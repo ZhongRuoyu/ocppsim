@@ -1,0 +1,353 @@
+use std::collections::{BTreeMap, VecDeque};
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
+
+use crate::args::ResolvedCliArgs;
+use crate::ocpp::OcppVersion;
+
+#[derive(Debug, Clone)]
+pub struct SimulatorConfig {
+  pub ws_url: String,
+  pub cp_id: String,
+  pub protocol: OcppVersion,
+  pub connectors: u16,
+  pub vendor: String,
+  pub model: String,
+  pub firmware: String,
+  pub append_cp_id: bool,
+  pub trace_frames: bool,
+  pub strict: bool,
+  pub request_timeout: Duration,
+  pub heartbeat_seconds: Option<u64>,
+}
+
+impl SimulatorConfig {
+  /// Converts resolved CLI arguments into simulator runtime configuration.
+  pub fn from_resolved(args: &ResolvedCliArgs) -> Self {
+    Self {
+      ws_url: args.ws_url.clone(),
+      cp_id: args.cp_id.clone(),
+      protocol: args.protocol,
+      connectors: args.connectors,
+      vendor: args.vendor.clone(),
+      model: args.model.clone(),
+      firmware: args.firmware.clone(),
+      append_cp_id: args.append_cp_id,
+      trace_frames: args.trace_frames,
+      strict: args.strict,
+      request_timeout: Duration::from_secs(args.request_timeout_seconds.max(5)),
+      heartbeat_seconds: args.heartbeat_seconds,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UiLogLevel {
+  Info,
+  Warn,
+  Error,
+  Tx,
+  Rx,
+}
+
+impl UiLogLevel {
+  /// Returns a short log-level label used in text output.
+  pub fn label(self) -> &'static str {
+    match self {
+      Self::Info => "INFO",
+      Self::Warn => "WARN",
+      Self::Error => "ERROR",
+      Self::Tx => "TX",
+      Self::Rx => "RX",
+    }
+  }
+
+  /// Returns the terminal color associated with this log level.
+  pub fn color(self) -> ratatui::style::Color {
+    use ratatui::style::Color;
+    match self {
+      Self::Info => Color::White,
+      Self::Warn => Color::Yellow,
+      Self::Error => Color::Red,
+      Self::Tx => Color::Cyan,
+      Self::Rx => Color::Green,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub enum UiEvent {
+  Log { level: UiLogLevel, message: String },
+  Snapshot(SimulatorSnapshot),
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulatorSnapshot {
+  pub cp_id: String,
+  pub protocol: String,
+  pub connection_url: String,
+  pub connected: bool,
+  pub heartbeat_seconds: Option<u64>,
+  pub queue_depth: usize,
+  pub pending_action: Option<String>,
+  pub connectors: Vec<ConnectorSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectorSnapshot {
+  pub id: u16,
+  pub status: String,
+  pub meter_wh: i64,
+  pub transaction: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum SimulatorCommand {
+  Connect,
+  Disconnect,
+  Status,
+  Boot,
+  Authorize {
+    id_token: String,
+  },
+  DataTransfer {
+    vendor_id: String,
+    message_id: Option<String>,
+    data: Option<String>,
+  },
+  StartTransaction {
+    connector: u16,
+    id_token: String,
+  },
+  StopTransaction {
+    connector: u16,
+    reason: Option<String>,
+  },
+  SetMeter {
+    connector: u16,
+    value_wh: i64,
+  },
+  SendMeter {
+    connector: u16,
+  },
+  Heartbeat,
+  StartHeartbeat {
+    seconds: u64,
+  },
+  StopHeartbeat,
+  SetConnectorStatus {
+    connector: u16,
+    status: String,
+  },
+  HeartbeatTick,
+  Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum ConnectorStatus {
+  Available,
+  Preparing,
+  Charging,
+  SuspendedEvse,
+  SuspendedEv,
+  Finishing,
+  Reserved,
+  Unavailable,
+  Faulted,
+  Occupied,
+}
+
+impl ConnectorStatus {
+  /// Returns the canonical internal display name for the connector status.
+  pub(in crate::simulator) fn display(self) -> &'static str {
+    match self {
+      Self::Available => "Available",
+      Self::Preparing => "Preparing",
+      Self::Charging => "Charging",
+      Self::SuspendedEvse => "SuspendedEVSE",
+      Self::SuspendedEv => "SuspendedEV",
+      Self::Finishing => "Finishing",
+      Self::Reserved => "Reserved",
+      Self::Unavailable => "Unavailable",
+      Self::Faulted => "Faulted",
+      Self::Occupied => "Occupied",
+    }
+  }
+
+  /// Maps connector status to the OCPP 1.6 `StatusNotification.status` value.
+  pub(in crate::simulator) fn as_v1_6(self) -> &'static str {
+    match self {
+      Self::Available => "Available",
+      Self::Preparing => "Preparing",
+      Self::Charging => "Charging",
+      Self::SuspendedEvse => "SuspendedEVSE",
+      Self::SuspendedEv => "SuspendedEV",
+      Self::Finishing => "Finishing",
+      Self::Reserved => "Reserved",
+      Self::Unavailable => "Unavailable",
+      Self::Faulted => "Faulted",
+      Self::Occupied => "Charging",
+    }
+  }
+
+  /// Maps connector status to the OCPP 2.x connector status value.
+  pub(in crate::simulator) fn as_v2_x(self) -> &'static str {
+    match self {
+      Self::Available => "Available",
+      Self::Reserved => "Reserved",
+      Self::Unavailable => "Unavailable",
+      Self::Faulted => "Faulted",
+      Self::Occupied => "Occupied",
+      Self::Preparing => "Occupied",
+      Self::Charging => "Occupied",
+      Self::SuspendedEvse => "Occupied",
+      Self::SuspendedEv => "Occupied",
+      Self::Finishing => "Occupied",
+    }
+  }
+
+  /// Parses user or payload status text into a normalized enum value.
+  pub(in crate::simulator) fn parse(input: &str) -> Option<Self> {
+    let normalized = normalize_identifier(input);
+
+    match normalized.as_str() {
+      "available" => Some(Self::Available),
+      "preparing" => Some(Self::Preparing),
+      "charging" => Some(Self::Charging),
+      "suspendedevse" => Some(Self::SuspendedEvse),
+      "suspendedev" => Some(Self::SuspendedEv),
+      "finishing" => Some(Self::Finishing),
+      "reserved" => Some(Self::Reserved),
+      "unavailable" => Some(Self::Unavailable),
+      "faulted" => Some(Self::Faulted),
+      "occupied" => Some(Self::Occupied),
+      _ => None,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct ConnectorState {
+  pub(in crate::simulator) status: ConnectorStatus,
+  pub(in crate::simulator) meter_wh: i64,
+  pub(in crate::simulator) offered_limit: Option<f64>,
+  pub(in crate::simulator) scheduled_availability: Option<ConnectorStatus>,
+  pub(in crate::simulator) transaction: Option<TransactionState>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct TransactionState {
+  pub(in crate::simulator) local_id: u64,
+  pub(in crate::simulator) transaction_uid: String,
+  pub(in crate::simulator) id_token: String,
+  pub(in crate::simulator) v1_6_transaction_id: Option<i64>,
+  pub(in crate::simulator) remote_start_id: Option<i64>,
+  pub(in crate::simulator) seq_no: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct QueuedCall {
+  pub(in crate::simulator) action: String,
+  pub(in crate::simulator) payload: Value,
+  pub(in crate::simulator) context: PendingContext,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct PendingCall {
+  pub(in crate::simulator) message_id: String,
+  pub(in crate::simulator) sent_at: Instant,
+  pub(in crate::simulator) call: QueuedCall,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) enum PendingContext {
+  Boot,
+  Heartbeat,
+  DataTransfer,
+  DiagnosticsStatusNotification,
+  FirmwareStatusNotification,
+  LogStatusNotification,
+  Authorize {
+    id_token: String,
+  },
+  StatusNotification {
+    connector: u16,
+  },
+  StartTxV1_6 {
+    connector: u16,
+    local_tx_id: u64,
+  },
+  StopTxV1_6 {
+    connector: u16,
+    local_tx_id: u64,
+  },
+  MeterValues {
+    connector: u16,
+  },
+  TxEvent {
+    connector: u16,
+    local_tx_id: u64,
+    event_type: TxEventType,
+  },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum TxEventType {
+  Started,
+  Updated,
+  Ended,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct TransactionEventRequest {
+  pub(in crate::simulator) connector: u16,
+  pub(in crate::simulator) local_tx_id: u64,
+  pub(in crate::simulator) event_type: TxEventType,
+  pub(in crate::simulator) trigger_reason: &'static str,
+  pub(in crate::simulator) id_token: Option<String>,
+  pub(in crate::simulator) remote_start_id: Option<i64>,
+  pub(in crate::simulator) stopped_reason: Option<&'static str>,
+}
+
+#[derive(Debug)]
+pub(in crate::simulator) struct HeartbeatTask {
+  pub(in crate::simulator) seconds: u64,
+  pub(in crate::simulator) handle: JoinHandle<()>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct ConfigurationEntry {
+  pub(in crate::simulator) value: String,
+  pub(in crate::simulator) read_only: bool,
+}
+
+pub(in crate::simulator) struct Simulator {
+  pub(in crate::simulator) config: SimulatorConfig,
+  pub(in crate::simulator) ui_tx: UnboundedSender<UiEvent>,
+  pub(in crate::simulator) self_cmd_tx: UnboundedSender<SimulatorCommand>,
+  pub(in crate::simulator) connectors: BTreeMap<u16, ConnectorState>,
+  pub(in crate::simulator) configuration: BTreeMap<String, ConfigurationEntry>,
+  pub(in crate::simulator) reservations: BTreeMap<i64, u16>,
+  pub(in crate::simulator) charging_profiles: BTreeMap<u16, Value>,
+  pub(in crate::simulator) local_auth_list_version: i64,
+  pub(in crate::simulator) queue: VecDeque<QueuedCall>,
+  pub(in crate::simulator) pending: Option<PendingCall>,
+  pub(in crate::simulator) next_message_id: u64,
+  pub(in crate::simulator) next_tx_id: u64,
+  pub(in crate::simulator) heartbeat: Option<HeartbeatTask>,
+  pub(in crate::simulator) connected: bool,
+}
+
+/// Normalizes free-form identifier text for case-insensitive matching.
+///
+/// Strips non-alphanumeric characters and lowercases the remainder.
+pub(in crate::simulator) fn normalize_identifier(text: &str) -> String {
+  text
+    .chars()
+    .filter(|ch| ch.is_ascii_alphanumeric())
+    .map(|ch| ch.to_ascii_lowercase())
+    .collect()
+}

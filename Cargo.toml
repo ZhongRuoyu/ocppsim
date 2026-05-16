@@ -1,0 +1,37 @@
+[package]
+name = "ocppsim"
+version = "0.1.0"
+authors = ["Ruoyu Zhong <zhongruoyu@outlook.com>"]
+edition = "2024"
+description = "A terminal OCPP-J charge point simulator."
+readme = "README.md"
+homepage = "https://github.com/ZhongRuoyu/ocppsim"
+repository = "https://github.com/ZhongRuoyu/ocppsim.git"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = "0.4.44"
+clap = { version = "4.6.1", features = ["derive", "string"] }
+crossterm = "0.29.0"
+futures-util = "0.3.32"
+http = "1.4.0"
+jsonschema = "0.46.5"
+ratatui = "0.30.0"
+rustls = { version = "0.23.40", features = ["ring"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.3", features = [
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+tokio-tungstenite = { version = "0.29.0", features = [
+  "rustls-tls-webpki-roots",
+] }
+toml = "1.1.2"
+url = "2.5.8"
+
+[build-dependencies]
+chrono = "0.4.44"
