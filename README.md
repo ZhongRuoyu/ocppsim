@@ -9,22 +9,42 @@ The simulator is focused on practical protocol development and CSMS testing.
 It keeps local connector, transaction, meter, reservation, charging profile, and
 configuration state, then emits protocol-shaped OCPP messages from that state.
 
-## Documentation
+## Installation
 
-Documentation on design, protocol support, usage, and more is available in the
-[`docs`](docs/README.md) directory.
+### Cargo
 
-## Quick Start
-
-Download prebuilt binaries for Linux, macOS, and Windows from `ocppsim`'s
-[latest GitHub release](https://github.com/ZhongRuoyu/ocppsim/releases/latest),
-or install it with Cargo:
+`ocppsim` is available on [crates.io](https://crates.io/crates/ocppsim) and can
+be installed with Cargo:
 
 ```sh
 cargo install ocppsim
 ```
 
-Then, run directly against a CSMS endpoint:
+### Homebrew
+
+On macOS and Linux, `ocppsim` can be installed with Homebrew:
+
+```sh
+brew install zhongruoyu/tap/ocppsim
+```
+
+### Prebuilt binaries
+
+Download prebuilt binaries for Linux, macOS, and Windows from `ocppsim`'s
+[latest GitHub release](https://github.com/ZhongRuoyu/ocppsim/releases/latest).
+
+### Docker
+
+Docker images for `ocppsim` are also available on Docker Hub as
+[`zhongruoyu/ocppsim`](https://hub.docker.com/r/zhongruoyu/ocppsim),
+and on GitHub Container Registry as
+[`ghcr.io/zhongruoyu/ocppsim`](https://ghcr.io/zhongruoyu/ocppsim).
+Use the `latest` tag or a specific version tag like `v0.1.0` to track stable
+releases, and `main` to track the latest commit on the main branch.
+
+## Quick Start
+
+Run `ocppsim` directly against a CSMS endpoint:
 
 ```sh
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
@@ -38,13 +58,7 @@ ocppsim some-profile
 ocppsim some-profile --config-path ./ocppsim.toml
 ```
 
-Docker images are also available on Docker Hub as
-[`zhongruoyu/ocppsim`](https://hub.docker.com/r/zhongruoyu/ocppsim),
-and on GitHub Container Registry as
-[`ghcr.io/zhongruoyu/ocppsim`](https://ghcr.io/zhongruoyu/ocppsim).
-Use the `latest` tag or a specific version tag like `v0.1.0` to track stable
-releases, and `main` to track the latest commit on the main branch.
-You can run the simulator with a mounted config file like:
+In a Docker container, you can run `ocppsim` with a mounted config file like:
 
 ```sh
 docker run --rm -it \
@@ -55,6 +69,11 @@ docker run --rm -it \
 Run `ocppsim --help` for more CLI options.
 Inside the terminal UI, type `help` to see available simulator commands.
 See [documentation](docs/usage.md) for more details on usage.
+
+## Documentation
+
+Documentation on design, protocol support, usage, and more is available in the
+[`docs`](docs/README.md) directory.
 
 ## Protocol Scope
 
