@@ -20,67 +20,13 @@ defaults:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runs-on: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            runs-on: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            runs-on: macos-26-intel
-          - target: aarch64-apple-darwin
-            runs-on: macos-26
-          - target: x86_64-pc-windows-msvc
-            runs-on: windows-latest
-          - target: aarch64-pc-windows-msvc
-            runs-on: windows-11-arm
-    runs-on: ${{ matrix.runs-on }}
+    uses: ./.github/workflows/build.yml
     permissions:
       contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Set up Rust
-        run: rustup target add "$TARGET"
-        env:
-          TARGET: ${{ matrix.target }}
-      - name: Cache Cargo registry and build artifacts
-        if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git/db
-            target
-          key: build-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            build-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            build-${{ matrix.target }}-cargo-
-      - name: Run build
-        run: cargo build --locked --all-targets --all-features --target "$TARGET"
-        env:
-          TARGET: ${{ matrix.target }}
-      - name: Package
-        id: package
-        run: |
-          cargo install --locked --debug --bins --all-features --no-track \
-            --target "$TARGET" \
-            --path . \
-            --root "$ARTIFACT"
-          tar czvf "$ARTIFACT.tar.gz" "$ARTIFACT"
-          echo "artifact=$ARTIFACT.tar.gz" >> "$GITHUB_OUTPUT"
-        env:
-          ARTIFACT: ocppsim-${{ github.sha }}-${{ matrix.target }}
-          TARGET: ${{ matrix.target }}
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.package.outputs.artifact }}
-          path: ${{ steps.package.outputs.artifact }}
+    with:
+      stable: false
+      profile: dev
+      cache: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request' }}
 
   tests:
     runs-on: ubuntu-latest
@@ -91,18 +37,28 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Cache Cargo registry and build artifacts
+      - name: Cache Cargo registry
         if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git/db
-            target
-          key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: tests-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            tests-${{ runner.os }}-cargo-
+            tests-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+            tests-cargo-${{ matrix.target }}-
+            tests-cargo-${{ matrix.target }}-
+      - name: Cache build artifacts
+        if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            target
+          key: tests-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            tests-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+            tests-target-${{ matrix.target }}-
       - name: Run format check
         run: cargo fmt --all --check
       - name: Run build

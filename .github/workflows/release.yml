@@ -15,35 +15,28 @@ defaults:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runs-on: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            runs-on: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            runs-on: macos-26-intel
-          - target: aarch64-apple-darwin
-            runs-on: macos-26
-          - target: x86_64-pc-windows-msvc
-            runs-on: windows-latest
-          - target: aarch64-pc-windows-msvc
-            runs-on: windows-11-arm
-    runs-on: ${{ matrix.runs-on }}
+    uses: ./.github/workflows/build.yml
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+    with:
+      stable: true
+      profile: release
+      cache: false
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
       artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - &version
-        name: Determine version
+      - name: Determine version
         id: version
         run: |
           version="$(
@@ -53,45 +46,14 @@ jobs:
                 '.packages[] | select(.name == $package) | .version'
           )"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Run build
-        run: |
-          cargo build --locked --bins --all-features --release \
-            --target "$TARGET"
-        env:
-          TARGET: ${{ matrix.target }}
-      - name: Package
-        id: package
-        run: |
-          cargo install --locked --bins --all-features --no-track \
-            --target "$TARGET" \
-            --path . \
-            --root "$ARTIFACT"
-          tar czvf "$ARTIFACT.tar.gz" "$ARTIFACT"
-          echo "artifact=$ARTIFACT.tar.gz" >> "$GITHUB_OUTPUT"
-        env:
-          ARTIFACT: ocppsim-${{ steps.version.outputs.version }}-${{ matrix.target }}
-          TARGET: ${{ matrix.target }}
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
       - name: Generate build provenance
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
-          subject-path: ${{ steps.package.outputs.artifact }}
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.package.outputs.artifact }}
-          path: ${{ steps.package.outputs.artifact }}
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - *version
+          subject-path: artifacts/**/*.tar.gz
       - name: Create bot token
         id: token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -106,10 +68,6 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           VERSION: ${{ steps.version.outputs.version }}
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}

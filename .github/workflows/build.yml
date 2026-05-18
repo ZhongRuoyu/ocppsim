@@ -1,0 +1,162 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      stable:
+        type: boolean
+      profile:
+        type: string
+      cache:
+        type: boolean
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -xeuo pipefail {0}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runs-on: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            runs-on: macos-26-intel
+          - target: aarch64-apple-darwin
+            runs-on: macos-26
+          - target: x86_64-pc-windows-msvc
+            runs-on: windows-latest
+          - target: aarch64-pc-windows-msvc
+            runs-on: windows-11-arm
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+    env:
+      PROFILE: ${{ inputs.profile }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$STABLE" = "true" ]]; then
+            version="$(
+              cargo metadata --format-version=1 --no-deps |
+                jq --raw-output \
+                  --arg package ocppsim \
+                  '.packages[] | select(.name == $package) | .version'
+            )"
+          else
+            version="$GITHUB_SHA"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          STABLE: ${{ inputs.stable }}
+      - name: Set up build environment
+        run: |
+          {
+            case "$TARGET" in
+            "x86_64-apple-darwin")
+              echo "MACOSX_DEPLOYMENT_TARGET=10.12"
+              ;;
+            "aarch64-apple-darwin")
+              echo "MACOSX_DEPLOYMENT_TARGET=11.0"
+              ;;
+            "x86_64-pc-windows-msvc" | "aarch64-pc-windows-msvc")
+              echo "RUSTFLAGS=-C target-feature=+crt-static"
+              ;;
+            esac
+          } >> "$GITHUB_ENV"
+      - name: Set up Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --no-modify-path \
+              --default-toolchain stable \
+              --target "$TARGET"
+      - name: Cache Cargo registry
+        if: inputs.cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+          key: build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+            build-cargo-${{ matrix.target }}-
+      - name: Cache build artifacts
+        if: inputs.cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            target
+          key: build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
+            build-target-${{ matrix.target }}-${{ env.PROFILE }}-
+            build-target-${{ matrix.target }}-
+      - name: Prepare Linux container
+        if: runner.os == 'Linux'
+        id: container
+        run: |
+          rust_stable="$(gh api /repos/rust-lang/rust/releases/latest --jq '.tag_name')"
+          rust_stable_commit="$(gh api "/repos/rust-lang/rust/commits/refs/tags/$rust_stable" --jq '.sha')"
+          artifacts_base_url="https://ci-artifacts.rust-lang.org/rustc-builds"
+
+          case "$TARGET" in
+          x86_64-unknown-linux-gnu) image="dist-x86_64-linux" ;;
+          aarch64-unknown-linux-gnu) image="dist-aarch64-linux" ;;
+          esac
+          image="$(curl -fsSL "$artifacts_base_url/$rust_stable_commit/image-$image.txt")"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Start Linux container
+        if: runner.os == 'Linux'
+        run: |
+          docker pull "$IMAGE"
+          mkdir -p target
+          docker run --detach --rm \
+            --name build \
+            --user "$(id -u):$(id -g)" \
+            --env CARGO_HOME=/cargo \
+            --mount "type=bind,source=$(rustc --print sysroot),target=/rustc-sysroot,readonly" \
+            --mount "type=bind,source=$HOME/.cargo,target=/cargo" \
+            --mount "type=bind,source=$PWD,target=/checkout" \
+            --workdir /checkout \
+            "$IMAGE" tail -f /dev/null
+          echo "PATH=/rustc-sysroot/bin:$(docker exec build sh -c 'echo $PATH')" > docker.env
+          echo "CARGO=docker exec --env-file docker.env build cargo" >> "$GITHUB_ENV"
+        env:
+          IMAGE: ${{ steps.container.outputs.image }}
+      - name: Run build
+        run: |
+          ${CARGO:-cargo} build --locked --all-targets --all-features \
+            --profile "$PROFILE" \
+            --target "$TARGET"
+      - name: Package
+        id: package
+        run: |
+          ${CARGO:-cargo} install --locked --bins --all-features --no-track \
+            --profile "$PROFILE" \
+            --target "$TARGET" \
+            --path . \
+            --root "$ARTIFACT"
+          tar czvf "$ARTIFACT.tar.gz" "$ARTIFACT"
+          echo "artifact=$ARTIFACT.tar.gz" >> "$GITHUB_OUTPUT"
+        env:
+          ARTIFACT: ocppsim-${{ steps.version.outputs.version }}-${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: ${{ steps.package.outputs.artifact }}
