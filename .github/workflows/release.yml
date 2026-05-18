@@ -70,15 +70,15 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           VERSION: ${{ steps.version.outputs.version }}
       - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh release create "v$VERSION" \
             --draft \
             --title "$VERSION" \
             --generate-notes \
             artifacts/**/*.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
 
   publish-crate:
     needs: release
