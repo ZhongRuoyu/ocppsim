@@ -26,6 +26,10 @@ jobs:
             runs-on: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             runs-on: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runs-on: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runs-on: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             runs-on: macos-26-intel
           - target: aarch64-apple-darwin
@@ -62,9 +66,19 @@ jobs:
         env:
           STABLE: ${{ inputs.stable }}
       - name: Set up build environment
+        id: setup-build
         run: |
           {
             case "$TARGET" in
+            "x86_64-unknown-linux-gnu" | "aarch64-unknown-linux-gnu" )
+              container=true
+              rust_ci_image=true
+              ;;
+            "x86_64-unknown-linux-musl" | "aarch64-unknown-linux-musl" )
+              echo "RUSTFLAGS=-C target-feature=+crt-static"
+              container=true
+              skip_setup_rust=true
+              ;;
             "x86_64-apple-darwin")
               echo "MACOSX_DEPLOYMENT_TARGET=10.12"
               ;;
@@ -76,7 +90,13 @@ jobs:
               ;;
             esac
           } >> "$GITHUB_ENV"
+          {
+            echo "container=${container:-false}"
+            echo "skip_setup_rust=${skip_setup_rust:-false}"
+            echo "rust_ci_image=${rust_ci_image:-false}"
+          } >> "$GITHUB_OUTPUT"
       - name: Set up Rust
+        if: ${{ !fromJson(steps.setup-build.outputs.skip_setup_rust) }}
         run: |
           # Workaround for https://github.com/rust-lang/rustup/issues/4755
           default_host=(--default-host "$TARGET")
@@ -110,39 +130,60 @@ jobs:
             build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
             build-target-${{ matrix.target }}-${{ env.PROFILE }}-
             build-target-${{ matrix.target }}-
-      - name: Prepare Linux container
-        if: runner.os == 'Linux'
+      - name: Prepare container
+        if: fromJson(steps.setup-build.outputs.container)
         id: container
         run: |
           rust_stable="$(gh api /repos/rust-lang/rust/releases/latest --jq '.tag_name')"
-          rust_stable_commit="$(gh api "/repos/rust-lang/rust/commits/refs/tags/$rust_stable" --jq '.sha')"
-          artifacts_base_url="https://ci-artifacts.rust-lang.org/rustc-builds"
-
           case "$TARGET" in
           x86_64-unknown-linux-gnu) image="dist-x86_64-linux" ;;
           aarch64-unknown-linux-gnu) image="dist-aarch64-linux" ;;
+          x86_64-unknown-linux-musl) image="rust:$rust_stable-alpine" ;;
+          aarch64-unknown-linux-musl) image="rust:$rust_stable-alpine" ;;
           esac
-          image="$(curl -fsSL "$artifacts_base_url/$rust_stable_commit/image-$image.txt")"
+          if [[ "$RUST_CI_IMAGE" = true ]]; then
+            rust_stable_commit="$(gh api "/repos/rust-lang/rust/commits/refs/tags/$rust_stable" --jq '.sha')"
+            artifacts_base_url="https://ci-artifacts.rust-lang.org/rustc-builds"
+            image="$(curl -fsSL "$artifacts_base_url/$rust_stable_commit/image-$image.txt")"
+          fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
-      - name: Start Linux container
-        if: runner.os == 'Linux'
+          RUST_CI_IMAGE: ${{ steps.setup-build.outputs.rust_ci_image }}
+      - name: Start container
+        if: fromJson(steps.setup-build.outputs.container)
         run: |
+          if [[ "$RUST_CI_IMAGE" = true ]]; then
+            docker_run_args=(
+              --env CARGO_HOME=/cargo
+              --mount "type=bind,source=$(rustc --print sysroot),target=/rustc-sysroot,readonly"
+              --mount "type=bind,source=$HOME/.cargo,target=/cargo"
+            )
+          else
+            mkdir -p ~/.cargo/registry ~/.cargo/git/db
+            docker_run_args=(
+              --mount "type=bind,source=$HOME/.cargo/registry,target=/usr/local/cargo/registry"
+              --mount "type=bind,source=$HOME/.cargo/git/db,target=/usr/local/cargo/git/db"
+            )
+          fi
           docker pull "$IMAGE"
           docker run --detach --rm \
             --name build \
             --user "$(id -u):$(id -g)" \
-            --env CARGO_HOME=/cargo \
-            --mount "type=bind,source=$(rustc --print sysroot),target=/rustc-sysroot,readonly" \
-            --mount "type=bind,source=$HOME/.cargo,target=/cargo" \
+            --env RUSTFLAGS \
             --mount "type=bind,source=$PWD,target=/checkout" \
             --workdir /checkout \
+            "${docker_run_args[@]}" \
             "$IMAGE" tail -f /dev/null
-          echo "PATH=/rustc-sysroot/bin:$(docker exec build sh -c 'echo $PATH')" > docker.env
-          echo "CARGO=docker exec --env-file docker.env build cargo" >> "$GITHUB_ENV"
+          if [[ "$RUST_CI_IMAGE" = true ]]; then
+            echo "PATH=/rustc-sysroot/bin:$(docker exec build sh -c 'echo $PATH')" > docker.env
+            echo "CARGO=docker exec --env-file docker.env build cargo" >> "$GITHUB_ENV"
+          else
+            echo "CARGO=docker exec build cargo" >> "$GITHUB_ENV"
+          fi
         env:
           IMAGE: ${{ steps.container.outputs.image }}
+          RUST_CI_IMAGE: ${{ steps.setup-build.outputs.rust_ci_image }}
       - name: Run build
         run: |
           ${CARGO:-cargo} build --locked --all-targets --all-features \
