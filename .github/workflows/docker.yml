@@ -5,12 +5,18 @@ on:
     branches:
       - main
     tags:
-      - "**"
+      - '**'
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -xeuo pipefail {0}
 
 env:
   DOCKERHUB_USERNAME: zhongruoyu
