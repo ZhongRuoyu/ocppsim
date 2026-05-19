@@ -1,4 +1,5 @@
-FROM rust:1.95.0-alpine AS build
+ARG RUST_VERSION=1
+FROM rust:"$RUST_VERSION-alpine" AS build
 
 RUN --mount=type=cache,target=/var/cache/apk \
   apk add git

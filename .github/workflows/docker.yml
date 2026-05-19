@@ -63,6 +63,7 @@ jobs:
       - name: Set up build
         id: setup
         run: |
+          rust_version="$(gh api /repos/rust-lang/rust/releases/latest --jq '.tag_name')"
           cache_from=""
           cache_to=""
           outputs=()
@@ -81,6 +82,7 @@ jobs:
             fi
           fi
           {
+            echo "rust_version=$rust_version"
             echo "cache_from=$cache_from"
             echo "cache_to=$cache_to"
             echo "outputs<<OUTPUTS"
@@ -90,6 +92,7 @@ jobs:
             echo "OUTPUTS"
           } >> "$GITHUB_OUTPUT"
         env:
+          GH_TOKEN: ${{ github.token }}
           ARCH: ${{ matrix.arch }}
       - name: Build and push Docker image by digest
         id: build
@@ -97,6 +100,8 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
+          build-args: |
+            RUST_VERSION=${{ steps.setup.outputs.rust_version }}
           cache-from: ${{ steps.setup.outputs.cache_from }}
           cache-to: ${{ steps.setup.outputs.cache_to }}
           outputs: ${{ steps.setup.outputs.outputs }}
