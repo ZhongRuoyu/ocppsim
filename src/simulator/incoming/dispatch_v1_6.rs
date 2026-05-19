@@ -110,9 +110,13 @@ impl Simulator {
             }
           },
         };
-        let result =
-          self.start_transaction(connector, request.id_token, true, None, true);
-        let status = if result.is_ok() {
+        let status = if self.authorize_remote_tx_requests() {
+          self.enqueue_remote_start_authorize_v1_6(connector, request.id_token);
+          ResponseStatus::Accepted
+        } else if self
+          .start_transaction(connector, request.id_token, true, None, true)
+          .is_ok()
+        {
           ResponseStatus::Accepted
         } else {
           ResponseStatus::Rejected

@@ -64,6 +64,54 @@ impl Simulator {
           format!("Authorize {} status={}", id_token, status),
         );
       }
+      PendingContext::RemoteStartAuthorizeV1_6 {
+        connector,
+        id_token,
+      } => {
+        let status = payload
+          .get("idTagInfo")
+          .and_then(Value::as_object)
+          .and_then(|info| info.get("status"))
+          .and_then(Value::as_str)
+          .and_then(ResponseStatus::parse)
+          .unwrap_or(ResponseStatus::Unknown);
+        self.log(
+          UiLogLevel::Info,
+          format!(
+            "RemoteStartTransaction authorization {} status={}",
+            id_token,
+            status.as_str()
+          ),
+        );
+        if status == ResponseStatus::Accepted {
+          if let Err(error) = self.start_transaction(
+            *connector,
+            id_token.clone(),
+            true,
+            None,
+            true,
+          ) {
+            self.log(
+              UiLogLevel::Warn,
+              format!(
+                "RemoteStartTransaction authorization accepted but start \
+                failed on connector {}: {}",
+                connector, error
+              ),
+            );
+          }
+        } else {
+          self.log(
+            UiLogLevel::Warn,
+            format!(
+              "RemoteStartTransaction not started on connector {}: \
+              authorization status={}",
+              connector,
+              status.as_str()
+            ),
+          );
+        }
+      }
       PendingContext::StatusNotification { connector } => {
         self.log(
           UiLogLevel::Info,

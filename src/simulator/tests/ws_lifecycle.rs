@@ -247,6 +247,36 @@ async fn malformed_remote_start_returns_call_error() {
 }
 
 #[tokio::test]
+async fn remote_start_v1_6_authorizes_before_start_when_configured() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "RemoteStartTransaction",
+    json!({ "idTag": "TOKEN" }),
+  )
+  .await;
+
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+  let authorize = simulator.queue.front().expect("queued authorize");
+  assert_eq!(authorize.action, "Authorize");
+  assert!(matches!(
+    &authorize.context,
+    PendingContext::RemoteStartAuthorizeV1_6 {
+      connector: 1,
+      id_token,
+    } if id_token == "TOKEN"
+  ));
+}
+
+#[tokio::test]
 async fn malformed_request_start_v2_returns_call_error() {
   let malformed_payloads = [
     json!({ "idToken": { "idToken": "TOKEN" } }),

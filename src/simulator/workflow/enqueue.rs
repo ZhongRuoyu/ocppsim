@@ -50,6 +50,23 @@ impl Simulator {
     );
   }
 
+  /// Enqueues the authorization step required before OCPP 1.6 remote start.
+  pub(in crate::simulator) fn enqueue_remote_start_authorize_v1_6(
+    &mut self,
+    connector: u16,
+    id_token: String,
+  ) {
+    let payload = Self::authorize_v1_6_payload(&id_token);
+    self.enqueue_call(
+      "Authorize",
+      payload,
+      PendingContext::RemoteStartAuthorizeV1_6 {
+        connector,
+        id_token,
+      },
+    );
+  }
+
   /// Enqueues a one-shot `Heartbeat` request.
   pub(in crate::simulator) fn enqueue_heartbeat(&mut self) {
     self.enqueue_call(

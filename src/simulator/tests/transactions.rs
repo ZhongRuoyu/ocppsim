@@ -237,6 +237,78 @@ fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
 }
 
 #[test]
+fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
+  let mut simulator = simulator_for_tests();
+  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string());
+  let authorize_call = simulator.queue.pop_front().expect("queued authorize");
+  simulator.pending = Some(PendingCall {
+    message_id: "auth-ack".to_string(),
+    sent_at: Instant::now(),
+    call: authorize_call,
+  });
+
+  simulator
+    .handle_call_result(
+      "auth-ack",
+      json!({
+        "idTagInfo": { "status": "Accepted" }
+      }),
+    )
+    .expect("authorization acknowledgement should apply");
+
+  assert!(simulator.pending.is_none());
+  assert!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some()
+  );
+  assert!(
+    simulator
+      .queue
+      .iter()
+      .any(|call| call.action == "StartTransaction")
+  );
+}
+
+#[test]
+fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
+  let mut simulator = simulator_for_tests();
+  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string());
+  let authorize_call = simulator.queue.pop_front().expect("queued authorize");
+  simulator.pending = Some(PendingCall {
+    message_id: "auth-concurrent".to_string(),
+    sent_at: Instant::now(),
+    call: authorize_call,
+  });
+
+  simulator
+    .handle_call_result(
+      "auth-concurrent",
+      json!({
+        "idTagInfo": { "status": "ConcurrentTx" }
+      }),
+    )
+    .expect("authorization acknowledgement should apply");
+
+  assert!(simulator.pending.is_none());
+  assert!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|state| state.transaction.as_ref())
+      .is_none()
+  );
+  assert!(
+    !simulator
+      .queue
+      .iter()
+      .any(|call| call.action == "StartTransaction")
+  );
+}
+
+#[test]
 fn start_transaction_v1_6_rejection_rolls_back_local_state() {
   let mut simulator = simulator_for_tests();
   simulator

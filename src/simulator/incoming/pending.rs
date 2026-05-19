@@ -103,6 +103,7 @@ impl Simulator {
       | PendingContext::FirmwareStatusNotification
       | PendingContext::LogStatusNotification
       | PendingContext::Authorize { .. }
+      | PendingContext::RemoteStartAuthorizeV1_6 { .. }
       | PendingContext::StatusNotification { .. }
       | PendingContext::MeterValues { .. } => {}
     }

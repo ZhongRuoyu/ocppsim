@@ -66,6 +66,15 @@ impl Simulator {
     self.reservations.values().any(|item| *item == connector)
   }
 
+  /// Returns whether OCPP 1.6 remote starts must authorize before starting.
+  pub(in crate::simulator) fn authorize_remote_tx_requests(&self) -> bool {
+    self
+      .configuration
+      .get("AuthorizeRemoteTxRequests")
+      .map(|entry| entry.value.eq_ignore_ascii_case("true"))
+      .unwrap_or(true)
+  }
+
   /// Finds the first connector currently eligible for a new transaction.
   pub(in crate::simulator) fn first_startable_connector(&self) -> Option<u16> {
     self.connectors.iter().find_map(|(connector, _)| {

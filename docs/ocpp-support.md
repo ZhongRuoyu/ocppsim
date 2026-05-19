@@ -10,7 +10,8 @@ OCPP 1.6 base JSON-schema actions are the complete support target.
 Supported behavior includes:
 
 - boot, heartbeat, authorize, status, meter, and data transfer messages,
-- local and remote transaction start and stop,
+- local and remote transaction start and stop, including OCPP 1.6
+  remote-start pre-authorization when `AuthorizeRemoteTxRequests` is true,
 - configuration get and change,
 - clear cache,
 - availability changes,
@@ -191,15 +192,15 @@ Unknown components return `UnknownComponent`, and unknown variables return
 `UnknownVariable`.
 Read-only variables reject writes.
 
-| Key                          | Writable | Notes                                       |
-| ---------------------------- | -------- | ------------------------------------------- |
-| `AllowOfflineTxForUnknownId` | Yes      | Stored as configuration only.               |
-| `AuthorizeRemoteTxRequests`  | Yes      | Stored as configuration only.               |
-| `HeartbeatInterval`          | Yes      | Boot/config changes can restart heartbeats. |
-| `MeterValueSampleInterval`   | Yes      | Stored as configuration only.               |
-| `NumberOfConnectors`         | No       | Derived from startup configuration.         |
-| `SupportedFeatureProfiles`   | No       | Advertises implemented feature families.    |
-| `WebSocketPingInterval`      | Yes      | Stored as configuration only.               |
+| Key                          | Writable | Notes                                         |
+| ---------------------------- | -------- | --------------------------------------------- |
+| `AllowOfflineTxForUnknownId` | Yes      | Stored as configuration only.                 |
+| `AuthorizeRemoteTxRequests`  | Yes      | Controls OCPP 1.6 remote-start authorization. |
+| `HeartbeatInterval`          | Yes      | Boot/config changes can restart heartbeats.   |
+| `MeterValueSampleInterval`   | Yes      | Stored as configuration only.                 |
+| `NumberOfConnectors`         | No       | Derived from startup configuration.           |
+| `SupportedFeatureProfiles`   | No       | Advertises implemented feature families.      |
+| `WebSocketPingInterval`      | Yes      | Stored as configuration only.                 |
 
 ## Behavioral Semantics
 
@@ -213,6 +214,16 @@ Unavailable, faulted, reserved, occupied, finishing, and already-active
 connectors reject starts.
 When a remote start omits a connector or EVSE, the first startable connector is
 chosen.
+
+For OCPP 1.6, `AuthorizeRemoteTxRequests` defaults to `true`.
+In that mode, an accepted `RemoteStartTransaction` queues `Authorize` first.
+The simulator only sends `StartTransaction` after the authorization response is
+`Accepted`.
+Other authorization statuses, including `ConcurrentTx`, are logged and stop the
+remote-start attempt.
+When `AuthorizeRemoteTxRequests` is set to `false`, the simulator starts the
+transaction immediately and then applies the eventual `StartTransaction.conf`
+status from the CSMS.
 
 Availability changes to `Inoperative` are scheduled when the target connector
 has an active transaction.
