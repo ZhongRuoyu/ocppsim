@@ -181,6 +181,27 @@ pub fn resolve_profile(
   })
 }
 
+/// Returns sorted charge point profile names from a TOML config file.
+pub fn profile_names(config_path: &Path) -> Result<Vec<String>> {
+  let content = std::fs::read_to_string(config_path)
+    .with_context(|| format!("Failed to read {}", config_path.display()))?;
+  let config: toml::Value = toml::from_str(&content)
+    .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+
+  let Some(charge_points) =
+    config.get("charge-points").and_then(toml::Value::as_table)
+  else {
+    return Ok(Vec::new());
+  };
+
+  let mut names = charge_points
+    .iter()
+    .filter_map(|(name, value)| value.as_table().map(|_| name.to_string()))
+    .collect::<Vec<_>>();
+  names.sort();
+  Ok(names)
+}
+
 /// Loads the config file and returns the requested profile plus global values.
 fn load_profile(path: &Path, profile_name: &str) -> Result<ProfileSelection> {
   let content = std::fs::read_to_string(path)
@@ -246,6 +267,43 @@ mod tests {
   use std::time::{SystemTime, UNIX_EPOCH};
 
   static TEMP_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+  #[test]
+  /// Verifies profile-name discovery reads and sorts charge point tables.
+  fn profile_names_returns_sorted_charge_point_names() {
+    let path = write_temp_config(
+      r#"
+[charge-points.beta]
+ws-url = "wss://example.com/ocpp"
+id = "CP-BETA"
+
+[charge-points.alpha]
+ws-url = "wss://example.com/ocpp"
+id = "CP-ALPHA"
+"#,
+    );
+
+    let names = super::profile_names(&path).expect("profile names");
+    assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies configs without charge point tables complete no profiles.
+  fn profile_names_returns_empty_without_charge_points() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.1"
+vendor = "ocppsim"
+"#,
+    );
+
+    let names = super::profile_names(&path).expect("profile names");
+    assert!(names.is_empty());
+
+    let _ = fs::remove_file(path);
+  }
 
   #[test]
   /// Verifies empty config files do not fail deserialization.

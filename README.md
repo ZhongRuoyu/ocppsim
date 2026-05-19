@@ -70,6 +70,20 @@ Run `ocppsim --help` for more CLI options.
 Inside the terminal UI, type `help` to see available simulator commands.
 See [documentation](docs/usage.md) for more details on usage.
 
+[Shell completion](docs/usage.md#shell-completion) can be enabled by adding the
+relevant command to your shell profile:
+
+```sh
+# Bash
+source <(ocppsim completions bash)
+# Zsh
+source <(ocppsim completions zsh)
+# Fish
+ocppsim completions fish | source
+# PowerShell
+ocppsim completions powershell | Out-String | Invoke-Expression
+```
+
 ## Documentation
 
 Documentation on design, protocol support, usage, and more is available in the

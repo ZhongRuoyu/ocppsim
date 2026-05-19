@@ -116,6 +116,24 @@ After startup, type commands into the terminal UI.
 Commands that send OCPP messages require an active connection.
 Local state commands can still update simulator state while disconnected.
 
+## Shell Completions
+
+`ocppsim` can generate shell completion setup scripts:
+
+```sh
+# Bash
+source <(ocppsim completions bash)
+# Zsh
+source <(ocppsim completions zsh)
+# Fish
+ocppsim completions fish | source
+# PowerShell
+ocppsim completions powershell | Out-String | Invoke-Expression
+```
+
+The generated completion script supports completing profile names from
+`~/.config/ocppsim/ocppsim.toml` while you type.
+
 ## Interoperability Notes
 
 The simulator requests exactly one OCPP-J WebSocket subprotocol:

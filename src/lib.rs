@@ -16,7 +16,7 @@ use std::thread;
 
 use anyhow::Result;
 use app::{InputAction, TerminalApp, TerminalSession, restore_console};
-use args::{CliArgs, ResolvedCliArgs};
+use args::{Cli, CliCommand, ResolvedCliArgs};
 use clap::Parser;
 use commands::{UserCommand, help_text, parse_command, standards_text};
 use simulator::{SimulatorCommand, SimulatorConfig, run_simulator};
@@ -26,9 +26,16 @@ use version::version_string;
 /// Runs the interactive OCPP simulator command-line application.
 pub async fn run() -> Result<()> {
   install_panic_hook();
+  args::complete_from_env();
   install_rustls_provider();
 
-  let cli = CliArgs::parse();
+  let cli = Cli::parse();
+  if let Some(CliCommand::Completions { shell }) = cli.command {
+    args::write_completion_script(shell, &mut std::io::stdout())?;
+    return Ok(());
+  }
+
+  let cli = cli.args;
   let resolved = cli.resolve()?;
   let protocol = resolved.protocol;
 

@@ -1,10 +1,14 @@
 use std::env;
+use std::ffi::OsStr;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::env::Shells;
+use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
-use crate::config::{ProfileDefaults, resolve_profile};
+use crate::config::{ProfileDefaults, profile_names, resolve_profile};
 use crate::ocpp::OcppVersion;
 
 const DEFAULT_CONNECTORS: u16 = 1;
@@ -52,10 +56,54 @@ Examples:
   after_long_help = CLI_AFTER_HELP,
   version,
   long_version = crate::version_string(),
+  args_conflicts_with_subcommands = true,
 )]
+pub struct Cli {
+  #[command(subcommand)]
+  pub command: Option<CliCommand>,
+
+  #[command(flatten)]
+  pub args: CliArgs,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum CliCommand {
+  /// Output shell completion script
+  Completions {
+    /// Shell to generate completions for
+    #[arg(value_enum)]
+    shell: CompletionShell,
+  },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CompletionShell {
+  Bash,
+  Elvish,
+  Fish,
+  Powershell,
+  Zsh,
+}
+
+impl CompletionShell {
+  fn name(self) -> &'static str {
+    match self {
+      Self::Bash => "bash",
+      Self::Elvish => "elvish",
+      Self::Fish => "fish",
+      Self::Powershell => "powershell",
+      Self::Zsh => "zsh",
+    }
+  }
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct CliArgs {
   /// Profile name from config file
-  #[arg(value_name = "PROFILE")]
+  #[arg(
+    value_name = "PROFILE",
+    add = ArgValueCompleter::new(profile_name_completer),
+  )]
   pub profile: Option<String>,
 
   /// Config file path. Defaults to ~/.config/ocppsim/ocppsim.toml
@@ -126,6 +174,28 @@ pub struct CliArgs {
   /// heartbeats)
   #[arg(long)]
   pub heartbeat_seconds: Option<u64>,
+}
+
+/// Handles dynamic completion requests emitted by generated shell scripts.
+pub fn complete_from_env() {
+  CompleteEnv::with_factory(Cli::command)
+    .bin("ocppsim")
+    .complete();
+}
+
+/// Writes a dynamic shell completion registration script.
+pub fn write_completion_script(
+  shell: CompletionShell,
+  output: &mut dyn Write,
+) -> io::Result<()> {
+  let command = Cli::command();
+  let name = command.get_name().to_string();
+  let shells = Shells::builtins();
+  let env_shell = shells
+    .completer(shell.name())
+    .ok_or_else(|| io::Error::other("unsupported completion shell"))?;
+
+  env_shell.write_registration("COMPLETE", &name, &name, &name, output)
 }
 
 /// Fully resolved runtime arguments after merging CLI and config profile data.
@@ -355,14 +425,44 @@ fn default_config_path() -> PathBuf {
   PathBuf::from(DEFAULT_CONFIG_PATH_HINT.trim_start_matches("~/"))
 }
 
+/// Completes profile names from the default config location.
+fn profile_name_completer(current: &OsStr) -> Vec<CompletionCandidate> {
+  profile_name_candidates(current, &default_config_path())
+}
+
+fn profile_name_candidates(
+  current: &OsStr,
+  config_path: &Path,
+) -> Vec<CompletionCandidate> {
+  let Some(current) = current.to_str() else {
+    return Vec::new();
+  };
+  let Ok(names) = profile_names(config_path) else {
+    return Vec::new();
+  };
+
+  names
+    .into_iter()
+    .filter(|name| name.starts_with(current))
+    .map(CompletionCandidate::new)
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
+  use std::ffi::OsStr;
   use std::fs;
   use std::path::{Path, PathBuf};
   use std::sync::atomic::{AtomicU64, Ordering};
   use std::time::{SystemTime, UNIX_EPOCH};
 
-  use super::{CliArgs, OcppVersion, default_config_path, expand_tilde_path};
+  use clap::Parser;
+
+  use super::{
+    Cli, CliArgs, CliCommand, CompletionShell, OcppVersion,
+    default_config_path, expand_tilde_path, profile_name_candidates,
+    write_completion_script,
+  };
 
   static TEMP_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -553,6 +653,55 @@ id = "CP-DEMO"
       heartbeat_seconds: None,
     };
     assert!(args.resolve().is_err());
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies the `completions` subcommand parses before profile mode.
+  fn parses_completion_subcommand() {
+    let cli = Cli::try_parse_from(["ocppsim", "completions", "bash"])
+      .expect("completion command should parse");
+    assert!(matches!(
+      cli.command,
+      Some(CliCommand::Completions {
+        shell: CompletionShell::Bash,
+      })
+    ));
+  }
+
+  #[test]
+  /// Verifies generated Bash registration delegates back to ocppsim.
+  fn bash_completion_script_uses_dynamic_completion() {
+    let mut output = Vec::new();
+    write_completion_script(CompletionShell::Bash, &mut output)
+      .expect("completion script");
+    let script = String::from_utf8(output).expect("utf8 script");
+
+    assert!(script.contains("COMPLETE=\"bash\""));
+    assert!(script.contains("\"ocppsim\" --"));
+  }
+
+  #[test]
+  /// Verifies profile completion candidates come from TOML profile names.
+  fn profile_name_completion_reads_config_names() {
+    let path = write_temp_config(
+      r#"
+[charge-points.alpha]
+ws-url = "wss://example.com/ocpp"
+id = "CP-ALPHA"
+
+[charge-points.beta]
+ws-url = "wss://example.com/ocpp"
+id = "CP-BETA"
+"#,
+    );
+
+    let candidates = profile_name_candidates(OsStr::new("a"), &path)
+      .into_iter()
+      .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
+      .collect::<Vec<_>>();
+    assert_eq!(candidates, vec!["alpha".to_string()]);
 
     let _ = fs::remove_file(path);
   }
