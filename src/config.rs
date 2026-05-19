@@ -50,7 +50,7 @@ struct ConfigFile {
   request_timeout_seconds: Option<u64>,
   #[serde(rename = "heartbeat-seconds")]
   heartbeat_seconds: Option<u64>,
-  #[serde(rename = "charge-points")]
+  #[serde(default, rename = "charge-points")]
   charge_points: HashMap<String, ProfileConfig>,
 }
 
@@ -236,4 +236,53 @@ fn parse_protocol_label(label: &str) -> Result<OcppVersion> {
 /// A value of `0` disables heartbeats and becomes `None`.
 fn normalize_heartbeat_seconds(value: Option<u64>) -> Option<u64> {
   value.and_then(|seconds| if seconds == 0 { None } else { Some(seconds) })
+}
+
+#[cfg(test)]
+mod tests {
+  use std::fs;
+  use std::path::PathBuf;
+  use std::sync::atomic::{AtomicU64, Ordering};
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  static TEMP_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+  #[test]
+  /// Verifies empty config files do not fail deserialization.
+  fn resolve_profile_reports_missing_profile_for_empty_config() {
+    let path = write_temp_config("");
+    let defaults = super::ProfileDefaults {
+      connectors: 1,
+      protocol: super::OcppVersion::V1_6,
+      vendor: "ocppsim".to_string(),
+      model: "ocppsim".to_string(),
+      firmware: "test".to_string(),
+      request_timeout_seconds: 30,
+    };
+
+    let error = super::resolve_profile(&path, "test", &defaults)
+      .expect_err("empty config should not resolve a profile");
+    assert_eq!(
+      error.to_string(),
+      format!("Profile `test` was not found in {}.", path.display())
+    );
+
+    let _ = fs::remove_file(path);
+  }
+
+  /// Writes temporary TOML config content and returns its path.
+  fn write_temp_config(content: &str) -> PathBuf {
+    let base = std::env::current_dir().expect("cwd");
+    let timestamp = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("time")
+      .as_nanos();
+    let sequence = TEMP_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let path = base.join(format!(
+      ".tmp-ocppsim-config-{pid}-{timestamp}-{sequence}.toml"
+    ));
+    fs::write(&path, content).expect("write temp config");
+    path
+  }
 }
