@@ -93,4 +93,4 @@ source of truth.
 ## License
 
 This project is licensed under the MIT License.
-See [LICENSE](LICENSE) for details.
+See [LICENSE](./LICENSE) for details.
