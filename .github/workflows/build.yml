@@ -124,7 +124,6 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           docker pull "$IMAGE"
-          mkdir -p target
           docker run --detach --rm \
             --name build \
             --user "$(id -u):$(id -g)" \
