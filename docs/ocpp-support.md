@@ -28,6 +28,9 @@ being treated as unknown actions.
 The simulator does not implement OCPP security profiles, client certificates,
 certificate-management actions, or security event workflows.
 
+Incoming response status tokens are recognized from the checked-in 1.6,
+2.0.1, and 2.1 schemas.
+
 ## OCPP 2.x Support Matrix
 
 OCPP 2.0.1 and OCPP 2.1 support the same common subset today.

@@ -211,50 +211,50 @@ impl OcppMessageTypeId {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncomingAction_V1_6 {
-  GetConfiguration,
+  CancelReservation,
+  ChangeAvailability,
   ChangeConfiguration,
   ClearCache,
-  ChangeAvailability,
+  ClearChargingProfile,
   DataTransfer,
+  GetCompositeSchedule,
+  GetConfiguration,
   GetDiagnostics,
-  UpdateFirmware,
+  GetLocalListVersion,
   RemoteStartTransaction,
   RemoteStopTransaction,
   ReserveNow,
-  CancelReservation,
-  UnlockConnector,
-  GetLocalListVersion,
+  Reset,
   SendLocalList,
   SetChargingProfile,
-  ClearChargingProfile,
-  GetCompositeSchedule,
   TriggerMessage,
-  Reset,
+  UnlockConnector,
+  UpdateFirmware,
 }
 
 impl IncomingAction_V1_6 {
   /// Parses an incoming OCPP 1.6 action name.
   pub fn parse(value: &str) -> Option<Self> {
     match value {
-      "GetConfiguration" => Some(Self::GetConfiguration),
+      "CancelReservation" => Some(Self::CancelReservation),
+      "ChangeAvailability" => Some(Self::ChangeAvailability),
       "ChangeConfiguration" => Some(Self::ChangeConfiguration),
       "ClearCache" => Some(Self::ClearCache),
-      "ChangeAvailability" => Some(Self::ChangeAvailability),
+      "ClearChargingProfile" => Some(Self::ClearChargingProfile),
       "DataTransfer" => Some(Self::DataTransfer),
+      "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
+      "GetConfiguration" => Some(Self::GetConfiguration),
       "GetDiagnostics" => Some(Self::GetDiagnostics),
-      "UpdateFirmware" => Some(Self::UpdateFirmware),
+      "GetLocalListVersion" => Some(Self::GetLocalListVersion),
       "RemoteStartTransaction" => Some(Self::RemoteStartTransaction),
       "RemoteStopTransaction" => Some(Self::RemoteStopTransaction),
       "ReserveNow" => Some(Self::ReserveNow),
-      "CancelReservation" => Some(Self::CancelReservation),
-      "UnlockConnector" => Some(Self::UnlockConnector),
-      "GetLocalListVersion" => Some(Self::GetLocalListVersion),
+      "Reset" => Some(Self::Reset),
       "SendLocalList" => Some(Self::SendLocalList),
       "SetChargingProfile" => Some(Self::SetChargingProfile),
-      "ClearChargingProfile" => Some(Self::ClearChargingProfile),
-      "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
       "TriggerMessage" => Some(Self::TriggerMessage),
-      "Reset" => Some(Self::Reset),
+      "UnlockConnector" => Some(Self::UnlockConnector),
+      "UpdateFirmware" => Some(Self::UpdateFirmware),
       _ => None,
     }
   }
@@ -270,50 +270,50 @@ impl IncomingAction_V1_6 {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncomingAction_V2_X {
+  CancelReservation,
   ChangeAvailability,
   ClearCache,
+  ClearChargingProfile,
   DataTransfer,
+  GetCompositeSchedule,
   GetLocalListVersion,
   GetLog,
   GetVariables,
   RequestStartTransaction,
   RequestStopTransaction,
   ReserveNow,
-  CancelReservation,
+  Reset,
   SendLocalList,
   SetChargingProfile,
   SetVariables,
-  ClearChargingProfile,
-  GetCompositeSchedule,
   TriggerMessage,
   UnlockConnector,
   UpdateFirmware,
-  Reset,
 }
 
 impl IncomingAction_V2_X {
   /// Parses an incoming OCPP 2.x action name.
   pub fn parse(value: &str) -> Option<Self> {
     match value {
+      "CancelReservation" => Some(Self::CancelReservation),
       "ChangeAvailability" => Some(Self::ChangeAvailability),
       "ClearCache" => Some(Self::ClearCache),
+      "ClearChargingProfile" => Some(Self::ClearChargingProfile),
       "DataTransfer" => Some(Self::DataTransfer),
+      "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
       "GetLocalListVersion" => Some(Self::GetLocalListVersion),
       "GetLog" => Some(Self::GetLog),
       "GetVariables" => Some(Self::GetVariables),
       "RequestStartTransaction" => Some(Self::RequestStartTransaction),
       "RequestStopTransaction" => Some(Self::RequestStopTransaction),
       "ReserveNow" => Some(Self::ReserveNow),
-      "CancelReservation" => Some(Self::CancelReservation),
+      "Reset" => Some(Self::Reset),
       "SendLocalList" => Some(Self::SendLocalList),
       "SetChargingProfile" => Some(Self::SetChargingProfile),
       "SetVariables" => Some(Self::SetVariables),
-      "ClearChargingProfile" => Some(Self::ClearChargingProfile),
-      "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
       "TriggerMessage" => Some(Self::TriggerMessage),
       "UnlockConnector" => Some(Self::UnlockConnector),
       "UpdateFirmware" => Some(Self::UpdateFirmware),
-      "Reset" => Some(Self::Reset),
       _ => None,
     }
   }
@@ -381,22 +381,112 @@ impl TriggerMessage_V2_X {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponseStatus {
   Accepted,
-  Rejected,
-  NotSupported,
-  Unsupported,
-  Scheduled,
-  Occupied,
-  Unavailable,
-  UnlockFailed,
-  Unlocked,
+  AcceptedCanceled,
+  Available,
+  BadMessage,
+  Blocked,
+  Canceled,
+  CertChainError,
+  CertificateExpired,
+  CertificateRevoked,
+  Charging,
+  ChecksumVerified,
+  ConcurrentTx,
+  ConditionNotSupported,
+  ContractCancelled,
+  Crl,
+  Downloaded,
+  DownloadFailed,
+  Downloading,
+  DownloadOngoing,
+  DownloadPaused,
+  DownloadScheduled,
+  Duplicate,
+  DuplicateTariffId,
+  EmptyResultSet,
+  Expired,
   Failed,
-  Unknown,
-  UnknownVendorId,
+  Faulted,
+  Finishing,
+  Good,
+  Idle,
+  Inoperative,
+  InstallationFailed,
+  Installed,
+  Installing,
+  InstallRebooting,
+  InstallScheduled,
+  InstallVerificationFailed,
   Invalid,
+  InvalidCertificate,
+  InvalidChecksum,
+  InvalidSignature,
+  LanguageNotSupported,
+  NoCertificateAvailable,
+  NoChargingProfile,
+  NoCredit,
+  NoCurrencyChange,
+  NoFirmware,
+  NoProfile,
+  NoProfiles,
+  NotAllowedTypeEVSE,
+  NoTariff,
+  NotAtThisLocation,
+  NotAtThisTime,
   NotFound,
-  UnknownConnector,
+  NotImplemented,
+  NoTransaction,
+  NotReady,
+  NotSupported,
+  NotSupportedAttributeType,
+  NotSupportedMessageFormat,
+  NotSupportedOperation,
+  NotSupportedPriority,
+  NotSupportedState,
+  Occupied,
+  Ocsp,
   OngoingAuthorizedTransaction,
+  Operative,
+  Pending,
+  PermissionDenied,
+  Preconditioning,
+  Preparing,
+  Processing,
+  Published,
+  PublishFailed,
+  Ready,
+  RebootRequired,
+  Rejected,
+  Removed,
+  Reserved,
+  Revoked,
+  RevokedCertificate,
+  Scheduled,
+  Settled,
+  SignatureError,
+  SignatureVerified,
+  SuspendedEV,
+  SuspendedEVSE,
+  TooManyElements,
+  TxNotFound,
+  Unavailable,
+  Unknown,
+  UnknownComponent,
+  UnknownConnector,
+  UnknownMessageId,
+  UnknownTransaction,
   UnknownVariable,
+  UnknownVendorId,
+  Unlocked,
+  UnlockFailed,
+  Unpublished,
+  Unsupported,
+  UnsupportedMonitorType,
+  Uploaded,
+  UploadFailed,
+  UploadFailure,
+  Uploading,
+  VersionMismatch,
 }
 
 impl ResponseStatus {
@@ -404,22 +494,112 @@ impl ResponseStatus {
   pub fn as_str(self) -> &'static str {
     match self {
       Self::Accepted => "Accepted",
-      Self::Rejected => "Rejected",
-      Self::NotSupported => "NotSupported",
-      Self::Unsupported => "Unsupported",
-      Self::Scheduled => "Scheduled",
-      Self::Occupied => "Occupied",
-      Self::Unavailable => "Unavailable",
-      Self::UnlockFailed => "UnlockFailed",
-      Self::Unlocked => "Unlocked",
+      Self::AcceptedCanceled => "AcceptedCanceled",
+      Self::Available => "Available",
+      Self::BadMessage => "BadMessage",
+      Self::Blocked => "Blocked",
+      Self::Canceled => "Canceled",
+      Self::CertChainError => "CertChainError",
+      Self::CertificateExpired => "CertificateExpired",
+      Self::CertificateRevoked => "CertificateRevoked",
+      Self::Charging => "Charging",
+      Self::ChecksumVerified => "ChecksumVerified",
+      Self::ConcurrentTx => "ConcurrentTx",
+      Self::ConditionNotSupported => "ConditionNotSupported",
+      Self::ContractCancelled => "ContractCancelled",
+      Self::Crl => "CRL",
+      Self::Downloaded => "Downloaded",
+      Self::DownloadFailed => "DownloadFailed",
+      Self::Downloading => "Downloading",
+      Self::DownloadOngoing => "DownloadOngoing",
+      Self::DownloadPaused => "DownloadPaused",
+      Self::DownloadScheduled => "DownloadScheduled",
+      Self::Duplicate => "Duplicate",
+      Self::DuplicateTariffId => "DuplicateTariffId",
+      Self::EmptyResultSet => "EmptyResultSet",
+      Self::Expired => "Expired",
       Self::Failed => "Failed",
-      Self::Unknown => "Unknown",
-      Self::UnknownVendorId => "UnknownVendorId",
+      Self::Faulted => "Faulted",
+      Self::Finishing => "Finishing",
+      Self::Good => "Good",
+      Self::Idle => "Idle",
+      Self::Inoperative => "Inoperative",
+      Self::InstallationFailed => "InstallationFailed",
+      Self::Installed => "Installed",
+      Self::Installing => "Installing",
+      Self::InstallRebooting => "InstallRebooting",
+      Self::InstallScheduled => "InstallScheduled",
+      Self::InstallVerificationFailed => "InstallVerificationFailed",
       Self::Invalid => "Invalid",
+      Self::InvalidCertificate => "InvalidCertificate",
+      Self::InvalidChecksum => "InvalidChecksum",
+      Self::InvalidSignature => "InvalidSignature",
+      Self::LanguageNotSupported => "LanguageNotSupported",
+      Self::NoCertificateAvailable => "NoCertificateAvailable",
+      Self::NoChargingProfile => "NoChargingProfile",
+      Self::NoCredit => "NoCredit",
+      Self::NoCurrencyChange => "NoCurrencyChange",
+      Self::NoFirmware => "NoFirmware",
+      Self::NoProfile => "NoProfile",
+      Self::NoProfiles => "NoProfiles",
+      Self::NotAllowedTypeEVSE => "NotAllowedTypeEVSE",
+      Self::NoTariff => "NoTariff",
+      Self::NotAtThisLocation => "NotAtThisLocation",
+      Self::NotAtThisTime => "NotAtThisTime",
       Self::NotFound => "NotFound",
-      Self::UnknownConnector => "UnknownConnector",
+      Self::NotImplemented => "NotImplemented",
+      Self::NoTransaction => "NoTransaction",
+      Self::NotReady => "NotReady",
+      Self::NotSupported => "NotSupported",
+      Self::NotSupportedAttributeType => "NotSupportedAttributeType",
+      Self::NotSupportedMessageFormat => "NotSupportedMessageFormat",
+      Self::NotSupportedOperation => "NotSupportedOperation",
+      Self::NotSupportedPriority => "NotSupportedPriority",
+      Self::NotSupportedState => "NotSupportedState",
+      Self::Occupied => "Occupied",
+      Self::Ocsp => "OCSP",
       Self::OngoingAuthorizedTransaction => "OngoingAuthorizedTransaction",
+      Self::Operative => "Operative",
+      Self::Pending => "Pending",
+      Self::PermissionDenied => "PermissionDenied",
+      Self::Preconditioning => "Preconditioning",
+      Self::Preparing => "Preparing",
+      Self::Processing => "Processing",
+      Self::Published => "Published",
+      Self::PublishFailed => "PublishFailed",
+      Self::Ready => "Ready",
+      Self::RebootRequired => "RebootRequired",
+      Self::Rejected => "Rejected",
+      Self::Removed => "Removed",
+      Self::Reserved => "Reserved",
+      Self::Revoked => "Revoked",
+      Self::RevokedCertificate => "RevokedCertificate",
+      Self::Scheduled => "Scheduled",
+      Self::Settled => "Settled",
+      Self::SignatureError => "SignatureError",
+      Self::SignatureVerified => "SignatureVerified",
+      Self::SuspendedEV => "SuspendedEV",
+      Self::SuspendedEVSE => "SuspendedEVSE",
+      Self::TooManyElements => "TooManyElements",
+      Self::TxNotFound => "TxNotFound",
+      Self::Unavailable => "Unavailable",
+      Self::Unknown => "Unknown",
+      Self::UnknownComponent => "UnknownComponent",
+      Self::UnknownConnector => "UnknownConnector",
+      Self::UnknownMessageId => "UnknownMessageId",
+      Self::UnknownTransaction => "UnknownTransaction",
       Self::UnknownVariable => "UnknownVariable",
+      Self::UnknownVendorId => "UnknownVendorId",
+      Self::Unlocked => "Unlocked",
+      Self::UnlockFailed => "UnlockFailed",
+      Self::Unpublished => "Unpublished",
+      Self::Unsupported => "Unsupported",
+      Self::UnsupportedMonitorType => "UnsupportedMonitorType",
+      Self::Uploaded => "Uploaded",
+      Self::UploadFailed => "UploadFailed",
+      Self::UploadFailure => "UploadFailure",
+      Self::Uploading => "Uploading",
+      Self::VersionMismatch => "VersionMismatch",
     }
   }
 
@@ -427,24 +607,114 @@ impl ResponseStatus {
   pub fn parse(value: &str) -> Option<Self> {
     match value {
       "Accepted" => Some(Self::Accepted),
-      "Rejected" => Some(Self::Rejected),
-      "NotSupported" => Some(Self::NotSupported),
-      "Unsupported" => Some(Self::Unsupported),
-      "Scheduled" => Some(Self::Scheduled),
-      "Occupied" => Some(Self::Occupied),
-      "Unavailable" => Some(Self::Unavailable),
-      "UnlockFailed" => Some(Self::UnlockFailed),
-      "Unlocked" => Some(Self::Unlocked),
+      "AcceptedCanceled" => Some(Self::AcceptedCanceled),
+      "Available" => Some(Self::Available),
+      "BadMessage" => Some(Self::BadMessage),
+      "Blocked" => Some(Self::Blocked),
+      "Canceled" => Some(Self::Canceled),
+      "CertChainError" => Some(Self::CertChainError),
+      "CertificateExpired" => Some(Self::CertificateExpired),
+      "CertificateRevoked" => Some(Self::CertificateRevoked),
+      "Charging" => Some(Self::Charging),
+      "ChecksumVerified" => Some(Self::ChecksumVerified),
+      "ConcurrentTx" => Some(Self::ConcurrentTx),
+      "ConditionNotSupported" => Some(Self::ConditionNotSupported),
+      "ContractCancelled" => Some(Self::ContractCancelled),
+      "CRL" => Some(Self::Crl),
+      "Downloaded" => Some(Self::Downloaded),
+      "DownloadFailed" => Some(Self::DownloadFailed),
+      "Downloading" => Some(Self::Downloading),
+      "DownloadOngoing" => Some(Self::DownloadOngoing),
+      "DownloadPaused" => Some(Self::DownloadPaused),
+      "DownloadScheduled" => Some(Self::DownloadScheduled),
+      "Duplicate" => Some(Self::Duplicate),
+      "DuplicateTariffId" => Some(Self::DuplicateTariffId),
+      "EmptyResultSet" => Some(Self::EmptyResultSet),
+      "Expired" => Some(Self::Expired),
       "Failed" => Some(Self::Failed),
-      "Unknown" => Some(Self::Unknown),
-      "UnknownVendorId" => Some(Self::UnknownVendorId),
+      "Faulted" => Some(Self::Faulted),
+      "Finishing" => Some(Self::Finishing),
+      "Good" => Some(Self::Good),
+      "Idle" => Some(Self::Idle),
+      "Inoperative" => Some(Self::Inoperative),
+      "InstallationFailed" => Some(Self::InstallationFailed),
+      "Installed" => Some(Self::Installed),
+      "Installing" => Some(Self::Installing),
+      "InstallRebooting" => Some(Self::InstallRebooting),
+      "InstallScheduled" => Some(Self::InstallScheduled),
+      "InstallVerificationFailed" => Some(Self::InstallVerificationFailed),
       "Invalid" => Some(Self::Invalid),
+      "InvalidCertificate" => Some(Self::InvalidCertificate),
+      "InvalidChecksum" => Some(Self::InvalidChecksum),
+      "InvalidSignature" => Some(Self::InvalidSignature),
+      "LanguageNotSupported" => Some(Self::LanguageNotSupported),
+      "NoCertificateAvailable" => Some(Self::NoCertificateAvailable),
+      "NoChargingProfile" => Some(Self::NoChargingProfile),
+      "NoCredit" => Some(Self::NoCredit),
+      "NoCurrencyChange" => Some(Self::NoCurrencyChange),
+      "NoFirmware" => Some(Self::NoFirmware),
+      "NoProfile" => Some(Self::NoProfile),
+      "NoProfiles" => Some(Self::NoProfiles),
+      "NotAllowedTypeEVSE" => Some(Self::NotAllowedTypeEVSE),
+      "NoTariff" => Some(Self::NoTariff),
+      "NotAtThisLocation" => Some(Self::NotAtThisLocation),
+      "NotAtThisTime" => Some(Self::NotAtThisTime),
       "NotFound" => Some(Self::NotFound),
-      "UnknownConnector" => Some(Self::UnknownConnector),
+      "NotImplemented" => Some(Self::NotImplemented),
+      "NoTransaction" => Some(Self::NoTransaction),
+      "NotReady" => Some(Self::NotReady),
+      "NotSupported" => Some(Self::NotSupported),
+      "NotSupportedAttributeType" => Some(Self::NotSupportedAttributeType),
+      "NotSupportedMessageFormat" => Some(Self::NotSupportedMessageFormat),
+      "NotSupportedOperation" => Some(Self::NotSupportedOperation),
+      "NotSupportedPriority" => Some(Self::NotSupportedPriority),
+      "NotSupportedState" => Some(Self::NotSupportedState),
+      "Occupied" => Some(Self::Occupied),
+      "OCSP" => Some(Self::Ocsp),
       "OngoingAuthorizedTransaction" => {
         Some(Self::OngoingAuthorizedTransaction)
       }
+      "Operative" => Some(Self::Operative),
+      "Pending" => Some(Self::Pending),
+      "PermissionDenied" => Some(Self::PermissionDenied),
+      "Preconditioning" => Some(Self::Preconditioning),
+      "Preparing" => Some(Self::Preparing),
+      "Processing" => Some(Self::Processing),
+      "Published" => Some(Self::Published),
+      "PublishFailed" => Some(Self::PublishFailed),
+      "Ready" => Some(Self::Ready),
+      "RebootRequired" => Some(Self::RebootRequired),
+      "Rejected" => Some(Self::Rejected),
+      "Removed" => Some(Self::Removed),
+      "Reserved" => Some(Self::Reserved),
+      "Revoked" => Some(Self::Revoked),
+      "RevokedCertificate" => Some(Self::RevokedCertificate),
+      "Scheduled" => Some(Self::Scheduled),
+      "Settled" => Some(Self::Settled),
+      "SignatureError" => Some(Self::SignatureError),
+      "SignatureVerified" => Some(Self::SignatureVerified),
+      "SuspendedEV" => Some(Self::SuspendedEV),
+      "SuspendedEVSE" => Some(Self::SuspendedEVSE),
+      "TooManyElements" => Some(Self::TooManyElements),
+      "TxNotFound" => Some(Self::TxNotFound),
+      "Unavailable" => Some(Self::Unavailable),
+      "Unknown" => Some(Self::Unknown),
+      "UnknownComponent" => Some(Self::UnknownComponent),
+      "UnknownConnector" => Some(Self::UnknownConnector),
+      "UnknownMessageId" => Some(Self::UnknownMessageId),
+      "UnknownTransaction" => Some(Self::UnknownTransaction),
       "UnknownVariable" => Some(Self::UnknownVariable),
+      "UnknownVendorId" => Some(Self::UnknownVendorId),
+      "Unlocked" => Some(Self::Unlocked),
+      "UnlockFailed" => Some(Self::UnlockFailed),
+      "Unpublished" => Some(Self::Unpublished),
+      "Unsupported" => Some(Self::Unsupported),
+      "UnsupportedMonitorType" => Some(Self::UnsupportedMonitorType),
+      "Uploaded" => Some(Self::Uploaded),
+      "UploadFailed" => Some(Self::UploadFailed),
+      "UploadFailure" => Some(Self::UploadFailure),
+      "Uploading" => Some(Self::Uploading),
+      "VersionMismatch" => Some(Self::VersionMismatch),
       _ => None,
     }
   }
@@ -639,13 +909,15 @@ fn parse_payload_object(value: &Value) -> Result<Value, String> {
 mod tests {
   use std::collections::BTreeSet;
 
-  use serde_json::json;
+  use serde_json::{Value, json};
+
+  use crate::embedded_schemas::EmbeddedSchemaType;
 
   use super::{
     IncomingAction_V1_6, OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS,
     OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_0_1_UNSUPPORTED_ACTIONS,
     OCPP_V2_1_UNSUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
-    OcppFrame, OcppVersion, build_call, parse_frame,
+    OcppFrame, OcppVersion, ResponseStatus, build_call, parse_frame,
   };
 
   #[test]
@@ -687,6 +959,30 @@ mod tests {
   fn v1_6_security_extension_actions_are_not_supported() {
     for action in OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS {
       assert!(IncomingAction_V1_6::is_known_unsupported(action));
+    }
+  }
+
+  #[test]
+  /// Verifies all schema status tokens are recognized by `ResponseStatus`.
+  fn response_status_covers_schema_status_enums() {
+    let mut statuses = BTreeSet::new();
+    for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1]
+    {
+      for schema_type in
+        [EmbeddedSchemaType::Request, EmbeddedSchemaType::Response]
+      {
+        for schema in crate::embedded_schemas::schemas(protocol, schema_type) {
+          let value: Value = serde_json::from_str(schema.text)
+            .unwrap_or_else(|error| panic!("{}: {error}", schema.file_name));
+          collect_status_enum_tokens(&value, &mut Vec::new(), &mut statuses);
+        }
+      }
+    }
+
+    for status in statuses {
+      let parsed = ResponseStatus::parse(&status)
+        .unwrap_or_else(|| panic!("missing ResponseStatus for {status}"));
+      assert_eq!(parsed.as_str(), status);
     }
   }
 
@@ -746,5 +1042,35 @@ mod tests {
       .flat_map(|items| items.iter().copied())
       .map(ToOwned::to_owned)
       .collect()
+  }
+
+  fn collect_status_enum_tokens(
+    value: &Value,
+    path: &mut Vec<String>,
+    statuses: &mut BTreeSet<String>,
+  ) {
+    match value {
+      Value::Object(map) => {
+        if path
+          .iter()
+          .any(|part| part.to_lowercase().contains("status"))
+          && let Some(Value::Array(items)) = map.get("enum")
+        {
+          statuses
+            .extend(items.iter().filter_map(Value::as_str).map(str::to_string));
+        }
+        for (key, child) in map {
+          path.push(key.clone());
+          collect_status_enum_tokens(child, path, statuses);
+          path.pop();
+        }
+      }
+      Value::Array(items) => {
+        for child in items {
+          collect_status_enum_tokens(child, path, statuses);
+        }
+      }
+      _ => {}
+    }
   }
 }
