@@ -148,6 +148,11 @@ jobs:
           ${CARGO:-cargo} build --locked --all-targets --all-features \
             --profile "$PROFILE" \
             --target "$TARGET"
+      - name: Run tests
+        run: |
+          ${CARGO:-cargo} test --locked --all-targets --all-features \
+            --profile "$PROFILE" \
+            --target "$TARGET"
       - name: Package
         id: package
         run: |
