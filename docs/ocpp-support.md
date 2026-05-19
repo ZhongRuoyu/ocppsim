@@ -23,8 +23,8 @@ Supported behavior includes:
 - simulated diagnostics and firmware update success flows.
 
 The OCPP 1.6 Security Whitepaper extension is out of scope for now.
-Recognized extension actions return `NotSupported` instead of being treated as
-unknown actions.
+Recognized extension actions are logged and return `NotSupported` instead of
+being treated as unknown actions.
 The simulator does not implement OCPP security profiles, client certificates,
 certificate-management actions, or security event workflows.
 

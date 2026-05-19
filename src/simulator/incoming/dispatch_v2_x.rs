@@ -322,6 +322,13 @@ impl Simulator {
           action,
           self.config.protocol,
         ) {
+          self.log(
+            UiLogLevel::Warn,
+            format!(
+              "Action `{action}` is known for {} but is not supported.",
+              self.config.protocol.label()
+            ),
+          );
           self
             .send_call_error(
               write,
@@ -332,6 +339,10 @@ impl Simulator {
             )
             .await?;
         } else {
+          self.log(
+            UiLogLevel::Warn,
+            format!("Action `{action}` is not implemented."),
+          );
           self
             .send_call_error(
               write,

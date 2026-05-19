@@ -304,6 +304,12 @@ impl Simulator {
       }
       None => {
         if IncomingAction_V1_6::is_known_unsupported(action) {
+          self.log(
+            UiLogLevel::Warn,
+            format!(
+              "Action `{action}` is known for OCPP 1.6 but is not supported."
+            ),
+          );
           self
             .send_call_error(
               write,
@@ -316,6 +322,10 @@ impl Simulator {
             )
             .await?;
         } else {
+          self.log(
+            UiLogLevel::Warn,
+            format!("Action `{action}` is not implemented."),
+          );
           self
             .send_call_error(
               write,
