@@ -217,7 +217,7 @@ pub fn help_text() -> &'static str {
     Start a transaction on connector (connector must be > 0).
   stop <connector> [reason...]
     Stop active transaction on connector.
-    Optional reason text is forwarded and may contain spaces.
+    Optional reason text is mapped to OCPP stop reason values.
   connector-status <connector> <status>
     Set local connector status and notify CSMS when connected.
     Valid statuses: Available, Preparing, Charging, SuspendedEVSE, SuspendedEV,

@@ -195,6 +195,39 @@ fn end_ack_enqueues_scheduled_v2_status() {
 }
 
 #[test]
+fn stop_transaction_v1_6_remote_reason_is_preserved() {
+  let mut simulator = simulator_for_tests();
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect("start should succeed");
+  simulator.queue.clear();
+
+  simulator
+    .stop_transaction(1, Some("Remote".to_string()), false, true)
+    .expect("stop should enqueue");
+
+  let payload = queued_payload(&simulator, "StopTransaction");
+  assert_eq!(payload["reason"], json!("Remote"));
+}
+
+#[test]
+fn stop_transaction_v2_0_1_remote_reason_is_preserved() {
+  let mut simulator = simulator_for_tests_v2_0_1();
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect("start should succeed");
+  simulator.queue.clear();
+
+  simulator
+    .stop_transaction(1, Some("Remote".to_string()), false, true)
+    .expect("stop should enqueue");
+
+  let payload = queued_payload(&simulator, "TransactionEvent");
+  assert_eq!(payload["eventType"], json!("Ended"));
+  assert_eq!(payload["transactionInfo"]["stoppedReason"], json!("Remote"));
+}
+
+#[test]
 fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
   let mut simulator = simulator_for_tests();
   simulator

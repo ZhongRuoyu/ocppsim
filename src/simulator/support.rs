@@ -106,15 +106,17 @@ pub(in crate::simulator) fn map_stop_reason_v1_6(
   }
   let normalized = normalize_identifier(reason.unwrap_or("local"));
   match normalized.as_str() {
+    "deauthorized" => "DeAuthorized",
     "emergencystop" => "EmergencyStop",
     "evdisconnected" => "EVDisconnected",
     "hardreset" => "HardReset",
+    "local" => "Local",
+    "other" => "Other",
     "powerloss" => "PowerLoss",
     "reboot" => "Reboot",
+    "remote" => "Remote",
     "softreset" => "SoftReset",
     "unlockcommand" => "UnlockCommand",
-    "deauthorized" => "DeAuthorized",
-    "other" => "Other",
     _ => "Local",
   }
 }
@@ -135,6 +137,7 @@ pub(in crate::simulator) fn map_stop_reason_v2_x(
     "evdisconnected" => "EVDisconnected",
     "groundfault" => "GroundFault",
     "immediatereset" => "ImmediateReset",
+    "local" => "Local",
     "localoutofcredit" => "LocalOutOfCredit",
     "masterpass" => "MasterPass",
     "other" => "Other",
@@ -142,6 +145,7 @@ pub(in crate::simulator) fn map_stop_reason_v2_x(
     "powerloss" => "PowerLoss",
     "powerquality" => "PowerQuality",
     "reboot" => "Reboot",
+    "remote" => "Remote",
     "soclimitreached" => "SOCLimitReached",
     "stoppedbyev" => "StoppedByEV",
     "timelimitreached" => "TimeLimitReached",
