@@ -87,7 +87,7 @@ impl Simulator {
       .send_call_error(
         write,
         message_id,
-        "FormationViolation",
+        OcppErrorCode::FormationViolation.as_str(),
         description,
         json!({}),
       )

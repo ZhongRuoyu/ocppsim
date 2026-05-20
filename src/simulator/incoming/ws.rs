@@ -124,7 +124,7 @@ impl Simulator {
         );
         let error = build_call_error(
           &id,
-          "MessageTypeNotSupported",
+          OcppErrorCode::MessageTypeNotSupported.as_str(),
           "Unsupported OCPP message type",
           json!({}),
         );
@@ -136,7 +136,7 @@ impl Simulator {
         self.log(UiLogLevel::Warn, format!("Malformed OCPP frame: {error}"));
         let call_error = build_call_error(
           "-1",
-          "ProtocolError",
+          OcppErrorCode::ProtocolError.as_str(),
           "Malformed OCPP frame",
           json!({ "reason": error }),
         );

@@ -33,7 +33,11 @@ impl Simulator {
       OcppVersion::V2_0_1 => self.boot_notification_v2_0_1_payload(),
       OcppVersion::V2_1 => self.boot_notification_v2_1_payload(),
     };
-    self.enqueue_call("BootNotification", payload, PendingContext::Boot);
+    self.enqueue_call(
+      OutgoingAction::BootNotification.as_str(),
+      payload,
+      PendingContext::Boot,
+    );
   }
 
   /// Enqueues an `Authorize` request for the provided id token.
@@ -44,7 +48,7 @@ impl Simulator {
       OcppVersion::V2_1 => Self::authorize_v2_1_payload(&id_token),
     };
     self.enqueue_call(
-      "Authorize",
+      OutgoingAction::Authorize.as_str(),
       payload,
       PendingContext::Authorize { id_token },
     );
@@ -58,7 +62,7 @@ impl Simulator {
   ) {
     let payload = Self::authorize_v1_6_payload(&id_token);
     self.enqueue_call(
-      "Authorize",
+      OutgoingAction::Authorize.as_str(),
       payload,
       PendingContext::RemoteStartAuthorizeV1_6 {
         connector,
@@ -70,7 +74,7 @@ impl Simulator {
   /// Enqueues a one-shot `Heartbeat` request.
   pub(in crate::simulator) fn enqueue_heartbeat(&mut self) {
     self.enqueue_call(
-      "Heartbeat",
+      OutgoingAction::Heartbeat.as_str(),
       to_value(&HeartbeatRequest {}),
       PendingContext::Heartbeat,
     );
@@ -100,7 +104,11 @@ impl Simulator {
         data.as_deref(),
       ),
     };
-    self.enqueue_call("DataTransfer", payload, PendingContext::DataTransfer);
+    self.enqueue_call(
+      OutgoingAction::DataTransfer.as_str(),
+      payload,
+      PendingContext::DataTransfer,
+    );
   }
 
   /// Enqueues an OCPP 1.6 `DiagnosticsStatusNotification` request.
@@ -109,7 +117,7 @@ impl Simulator {
     status: &str,
   ) {
     self.enqueue_call(
-      "DiagnosticsStatusNotification",
+      OutgoingAction::DiagnosticsStatusNotification.as_str(),
       to_value(&StatusPayload { status }),
       PendingContext::DiagnosticsStatusNotification,
     );
@@ -131,7 +139,7 @@ impl Simulator {
       }
     };
     self.enqueue_call(
-      "FirmwareStatusNotification",
+      OutgoingAction::FirmwareStatusNotification.as_str(),
       payload,
       PendingContext::FirmwareStatusNotification,
     );
@@ -145,7 +153,7 @@ impl Simulator {
   ) {
     let payload = to_value(&LogStatusPayload { status, request_id });
     self.enqueue_call(
-      "LogStatusNotification",
+      OutgoingAction::LogStatusNotification.as_str(),
       payload,
       PendingContext::LogStatusNotification,
     );
@@ -171,7 +179,7 @@ impl Simulator {
       }
     };
     self.enqueue_call(
-      "StatusNotification",
+      OutgoingAction::StatusNotification.as_str(),
       payload,
       PendingContext::StatusNotification { connector },
     );
@@ -190,7 +198,7 @@ impl Simulator {
         let payload =
           Self::meter_values_v1_6_payload(connector, state, &timestamp);
         self.enqueue_call(
-          "MeterValues",
+          OutgoingAction::MeterValues.as_str(),
           payload,
           PendingContext::MeterValues { connector },
         );
@@ -199,7 +207,7 @@ impl Simulator {
         let payload =
           Self::meter_values_v2_0_1_payload(connector, state, &timestamp);
         self.enqueue_call(
-          "MeterValues",
+          OutgoingAction::MeterValues.as_str(),
           payload,
           PendingContext::MeterValues { connector },
         );
@@ -208,7 +216,7 @@ impl Simulator {
         let payload =
           Self::meter_values_v2_1_payload(connector, state, &timestamp);
         self.enqueue_call(
-          "MeterValues",
+          OutgoingAction::MeterValues.as_str(),
           payload,
           PendingContext::MeterValues { connector },
         );
@@ -232,15 +240,11 @@ impl Simulator {
 
     let timestamp = now_timestamp();
     let context = match request.event_type {
-      TxEventType::Started => "Transaction.Begin",
-      TxEventType::Updated => "Sample.Periodic",
-      TxEventType::Ended => "Transaction.End",
+      TxEventType::Started => ReadingContext::TransactionBegin,
+      TxEventType::Updated => ReadingContext::SamplePeriodic,
+      TxEventType::Ended => ReadingContext::TransactionEnd,
     };
-    let event_type_label = match request.event_type {
-      TxEventType::Started => "Started",
-      TxEventType::Updated => "Updated",
-      TxEventType::Ended => "Ended",
-    };
+    let event_type_label = request.event_type.as_str();
 
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => unreachable!("TransactionEvent is not OCPP 1.6"),
@@ -249,21 +253,23 @@ impl Simulator {
         transaction,
         state.meter_wh,
         &timestamp,
-        context,
+        context.as_str(),
         event_type_label,
+        OcppVersion::V2_0_1,
       ),
       OcppVersion::V2_1 => Self::transaction_event_v2_1_payload(
         &request,
         transaction,
         state.meter_wh,
         &timestamp,
-        context,
+        context.as_str(),
         event_type_label,
+        OcppVersion::V2_1,
       ),
     };
 
     self.enqueue_call(
-      "TransactionEvent",
+      OutgoingAction::TransactionEvent.as_str(),
       payload,
       PendingContext::TxEvent {
         connector: request.connector,
@@ -284,7 +290,7 @@ impl Simulator {
 
   fn boot_notification_v2_0_1_payload(&self) -> Value {
     to_value(&BootNotification_V2_X_Request {
-      reason: "PowerUp",
+      reason: BootReason::PowerUp.as_str(),
       charging_station: ChargingStationInfo {
         vendor_name: &self.config.vendor,
         model: &self.config.model,
@@ -295,7 +301,7 @@ impl Simulator {
 
   fn boot_notification_v2_1_payload(&self) -> Value {
     to_value(&BootNotification_V2_X_Request {
-      reason: "PowerUp",
+      reason: BootReason::PowerUp.as_str(),
       charging_station: ChargingStationInfo {
         vendor_name: &self.config.vendor,
         model: &self.config.model,
@@ -312,7 +318,7 @@ impl Simulator {
     to_value(&Authorize_V2_X_Request {
       id_token: IdTokenPayload {
         id_token,
-        token_type: "Central",
+        token_type: IdTokenType::Central.as_str(),
       },
     })
   }
@@ -321,7 +327,7 @@ impl Simulator {
     to_value(&Authorize_V2_X_Request {
       id_token: IdTokenPayload {
         id_token,
-        token_type: "Central",
+        token_type: IdTokenType::Central.as_str(),
       },
     })
   }
@@ -395,7 +401,7 @@ impl Simulator {
     let timestamp = now_timestamp();
     to_value(&StatusNotificationV1_6Request {
       connector_id: connector,
-      error_code: "NoError",
+      error_code: StatusNotificationErrorCode::NoError.as_str(),
       status: status.as_v1_6(),
       timestamp: &timestamp,
     })
@@ -445,9 +451,9 @@ impl Simulator {
         timestamp,
         sampled_value: vec![SampledValueV1_6 {
           value: &meter_wh_str,
-          context: "Sample.Periodic",
-          measurand: "Energy.Active.Import.Register",
-          unit: "Wh",
+          context: ReadingContext::SamplePeriodic.as_str(),
+          measurand: Measurand::EnergyActiveImportRegister.as_str(),
+          unit: MeterUnit::Wh.as_str(),
         }],
       }],
     })
@@ -480,9 +486,11 @@ impl Simulator {
         timestamp,
         sampled_value: vec![SampledValue_V2_X {
           value: state.meter_wh,
-          context: "Sample.Periodic",
-          measurand: "Energy.Active.Import.Register",
-          unit_of_measure: UnitOfMeasure { unit: "Wh" },
+          context: ReadingContext::SamplePeriodic.as_str(),
+          measurand: Measurand::EnergyActiveImportRegister.as_str(),
+          unit_of_measure: UnitOfMeasure {
+            unit: MeterUnit::Wh.as_str(),
+          },
         }],
       }],
     })
@@ -495,6 +503,7 @@ impl Simulator {
     timestamp: &str,
     context: &str,
     event_type_label: &str,
+    protocol: OcppVersion,
   ) -> Value {
     Self::transaction_event_v2_x_payload(
       request,
@@ -503,6 +512,7 @@ impl Simulator {
       timestamp,
       context,
       event_type_label,
+      protocol,
     )
   }
 
@@ -513,6 +523,7 @@ impl Simulator {
     timestamp: &str,
     context: &str,
     event_type_label: &str,
+    protocol: OcppVersion,
   ) -> Value {
     Self::transaction_event_v2_x_payload(
       request,
@@ -521,6 +532,7 @@ impl Simulator {
       timestamp,
       context,
       event_type_label,
+      protocol,
     )
   }
 
@@ -531,16 +543,21 @@ impl Simulator {
     timestamp: &str,
     context: &str,
     event_type_label: &str,
+    protocol: OcppVersion,
   ) -> Value {
+    let stopped_reason = request
+      .stopped_reason
+      .and_then(|reason| reason.as_v2_x(protocol));
+
     to_value(&TransactionEvent_V2_X_Request {
       event_type: event_type_label,
       timestamp,
-      trigger_reason: request.trigger_reason,
+      trigger_reason: request.trigger_reason.as_str(),
       seq_no: transaction.seq_no,
       transaction_info: TransactionInfoPayload {
         transaction_id: &transaction.transaction_uid,
         remote_start_id: request.remote_start_id,
-        stopped_reason: request.stopped_reason,
+        stopped_reason,
       },
       evse: EvsePayload {
         id: request.connector,
@@ -551,13 +568,15 @@ impl Simulator {
         sampled_value: vec![SampledValue_V2_X {
           value: meter_wh,
           context,
-          measurand: "Energy.Active.Import.Register",
-          unit_of_measure: UnitOfMeasure { unit: "Wh" },
+          measurand: Measurand::EnergyActiveImportRegister.as_str(),
+          unit_of_measure: UnitOfMeasure {
+            unit: MeterUnit::Wh.as_str(),
+          },
         }],
       }],
       id_token: request.id_token.as_deref().map(|token| IdTokenPayload {
         id_token: token,
-        token_type: "Central",
+        token_type: IdTokenType::Central.as_str(),
       }),
     })
   }

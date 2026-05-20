@@ -67,7 +67,7 @@ impl Simulator {
           timestamp: &timestamp,
         });
         self.enqueue_call(
-          "StartTransaction",
+          OutgoingAction::StartTransaction.as_str(),
           payload,
           PendingContext::StartTxV1_6 {
             connector,
@@ -78,9 +78,9 @@ impl Simulator {
       OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
         self.bump_seq_no(connector, local_tx_id)?;
         let trigger_reason = if remote_start {
-          "RemoteStart"
+          TransactionTriggerReason::RemoteStart
         } else {
-          "Authorized"
+          TransactionTriggerReason::Authorized
         };
         self.enqueue_transaction_event(TransactionEventRequest {
           connector,
@@ -146,7 +146,9 @@ impl Simulator {
         let connector_state = self.connector_ref(connector)?;
         let tx_id = v1_6_tx_id.unwrap_or(local_tx_id as i64);
         let timestamp = now_timestamp();
-        let reason_str = map_stop_reason_v1_6(reason.as_deref(), remote_stop);
+        let stop_reason = map_stop_reason_v1_6(reason.as_deref(), remote_stop);
+        let reason_str =
+          stop_reason.as_v1_6().unwrap_or(StopReason::Local.as_str());
         let payload = to_value(&StopTransactionV1_6Request {
           transaction_id: tx_id,
           timestamp: &timestamp,
@@ -155,7 +157,7 @@ impl Simulator {
           reason: reason_str,
         });
         self.enqueue_call(
-          "StopTransaction",
+          OutgoingAction::StopTransaction.as_str(),
           payload,
           PendingContext::StopTxV1_6 {
             connector,
@@ -179,12 +181,15 @@ impl Simulator {
         }
 
         let trigger_reason = if remote_stop {
-          "RemoteStop"
+          TransactionTriggerReason::RemoteStop
         } else {
-          "StopAuthorized"
+          TransactionTriggerReason::StopAuthorized
         };
-        let stopped_reason =
-          map_stop_reason_v2_x(reason.as_deref(), remote_stop);
+        let stopped_reason = map_stop_reason_v2_x(
+          self.config.protocol,
+          reason.as_deref(),
+          remote_stop,
+        );
         self.enqueue_transaction_event(TransactionEventRequest {
           connector,
           local_tx_id,
@@ -255,7 +260,7 @@ impl Simulator {
             connector,
             local_tx_id,
             event_type: TxEventType::Updated,
-            trigger_reason: "MeterValuePeriodic",
+            trigger_reason: TransactionTriggerReason::MeterValuePeriodic,
             id_token: None,
             remote_start_id,
             stopped_reason: None,

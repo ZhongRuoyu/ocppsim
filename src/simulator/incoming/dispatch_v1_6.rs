@@ -143,12 +143,7 @@ impl Simulator {
         };
         let connector = self.find_v1_6_transaction(request.transaction_id);
         if let Some(connector_id) = connector {
-          self.stop_transaction(
-            connector_id,
-            Some("Remote".to_string()),
-            true,
-            true,
-          )?;
+          self.stop_transaction(connector_id, None, true, true)?;
           self
             .send_call_result(
               write,
@@ -284,7 +279,7 @@ impl Simulator {
                 write,
                 message_id,
                 to_value(&StatusPayload {
-                  status: "NotImplemented",
+                  status: ResponseStatus::NotImplemented.as_str(),
                 }),
               )
               .await?;
@@ -318,7 +313,7 @@ impl Simulator {
             .send_call_error(
               write,
               message_id,
-              "NotSupported",
+              OcppErrorCode::NotSupported.as_str(),
               &format!(
                 "Action `{action}` is outside the supported base schemas."
               ),
@@ -334,7 +329,7 @@ impl Simulator {
             .send_call_error(
               write,
               message_id,
-              "NotImplemented",
+              OcppErrorCode::NotImplemented.as_str(),
               &format!("Action `{action}` is not implemented."),
               json!({}),
             )

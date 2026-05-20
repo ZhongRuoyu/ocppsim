@@ -4,53 +4,53 @@ use anyhow::{Result, anyhow};
 use chrono::{SecondsFormat, Utc};
 use serde_json::Value;
 
-use crate::ocpp::{OcppVersion, ResponseStatus};
+use crate::ocpp::{ConfigurationKey, OcppVersion, ResponseStatus, StopReason};
 
-use super::{ConfigurationEntry, SimulatorConfig, normalize_identifier};
+use super::{ConfigurationEntry, SimulatorConfig};
 
 /// Builds the baseline OCPP configuration key map exposed by the simulator.
 pub(in crate::simulator) fn default_configuration_entries(
   config: &SimulatorConfig,
-) -> BTreeMap<String, ConfigurationEntry> {
+) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
   let heartbeat_interval = config.heartbeat_seconds.unwrap_or(30).to_string();
   BTreeMap::from([
     (
-      "AllowOfflineTxForUnknownId".to_string(),
+      ConfigurationKey::AllowOfflineTxForUnknownId,
       ConfigurationEntry {
         value: "false".to_string(),
         read_only: false,
       },
     ),
     (
-      "AuthorizeRemoteTxRequests".to_string(),
+      ConfigurationKey::AuthorizeRemoteTxRequests,
       ConfigurationEntry {
         value: "true".to_string(),
         read_only: false,
       },
     ),
     (
-      "HeartbeatInterval".to_string(),
+      ConfigurationKey::HeartbeatInterval,
       ConfigurationEntry {
         value: heartbeat_interval,
         read_only: false,
       },
     ),
     (
-      "MeterValueSampleInterval".to_string(),
+      ConfigurationKey::MeterValueSampleInterval,
       ConfigurationEntry {
         value: "60".to_string(),
         read_only: false,
       },
     ),
     (
-      "NumberOfConnectors".to_string(),
+      ConfigurationKey::NumberOfConnectors,
       ConfigurationEntry {
         value: config.connectors.to_string(),
         read_only: true,
       },
     ),
     (
-      "SupportedFeatureProfiles".to_string(),
+      ConfigurationKey::SupportedFeatureProfiles,
       ConfigurationEntry {
         value: "Core,FirmwareManagement,LocalAuthListManagement,\
 SmartCharging,RemoteTrigger,Reservation"
@@ -59,7 +59,7 @@ SmartCharging,RemoteTrigger,Reservation"
       },
     ),
     (
-      "WebSocketPingInterval".to_string(),
+      ConfigurationKey::WebSocketPingInterval,
       ConfigurationEntry {
         value: "0".to_string(),
         read_only: false,
@@ -96,62 +96,33 @@ pub(in crate::simulator) fn authorize_status(
   }
 }
 
-/// Maps local stop reason text to OCPP 1.6 reason enumeration strings.
+/// Maps local stop reason text to an OCPP 1.6 stop reason value.
 pub(in crate::simulator) fn map_stop_reason_v1_6(
   reason: Option<&str>,
   remote_stop: bool,
-) -> &'static str {
+) -> StopReason {
   if remote_stop {
-    return "Remote";
+    return StopReason::Remote;
   }
-  let normalized = normalize_identifier(reason.unwrap_or("local"));
-  match normalized.as_str() {
-    "deauthorized" => "DeAuthorized",
-    "emergencystop" => "EmergencyStop",
-    "evdisconnected" => "EVDisconnected",
-    "hardreset" => "HardReset",
-    "local" => "Local",
-    "other" => "Other",
-    "powerloss" => "PowerLoss",
-    "reboot" => "Reboot",
-    "remote" => "Remote",
-    "softreset" => "SoftReset",
-    "unlockcommand" => "UnlockCommand",
-    _ => "Local",
-  }
+  reason
+    .and_then(StopReason::parse_user_input)
+    .filter(|item| item.as_v1_6().is_some())
+    .unwrap_or(StopReason::Local)
 }
 
-/// Maps local stop reason text to OCPP 2.x reason enumeration strings.
+/// Maps local stop reason text to an OCPP 2.x stop reason value.
 pub(in crate::simulator) fn map_stop_reason_v2_x(
+  protocol: OcppVersion,
   reason: Option<&str>,
   remote_stop: bool,
-) -> &'static str {
+) -> StopReason {
   if remote_stop {
-    return "Remote";
+    return StopReason::Remote;
   }
-  let normalized = normalize_identifier(reason.unwrap_or("local"));
-  match normalized.as_str() {
-    "deauthorized" => "DeAuthorized",
-    "emergencystop" => "EmergencyStop",
-    "energylimitreached" => "EnergyLimitReached",
-    "evdisconnected" => "EVDisconnected",
-    "groundfault" => "GroundFault",
-    "immediatereset" => "ImmediateReset",
-    "local" => "Local",
-    "localoutofcredit" => "LocalOutOfCredit",
-    "masterpass" => "MasterPass",
-    "other" => "Other",
-    "overcurrentfault" => "OvercurrentFault",
-    "powerloss" => "PowerLoss",
-    "powerquality" => "PowerQuality",
-    "reboot" => "Reboot",
-    "remote" => "Remote",
-    "soclimitreached" => "SOCLimitReached",
-    "stoppedbyev" => "StoppedByEV",
-    "timelimitreached" => "TimeLimitReached",
-    "timeout" => "Timeout",
-    _ => "Local",
-  }
+  reason
+    .and_then(StopReason::parse_user_input)
+    .filter(|item| item.as_v2_x(protocol).is_some())
+    .unwrap_or(StopReason::Local)
 }
 
 /// Validates that the CSMS accepted the requested WebSocket subprotocol.

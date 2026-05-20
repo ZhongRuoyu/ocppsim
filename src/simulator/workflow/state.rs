@@ -4,22 +4,22 @@ impl Simulator {
   /// Updates a configuration value and applies key-specific side effects.
   pub(in crate::simulator) fn set_configuration_value(
     &mut self,
-    key: &str,
+    key: ConfigurationKey,
     value: &str,
   ) -> ResponseStatus {
-    let Some(entry) = self.configuration.get(key) else {
+    let Some(entry) = self.configuration.get(&key) else {
       return ResponseStatus::NotSupported;
     };
     if entry.read_only {
       return ResponseStatus::Rejected;
     }
 
-    if key == "HeartbeatInterval" {
+    if key == ConfigurationKey::HeartbeatInterval {
       let Some(seconds) = value.parse::<u64>().ok().filter(|item| *item > 0)
       else {
         return ResponseStatus::Rejected;
       };
-      if let Some(entry) = self.configuration.get_mut(key) {
+      if let Some(entry) = self.configuration.get_mut(&key) {
         entry.value = value.to_string();
       }
       if self.heartbeat.is_some() {
@@ -28,7 +28,7 @@ impl Simulator {
       return ResponseStatus::Accepted;
     }
 
-    if let Some(entry) = self.configuration.get_mut(key) {
+    if let Some(entry) = self.configuration.get_mut(&key) {
       entry.value = value.to_string();
     }
     ResponseStatus::Accepted
@@ -38,24 +38,21 @@ impl Simulator {
   pub(in crate::simulator) fn configuration_entry(
     &self,
     variable: &str,
-  ) -> Option<(&str, &ConfigurationEntry)> {
+  ) -> Option<(ConfigurationKey, &ConfigurationEntry)> {
+    let key = ConfigurationKey::parse(variable)?;
     self
       .configuration
-      .iter()
-      .find(|(key, _)| key.eq_ignore_ascii_case(variable))
-      .map(|(key, value)| (key.as_str(), value))
+      .get_key_value(&key)
+      .map(|(key, value)| (*key, value))
   }
 
   /// Finds the canonical configuration key for a variable name.
   pub(in crate::simulator) fn configuration_key(
     &self,
     variable: &str,
-  ) -> Option<String> {
-    self
-      .configuration
-      .keys()
-      .find(|key| key.eq_ignore_ascii_case(variable))
-      .cloned()
+  ) -> Option<ConfigurationKey> {
+    let key = ConfigurationKey::parse(variable)?;
+    self.configuration.contains_key(&key).then_some(key)
   }
 
   /// Returns true when any active reservation targets this connector.
@@ -70,7 +67,7 @@ impl Simulator {
   pub(in crate::simulator) fn authorize_remote_tx_requests(&self) -> bool {
     self
       .configuration
-      .get("AuthorizeRemoteTxRequests")
+      .get(&ConfigurationKey::AuthorizeRemoteTxRequests)
       .map(|entry| entry.value.eq_ignore_ascii_case("true"))
       .unwrap_or(true)
   }

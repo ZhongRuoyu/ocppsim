@@ -220,7 +220,10 @@ impl Simulator {
       );
       return;
     }
-    if let Some(entry) = self.configuration.get_mut("HeartbeatInterval") {
+    if let Some(entry) = self
+      .configuration
+      .get_mut(&ConfigurationKey::HeartbeatInterval)
+    {
       entry.value = seconds.to_string();
     }
     self.start_heartbeat(seconds);

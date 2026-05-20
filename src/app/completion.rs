@@ -1,3 +1,5 @@
+use crate::ocpp::StopReason;
+
 const COMMAND_WORDS: &[&str] = &[
   "help",
   "standards",
@@ -29,8 +31,13 @@ const STATUS_WORDS: &[&str] = &[
   "Occupied",
 ];
 const ID_TOKEN_HINTS: &[&str] = &["TAG001", "TAG002", "REMOTE"];
-const STOP_REASON_HINTS: &[&str] =
-  &["Local", "Remote", "EmergencyStop", "PowerLoss", "Other"];
+const STOP_REASON_HINTS: &[&str] = &[
+  StopReason::Local.as_str(),
+  StopReason::Remote.as_str(),
+  StopReason::EmergencyStop.as_str(),
+  StopReason::PowerLoss.as_str(),
+  StopReason::Other.as_str(),
+];
 const METER_HINTS: &[&str] = &["0", "1000", "10000"];
 const HEARTBEAT_HINTS: &[&str] = &["15", "30", "60"];
 

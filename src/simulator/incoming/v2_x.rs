@@ -94,8 +94,14 @@ impl Simulator {
       UiLogLevel::Info,
       format!("Received GetLog request for {}", location),
     );
-    self.enqueue_log_status_notification("Uploading", Some(request_id));
-    self.enqueue_log_status_notification("Uploaded", Some(request_id));
+    self.enqueue_log_status_notification(
+      ResponseStatus::Uploading.as_str(),
+      Some(request_id),
+    );
+    self.enqueue_log_status_notification(
+      ResponseStatus::Uploaded.as_str(),
+      Some(request_id),
+    );
     let filename = format!("log-{}.txt", self.config.cp_id);
     Ok(to_value(&GetLog_V2_X_Response {
       status: ResponseStatus::Accepted.as_str(),
@@ -195,19 +201,19 @@ impl Simulator {
       format!("Received UpdateFirmware request from {}", location),
     );
     self.enqueue_firmware_status_notification(
-      "Downloading",
+      ResponseStatus::Downloading.as_str(),
       Some(request.request_id),
     );
     self.enqueue_firmware_status_notification(
-      "Downloaded",
+      ResponseStatus::Downloaded.as_str(),
       Some(request.request_id),
     );
     self.enqueue_firmware_status_notification(
-      "Installing",
+      ResponseStatus::Installing.as_str(),
       Some(request.request_id),
     );
     self.enqueue_firmware_status_notification(
-      "Installed",
+      ResponseStatus::Installed.as_str(),
       Some(request.request_id),
     );
     Ok(ResponseStatus::Accepted)
@@ -323,7 +329,7 @@ impl Simulator {
         evse_id: request.connector,
         duration: request.duration,
         schedule_start: &timestamp,
-        charging_rate_unit: "W",
+        charging_rate_unit: ChargingRateUnit::W.as_str(),
         charging_schedule_period: vec![ChargingSchedulePeriod {
           start_period: 0,
           limit,
@@ -339,17 +345,20 @@ impl Simulator {
     let component = variable_component(entry)?;
     let variable = variable_name(entry)?;
     let attribute_type = variable_attribute_type(entry);
-    let base = VariableResult_V2_X::from_entry(entry, "UnknownVariable")?;
+    let base = VariableResult_V2_X::from_entry(
+      entry,
+      ResponseStatus::UnknownVariable.as_str(),
+    )?;
 
     if !is_supported_variable_component(component) {
       return Ok(VariableResult_V2_X {
-        attribute_status: "UnknownComponent",
+        attribute_status: ResponseStatus::UnknownComponent.as_str(),
         ..base
       });
     }
     if !is_supported_variable_attribute(attribute_type) {
       return Ok(VariableResult_V2_X {
-        attribute_status: "NotSupportedAttributeType",
+        attribute_status: ResponseStatus::NotSupportedAttributeType.as_str(),
         ..base
       });
     }
@@ -377,17 +386,20 @@ impl Simulator {
       .ok_or_else(|| {
       anyhow!("setVariableData.attributeValue is required.")
     })?;
-    let base = VariableResult_V2_X::from_entry(entry, "UnknownVariable")?;
+    let base = VariableResult_V2_X::from_entry(
+      entry,
+      ResponseStatus::UnknownVariable.as_str(),
+    )?;
 
     if !is_supported_variable_component(component) {
       return Ok(VariableResult_V2_X {
-        attribute_status: "UnknownComponent",
+        attribute_status: ResponseStatus::UnknownComponent.as_str(),
         ..base
       });
     }
     if !is_supported_variable_attribute(attribute_type) {
       return Ok(VariableResult_V2_X {
-        attribute_status: "NotSupportedAttributeType",
+        attribute_status: ResponseStatus::NotSupportedAttributeType.as_str(),
         ..base
       });
     }
@@ -397,7 +409,7 @@ impl Simulator {
     };
     Ok(VariableResult_V2_X {
       attribute_status: self
-        .set_configuration_value(&configuration_key, attribute_value)
+        .set_configuration_value(configuration_key, attribute_value)
         .as_str(),
       ..base
     })
@@ -422,17 +434,22 @@ fn variable_name(entry: &Value) -> Result<&str> {
     .ok_or_else(|| anyhow!("variable.name is required."))
 }
 
-fn variable_attribute_type(entry: &Value) -> &str {
-  entry
-    .get("attributeType")
-    .and_then(Value::as_str)
-    .unwrap_or("Actual")
+fn variable_attribute_type(entry: &Value) -> Option<VariableAttributeType> {
+  entry.get("attributeType").and_then(Value::as_str).map_or(
+    Some(VariableAttributeType::Actual),
+    VariableAttributeType::parse,
+  )
 }
 
 fn is_supported_variable_component(component: &str) -> bool {
   normalize_identifier(component) == "chargingstation"
 }
 
-fn is_supported_variable_attribute(attribute_type: &str) -> bool {
-  matches!(attribute_type, "Actual" | "Target")
+fn is_supported_variable_attribute(
+  attribute_type: Option<VariableAttributeType>,
+) -> bool {
+  matches!(
+    attribute_type,
+    Some(VariableAttributeType::Actual | VariableAttributeType::Target)
+  )
 }

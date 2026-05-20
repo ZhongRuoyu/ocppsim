@@ -6,7 +6,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::args::ResolvedCliArgs;
-use crate::ocpp::OcppVersion;
+use crate::ocpp::{
+  ConfigurationKey, OcppVersion, StopReason, TransactionTriggerReason,
+};
 
 #[derive(Debug, Clone)]
 pub struct SimulatorConfig {
@@ -305,15 +307,36 @@ pub(in crate::simulator) enum TxEventType {
   Ended,
 }
 
+impl TxEventType {
+  pub(in crate::simulator) fn as_str(self) -> &'static str {
+    match self {
+      Self::Started => "Started",
+      Self::Updated => "Updated",
+      Self::Ended => "Ended",
+    }
+  }
+
+  // Kept for schema coverage and future inbound transaction event parsing.
+  #[allow(dead_code)]
+  pub(in crate::simulator) fn parse(value: &str) -> Option<Self> {
+    match value {
+      "Started" => Some(Self::Started),
+      "Updated" => Some(Self::Updated),
+      "Ended" => Some(Self::Ended),
+      _ => None,
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct TransactionEventRequest {
   pub(in crate::simulator) connector: u16,
   pub(in crate::simulator) local_tx_id: u64,
   pub(in crate::simulator) event_type: TxEventType,
-  pub(in crate::simulator) trigger_reason: &'static str,
+  pub(in crate::simulator) trigger_reason: TransactionTriggerReason,
   pub(in crate::simulator) id_token: Option<String>,
   pub(in crate::simulator) remote_start_id: Option<i64>,
-  pub(in crate::simulator) stopped_reason: Option<&'static str>,
+  pub(in crate::simulator) stopped_reason: Option<StopReason>,
 }
 
 #[derive(Debug)]
@@ -333,7 +356,8 @@ pub(in crate::simulator) struct Simulator {
   pub(in crate::simulator) ui_tx: UnboundedSender<UiEvent>,
   pub(in crate::simulator) self_cmd_tx: UnboundedSender<SimulatorCommand>,
   pub(in crate::simulator) connectors: BTreeMap<u16, ConnectorState>,
-  pub(in crate::simulator) configuration: BTreeMap<String, ConfigurationEntry>,
+  pub(in crate::simulator) configuration:
+    BTreeMap<ConfigurationKey, ConfigurationEntry>,
   pub(in crate::simulator) reservations: BTreeMap<i64, u16>,
   pub(in crate::simulator) charging_profiles: BTreeMap<u16, Value>,
   pub(in crate::simulator) local_auth_list_version: i64,

@@ -26,11 +26,11 @@ impl Simulator {
 
     if let Some(keys) = requested_keys {
       for key in keys {
-        if let Some((stored_key, entry)) =
-          self.configuration.get_key_value(key.as_str())
+        if let Some(config_key) = ConfigurationKey::parse(&key)
+          && let Some(entry) = self.configuration.get(&config_key)
         {
           configuration_key.push(ConfigurationKeyEntry {
-            key: stored_key,
+            key: config_key.as_str(),
             readonly: entry.read_only,
             value: &entry.value,
           });
@@ -46,7 +46,7 @@ impl Simulator {
 
     for (key, entry) in &self.configuration {
       configuration_key.push(ConfigurationKeyEntry {
-        key,
+        key: key.as_str(),
         readonly: entry.read_only,
         value: &entry.value,
       });
@@ -68,10 +68,10 @@ impl Simulator {
       return ResponseStatus::Rejected;
     }
 
-    if !self.configuration.contains_key(key) {
+    let Some(configuration_key) = ConfigurationKey::parse(key) else {
       return ResponseStatus::NotSupported;
-    }
-    self.set_configuration_value(key, value)
+    };
+    self.set_configuration_value(configuration_key, value)
   }
 
   /// Applies `ChangeAvailability.req` for one or all connectors in OCPP 1.6.
@@ -157,8 +157,12 @@ impl Simulator {
       UiLogLevel::Info,
       format!("Received GetDiagnostics request for {}", location),
     );
-    self.enqueue_diagnostics_status_notification("Uploading");
-    self.enqueue_diagnostics_status_notification("Uploaded");
+    self.enqueue_diagnostics_status_notification(
+      ResponseStatus::Uploading.as_str(),
+    );
+    self.enqueue_diagnostics_status_notification(
+      ResponseStatus::Uploaded.as_str(),
+    );
     let filename = format!("diagnostics-{}.log", self.config.cp_id);
     Ok(to_value(&GetDiagnosticsV1_6Response {
       file_name: &filename,
@@ -185,10 +189,22 @@ impl Simulator {
       UiLogLevel::Info,
       format!("Received UpdateFirmware request from {}", location),
     );
-    self.enqueue_firmware_status_notification("Downloading", None);
-    self.enqueue_firmware_status_notification("Downloaded", None);
-    self.enqueue_firmware_status_notification("Installing", None);
-    self.enqueue_firmware_status_notification("Installed", None);
+    self.enqueue_firmware_status_notification(
+      ResponseStatus::Downloading.as_str(),
+      None,
+    );
+    self.enqueue_firmware_status_notification(
+      ResponseStatus::Downloaded.as_str(),
+      None,
+    );
+    self.enqueue_firmware_status_notification(
+      ResponseStatus::Installing.as_str(),
+      None,
+    );
+    self.enqueue_firmware_status_notification(
+      ResponseStatus::Installed.as_str(),
+      None,
+    );
     Ok(())
   }
 
@@ -445,8 +461,10 @@ impl Simulator {
         charging_schedule: None,
       }));
     };
-    let charging_rate_unit =
-      request.charging_rate_unit.as_deref().unwrap_or("W");
+    let charging_rate_unit = request
+      .charging_rate_unit
+      .as_deref()
+      .unwrap_or(ChargingRateUnit::W.as_str());
     let timestamp = now_timestamp();
 
     Ok(to_value(&GetCompositeScheduleV1_6Response {

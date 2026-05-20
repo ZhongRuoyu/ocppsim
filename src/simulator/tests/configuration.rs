@@ -24,7 +24,7 @@ fn change_configuration_updates_writable_key() {
   assert_eq!(status, ResponseStatus::Accepted);
   let entry = simulator
     .configuration
-    .get("HeartbeatInterval")
+    .get(&ConfigurationKey::HeartbeatInterval)
     .expect("key must exist");
   assert_eq!(entry.value, "25");
 }
@@ -152,7 +152,7 @@ fn assert_set_variables_updates_configuration(
   assert_eq!(
     simulator
       .configuration
-      .get("HeartbeatInterval")
+      .get(&ConfigurationKey::HeartbeatInterval)
       .map(|entry| entry.value.as_str()),
     Some("20")
   );

@@ -144,12 +144,7 @@ impl Simulator {
         if let Some(connector) =
           self.find_transaction_by_uid(&request.transaction_id)
         {
-          let result = self.stop_transaction(
-            connector,
-            Some("Remote".to_string()),
-            true,
-            true,
-          );
+          let result = self.stop_transaction(connector, None, true, true);
           let status = if result.is_ok() {
             ResponseStatus::Accepted
           } else {
@@ -279,7 +274,7 @@ impl Simulator {
                 write,
                 message_id,
                 to_value(&StatusPayload {
-                  status: "NotImplemented",
+                  status: ResponseStatus::NotImplemented.as_str(),
                 }),
               )
               .await?;
@@ -333,7 +328,7 @@ impl Simulator {
             .send_call_error(
               write,
               message_id,
-              "NotSupported",
+              OcppErrorCode::NotSupported.as_str(),
               &format!("Action `{action}` is outside the supported subset."),
               json!({}),
             )
@@ -347,7 +342,7 @@ impl Simulator {
             .send_call_error(
               write,
               message_id,
-              "NotImplemented",
+              OcppErrorCode::NotImplemented.as_str(),
               &format!("Action `{action}` is not implemented."),
               json!({}),
             )

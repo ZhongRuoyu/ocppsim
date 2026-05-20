@@ -127,7 +127,7 @@ async fn boot_response_starts_heartbeat_from_interval() {
   assert_eq!(
     simulator
       .configuration
-      .get("HeartbeatInterval")
+      .get(&ConfigurationKey::HeartbeatInterval)
       .map(|entry| entry.value.as_str()),
     Some("17")
   );
