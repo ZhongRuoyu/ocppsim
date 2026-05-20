@@ -281,6 +281,16 @@ impl TerminalApp {
         self.select_next_history();
         InputAction::None
       }
+      KeyCode::PageUp => {
+        self.clear_completion();
+        self.scroll_logs_full_page_up();
+        InputAction::None
+      }
+      KeyCode::PageDown => {
+        self.clear_completion();
+        self.scroll_logs_full_page_down();
+        InputAction::None
+      }
       KeyCode::Char(ch) => {
         if key.modifiers != KeyModifiers::NONE
           && key.modifiers != KeyModifiers::SHIFT
@@ -549,6 +559,16 @@ impl TerminalApp {
   /// Clears any active tab-completion state.
   fn clear_completion(&mut self) {
     self.completion = None;
+  }
+
+  /// Scrolls logs up by a full page.
+  fn scroll_logs_full_page_up(&mut self) {
+    self.scroll_logs_up(self.log_view_height);
+  }
+
+  /// Scrolls logs down by a full page.
+  fn scroll_logs_full_page_down(&mut self) {
+    self.scroll_logs_down(self.log_view_height);
   }
 
   /// Scrolls logs up by half of the currently visible log pane.
