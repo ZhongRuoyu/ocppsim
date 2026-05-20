@@ -11,36 +11,32 @@ configuration state, then emits protocol-shaped OCPP messages from that state.
 
 ## Installation
 
-### Cargo
+- Cargo
 
-`ocppsim` is available on [crates.io](https://crates.io/crates/ocppsim) and can
-be installed with Cargo:
+  ```sh
+  cargo install ocppsim
+  ```
 
-```sh
-cargo install ocppsim
-```
+- Homebrew
 
-### Homebrew
+  ```sh
+  brew install zhongruoyu/tap/ocppsim
+  ```
 
-On macOS and Linux, `ocppsim` can be installed with Homebrew:
+- Prebuilt binaries
 
-```sh
-brew install zhongruoyu/tap/ocppsim
-```
+  Download prebuilt binaries for Linux, macOS, and Windows from `ocppsim`'s
+  [latest release](https://github.com/ZhongRuoyu/ocppsim/releases/latest) on
+  GitHub.
 
-### Prebuilt binaries
+- Docker
 
-Download prebuilt binaries for Linux, macOS, and Windows from `ocppsim`'s
-[latest GitHub release](https://github.com/ZhongRuoyu/ocppsim/releases/latest).
-
-### Docker
-
-Docker images for `ocppsim` are also available on Docker Hub as
-[`zhongruoyu/ocppsim`](https://hub.docker.com/r/zhongruoyu/ocppsim),
-and on GitHub Container Registry as
-[`ghcr.io/zhongruoyu/ocppsim`](https://ghcr.io/zhongruoyu/ocppsim).
-Use the `latest` tag or a specific version tag like `v0.1.0` to track stable
-releases, and `main` to track the latest commit on the main branch.
+  Docker images for `ocppsim` are also available on Docker Hub as
+  [`zhongruoyu/ocppsim`](https://hub.docker.com/r/zhongruoyu/ocppsim),
+  and on GitHub Container Registry as
+  [`ghcr.io/zhongruoyu/ocppsim`](https://ghcr.io/zhongruoyu/ocppsim).
+  Use the `latest` tag or a specific version tag like `v0.1.0` to track stable
+  releases, and `main` to track the latest commit on the main branch.
 
 ## Quick Start
 
