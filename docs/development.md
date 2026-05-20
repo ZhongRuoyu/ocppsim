@@ -72,6 +72,11 @@ For CamelCase identifiers, write the version suffix as `V1_6`, `V2_0_1`,
 Rust type names may use underscores in these version suffixes; add a local
 `#[allow(non_camel_case_types)]` only where that spelling is necessary.
 
+The version suffix should be separated by underscores on both sides to avoid
+ambiguity.
+For example, `IncomingAction_V2_X`, `v1_6_simulator`, or
+`ListVersion_V2_X_Response`.
+
 Use `OCPP` in identifiers only when it adds needed context.
 Global constants should keep the prefix, for example
 `OCPP_V2_1_UNSUPPORTED_ACTIONS`.
