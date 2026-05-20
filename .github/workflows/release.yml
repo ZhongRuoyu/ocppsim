@@ -74,7 +74,7 @@ jobs:
       - name: Create release
         run: |
           gh release create "v$VERSION" \
-            --draft \
+            --latest \
             --title "$VERSION" \
             --generate-notes \
             artifacts/**/*.tar.gz
