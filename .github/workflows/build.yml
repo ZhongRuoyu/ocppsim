@@ -117,7 +117,6 @@ jobs:
             ~/.cargo/git/db
           key: build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
             build-cargo-${{ matrix.target }}-
       - name: Cache build artifacts
         if: inputs.cache
@@ -127,9 +126,7 @@ jobs:
             target
           key: build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
             build-target-${{ matrix.target }}-${{ env.PROFILE }}-
-            build-target-${{ matrix.target }}-
       - name: Prepare container
         if: fromJson(steps.setup-build.outputs.container)
         id: container
