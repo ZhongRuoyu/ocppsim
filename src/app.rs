@@ -498,7 +498,7 @@ impl TerminalApp {
     }
 
     let Some((base, candidates)) =
-      completion_seed(&self.input, &self.known_connectors)
+      completion_seed(&self.input, self.protocol, &self.known_connectors)
     else {
       return;
     };

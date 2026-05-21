@@ -7,7 +7,8 @@ use tokio::task::JoinHandle;
 
 use crate::args::ResolvedCliArgs;
 use crate::ocpp::{
-  ConfigurationKey, OcppVersion, StopReason, TransactionTriggerReason,
+  ConfigurationKey, ConnectorStatus as OcppConnectorStatus, OcppVersion,
+  StopReason, TransactionTriggerReason,
 };
 
 #[derive(Debug, Clone)]
@@ -179,35 +180,35 @@ impl ConnectorStatus {
     }
   }
 
-  /// Maps connector status to the OCPP 1.6 `StatusNotification.status` value.
-  pub(in crate::simulator) fn as_v1_6(self) -> &'static str {
+  /// Maps connector status to an OCPP 1.6 `StatusNotification.status` value.
+  pub(in crate::simulator) fn as_v1_6(self) -> OcppConnectorStatus {
     match self {
-      Self::Available => "Available",
-      Self::Preparing => "Preparing",
-      Self::Charging => "Charging",
-      Self::SuspendedEvse => "SuspendedEVSE",
-      Self::SuspendedEv => "SuspendedEV",
-      Self::Finishing => "Finishing",
-      Self::Reserved => "Reserved",
-      Self::Unavailable => "Unavailable",
-      Self::Faulted => "Faulted",
-      Self::Occupied => "Charging",
+      Self::Available => OcppConnectorStatus::Available,
+      Self::Preparing => OcppConnectorStatus::Preparing,
+      Self::Charging => OcppConnectorStatus::Charging,
+      Self::SuspendedEvse => OcppConnectorStatus::SuspendedEvse,
+      Self::SuspendedEv => OcppConnectorStatus::SuspendedEv,
+      Self::Finishing => OcppConnectorStatus::Finishing,
+      Self::Reserved => OcppConnectorStatus::Reserved,
+      Self::Unavailable => OcppConnectorStatus::Unavailable,
+      Self::Faulted => OcppConnectorStatus::Faulted,
+      Self::Occupied => OcppConnectorStatus::Charging,
     }
   }
 
-  /// Maps connector status to the OCPP 2.x connector status value.
-  pub(in crate::simulator) fn as_v2_x(self) -> &'static str {
+  /// Maps connector status to an OCPP 2.x connector status value.
+  pub(in crate::simulator) fn as_v2_x(self) -> OcppConnectorStatus {
     match self {
-      Self::Available => "Available",
-      Self::Reserved => "Reserved",
-      Self::Unavailable => "Unavailable",
-      Self::Faulted => "Faulted",
-      Self::Occupied => "Occupied",
-      Self::Preparing => "Occupied",
-      Self::Charging => "Occupied",
-      Self::SuspendedEvse => "Occupied",
-      Self::SuspendedEv => "Occupied",
-      Self::Finishing => "Occupied",
+      Self::Available => OcppConnectorStatus::Available,
+      Self::Reserved => OcppConnectorStatus::Reserved,
+      Self::Unavailable => OcppConnectorStatus::Unavailable,
+      Self::Faulted => OcppConnectorStatus::Faulted,
+      Self::Occupied => OcppConnectorStatus::Occupied,
+      Self::Preparing => OcppConnectorStatus::Occupied,
+      Self::Charging => OcppConnectorStatus::Occupied,
+      Self::SuspendedEvse => OcppConnectorStatus::Occupied,
+      Self::SuspendedEv => OcppConnectorStatus::Occupied,
+      Self::Finishing => OcppConnectorStatus::Occupied,
     }
   }
 

@@ -402,7 +402,10 @@ impl Simulator {
     to_value(&StatusNotificationV1_6Request {
       connector_id: connector,
       error_code: StatusNotificationErrorCode::NoError.as_str(),
-      status: status.as_v1_6(),
+      status: status
+        .as_v1_6()
+        .as_v1_6()
+        .expect("simulator status maps to OCPP 1.6 status"),
       timestamp: &timestamp,
     })
   }
@@ -415,7 +418,10 @@ impl Simulator {
     let timestamp = now_timestamp();
     to_value(&StatusNotification_V2_X_Request {
       timestamp: &timestamp,
-      connector_status: status.as_v2_x(),
+      connector_status: status
+        .as_v2_x()
+        .as_v2_x()
+        .expect("simulator status maps to OCPP 2.x status"),
       evse_id: connector,
       connector_id: 1,
     })
@@ -429,7 +435,10 @@ impl Simulator {
     let timestamp = now_timestamp();
     to_value(&StatusNotification_V2_X_Request {
       timestamp: &timestamp,
-      connector_status: status.as_v2_x(),
+      connector_status: status
+        .as_v2_x()
+        .as_v2_x()
+        .expect("simulator status maps to OCPP 2.x status"),
       evse_id: connector,
       connector_id: 1,
     })

@@ -120,7 +120,9 @@ rendering path harder to scan.
 ## Connector State Notes
 
 The simulator uses one protocol-neutral connector state and maps it to the
-active protocol when payloads are built.
+active protocol's OCPP status values when payloads are built.
+Local transitional states remain available to drive simulator behavior
+before being mapped to wire values.
 
 | Local state     | OCPP 1.6 status | OCPP 2.x status | Notes                                     |
 | --------------- | --------------- | --------------- | ----------------------------------------- |

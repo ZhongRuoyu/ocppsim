@@ -102,7 +102,7 @@ After startup, type commands into the terminal UI.
 - `authorize <idToken>`: send `Authorize`.
 - `data-transfer <vendorId> [messageId] [data...]`: send `DataTransfer`.
 - `start <connector> <idToken>`: start a local transaction.
-- `stop <connector> [reason...]`: stop a local transaction.
+- `stop <connector> [reason]`: stop a local transaction.
 - `connector-status <connector> <status>`: set local connector status.
 - `meter <connector> <wh>`: set the local meter counter.
 - `send-meter <connector>`: send current meter data.

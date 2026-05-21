@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use crate::ocpp::{
   OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppVersion,
 };
@@ -10,7 +12,7 @@ const USAGE_AUTHORIZE: &str = "Usage: authorize <idToken>";
 const USAGE_DATA_TRANSFER: &str =
   "Usage: data-transfer <vendorId> [messageId] [data...]";
 const USAGE_START: &str = "Usage: start <connector> <idToken>";
-const USAGE_STOP: &str = "Usage: stop <connector> [reason...]";
+const USAGE_STOP: &str = "Usage: stop <connector> [reason]";
 const USAGE_CONNECTOR_STATUS: &str =
   "Usage: connector-status <connector> <status>";
 const USAGE_METER: &str = "Usage: meter <connector> <wh>";
@@ -103,7 +105,7 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
       })
     }
     "data-transfer" => {
-      ensure_min(&parts, 2, USAGE_DATA_TRANSFER)?;
+      ensure_range(&parts, 2.., USAGE_DATA_TRANSFER)?;
       let vendor_id = parse_required(parts.get(1), USAGE_DATA_TRANSFER)?;
       let message_id = parts.get(2).map(|value| (*value).to_string());
       let data = if parts.len() > 3 {
@@ -127,10 +129,10 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
       })
     }
     "stop" => {
-      ensure_min(&parts, 2, USAGE_STOP)?;
+      ensure_range(&parts, 2..=3, USAGE_STOP)?;
       let connector = parse_u16(parts.get(1), USAGE_STOP)?;
       let reason = if parts.len() > 2 {
-        Some(parts[2..].join(" "))
+        Some(parts[2].to_string())
       } else {
         None
       };
@@ -215,13 +217,14 @@ pub fn help_text() -> &'static str {
     Send DataTransfer with optional messageId and text data.
   start <connector> <idToken>
     Start a transaction on connector (connector must be > 0).
-  stop <connector> [reason...]
+  stop <connector> [reason]
     Stop active transaction on connector.
-    Optional reason text is mapped to OCPP stop reason values.
+    Optional reason text is mapped to a valid reason for the active protocol.
   connector-status <connector> <status>
     Set local connector status and notify CSMS when connected.
-    Valid statuses: Available, Preparing, Charging, SuspendedEVSE, SuspendedEV,
-    Finishing, Reserved, Unavailable, Faulted, Occupied.
+    Valid statuses: Available, Preparing, Charging, SuspendedEVSE,
+    SuspendedEV, Finishing, Reserved, Unavailable, Faulted, Occupied.
+    Status is mapped to a valid status for the active protocol before sending.
   meter <connector> <wh>
     Set local meter counter (Wh) for connector.
   send-meter <connector>
@@ -314,9 +317,13 @@ fn ensure_exact(
   Ok(())
 }
 
-/// Validates that the command has at least `min` arguments.
-fn ensure_min(parts: &[&str], min: usize, usage: &str) -> Result<(), String> {
-  if parts.len() < min {
+/// Validates that the command's argument count is within the specified range.
+fn ensure_range(
+  parts: &[&str],
+  range: impl RangeBounds<usize>,
+  usage: &str,
+) -> Result<(), String> {
+  if !range.contains(&parts.len()) {
     return Err(usage.to_string());
   }
   Ok(())
@@ -341,13 +348,25 @@ mod tests {
   }
 
   #[test]
-  /// Verifies `stop` accepts a multi-word trailing reason.
-  fn accepts_stop_with_reason_phrase() {
-    let command = parse_command("stop 1 power loss").expect("valid command");
+  /// Verifies `stop` accepts an optional trailing reason.
+  fn accepts_stop_with_optional_reason() {
+    let error = parse_command("stop 1 power loss");
+    assert!(error.is_err());
+
+    let command = parse_command("stop 1 powerloss").expect("valid command");
     match command {
       UserCommand::Stop { connector, reason } => {
         assert_eq!(connector, 1);
-        assert_eq!(reason.as_deref(), Some("power loss"));
+        assert_eq!(reason.as_deref(), Some("powerloss"));
+      }
+      _ => panic!("unexpected command variant"),
+    }
+
+    let command = parse_command("stop 2").expect("valid command");
+    match command {
+      UserCommand::Stop { connector, reason } => {
+        assert_eq!(connector, 2);
+        assert!(reason.is_none());
       }
       _ => panic!("unexpected command variant"),
     }

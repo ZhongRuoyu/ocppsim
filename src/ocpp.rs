@@ -496,6 +496,78 @@ impl ConfigurationKey {
 }
 
 wire_enum! {
+  /// Connector status values carried by OCPP `StatusNotification` messages.
+  pub enum ConnectorStatus {
+    Available => "Available",
+    Preparing => "Preparing",
+    Charging => "Charging",
+    SuspendedEvse => "SuspendedEVSE",
+    SuspendedEv => "SuspendedEV",
+    Finishing => "Finishing",
+    Reserved => "Reserved",
+    Unavailable => "Unavailable",
+    Faulted => "Faulted",
+    Occupied => "Occupied",
+  }
+}
+
+impl ConnectorStatus {
+  /// OCPP 1.6 `StatusNotification.status` values.
+  pub const V1_6: &'static [Self] = &[
+    Self::Available,
+    Self::Preparing,
+    Self::Charging,
+    Self::SuspendedEvse,
+    Self::SuspendedEv,
+    Self::Finishing,
+    Self::Reserved,
+    Self::Unavailable,
+    Self::Faulted,
+  ];
+
+  /// OCPP 2.0.1 and 2.1 `StatusNotification.connectorStatus` values.
+  pub const V2_X: &'static [Self] = &[
+    Self::Available,
+    Self::Occupied,
+    Self::Reserved,
+    Self::Unavailable,
+    Self::Faulted,
+  ];
+
+  /// Returns this value when it is valid for OCPP 1.6 status payloads.
+  pub fn as_v1_6(self) -> Option<&'static str> {
+    match self {
+      Self::Available
+      | Self::Preparing
+      | Self::Charging
+      | Self::SuspendedEvse
+      | Self::SuspendedEv
+      | Self::Finishing
+      | Self::Reserved
+      | Self::Unavailable
+      | Self::Faulted => Some(self.as_str()),
+      Self::Occupied => None,
+    }
+  }
+
+  /// Returns this value when it is valid for OCPP 2.x status payloads.
+  pub fn as_v2_x(self) -> Option<&'static str> {
+    match self {
+      Self::Available
+      | Self::Occupied
+      | Self::Reserved
+      | Self::Unavailable
+      | Self::Faulted => Some(self.as_str()),
+      Self::Preparing
+      | Self::Charging
+      | Self::SuspendedEvse
+      | Self::SuspendedEv
+      | Self::Finishing => None,
+    }
+  }
+}
+
+wire_enum! {
   pub enum BootReason {
     ApplicationReset => "ApplicationReset",
     FirmwareUpdate => "FirmwareUpdate",
@@ -551,6 +623,68 @@ wire_enum! {
 }
 
 impl StopReason {
+  /// OCPP 1.6 `StopTransaction.reason` values.
+  pub const V1_6: &'static [Self] = &[
+    Self::EmergencyStop,
+    Self::EvDisconnected,
+    Self::HardReset,
+    Self::Local,
+    Self::Other,
+    Self::PowerLoss,
+    Self::Reboot,
+    Self::Remote,
+    Self::SoftReset,
+    Self::UnlockCommand,
+    Self::DeAuthorized,
+  ];
+
+  /// OCPP 2.0.1 `TransactionEvent.stoppedReason` values.
+  pub const V2_0_1: &'static [Self] = &[
+    Self::DeAuthorized,
+    Self::EmergencyStop,
+    Self::EnergyLimitReached,
+    Self::EvDisconnected,
+    Self::GroundFault,
+    Self::ImmediateReset,
+    Self::Local,
+    Self::LocalOutOfCredit,
+    Self::MasterPass,
+    Self::Other,
+    Self::OvercurrentFault,
+    Self::PowerLoss,
+    Self::PowerQuality,
+    Self::Reboot,
+    Self::Remote,
+    Self::SocLimitReached,
+    Self::StoppedByEv,
+    Self::TimeLimitReached,
+    Self::Timeout,
+  ];
+
+  /// OCPP 2.1 `TransactionEvent.stoppedReason` values.
+  pub const V2_1: &'static [Self] = &[
+    Self::DeAuthorized,
+    Self::EmergencyStop,
+    Self::EnergyLimitReached,
+    Self::EvDisconnected,
+    Self::GroundFault,
+    Self::ImmediateReset,
+    Self::MasterPass,
+    Self::Local,
+    Self::LocalOutOfCredit,
+    Self::Other,
+    Self::OvercurrentFault,
+    Self::PowerLoss,
+    Self::PowerQuality,
+    Self::Reboot,
+    Self::Remote,
+    Self::SocLimitReached,
+    Self::StoppedByEv,
+    Self::TimeLimitReached,
+    Self::Timeout,
+    Self::ReqEnergyTransferRejected,
+  ];
+
   pub fn as_v1_6(self) -> Option<&'static str> {
     match self {
       Self::DeAuthorized
@@ -1597,14 +1731,14 @@ mod tests {
   use crate::embedded_schemas::EmbeddedSchemaType;
 
   use super::{
-    BootReason, ChargingRateUnit, IdTokenType, IncomingAction_V1_6, Measurand,
-    MeterUnit, MeterValueLocation, MeterValuePhase,
-    OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS, OCPP_V1_6_SUPPORTED_ACTIONS,
-    OCPP_V2_0_1_UNSUPPORTED_ACTIONS, OCPP_V2_1_UNSUPPORTED_ACTIONS,
-    OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppFrame, OcppVersion, ReadingContext,
-    ResponseStatus, SampledValueFormat, StatusNotificationErrorCode,
-    StopReason, TransactionTriggerReason, VariableAttributeType, build_call,
-    parse_frame,
+    BootReason, ChargingRateUnit, ConnectorStatus, IdTokenType,
+    IncomingAction_V1_6, Measurand, MeterUnit, MeterValueLocation,
+    MeterValuePhase, OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS,
+    OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_0_1_UNSUPPORTED_ACTIONS,
+    OCPP_V2_1_UNSUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
+    OcppFrame, OcppVersion, ReadingContext, ResponseStatus, SampledValueFormat,
+    StatusNotificationErrorCode, StopReason, TransactionTriggerReason,
+    VariableAttributeType, build_call, parse_frame,
   };
 
   #[test]
@@ -1690,6 +1824,29 @@ mod tests {
     ));
 
     assert_wire_enum_tokens(reasons, StopReason::parse, StopReason::as_str);
+  }
+
+  #[test]
+  /// Verifies all schema connector status tokens are typed.
+  fn connector_status_covers_status_notification_schema_enums() {
+    let mut statuses = enum_tokens_at_path(
+      "schemas/1.6/StatusNotification.json",
+      &["properties", "status", "enum"],
+    );
+    statuses.extend(definition_enum_tokens(
+      "schemas/2.0.1/StatusNotificationRequest.json",
+      "ConnectorStatusEnumType",
+    ));
+    statuses.extend(definition_enum_tokens(
+      "schemas/2.1/StatusNotificationRequest.json",
+      "ConnectorStatusEnumType",
+    ));
+
+    assert_wire_enum_tokens(
+      statuses,
+      ConnectorStatus::parse,
+      ConnectorStatus::as_str,
+    );
   }
 
   #[test]

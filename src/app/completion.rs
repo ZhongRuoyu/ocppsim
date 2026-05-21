@@ -1,13 +1,11 @@
-use crate::ocpp::StopReason;
+use crate::ocpp::{
+  ConnectorStatus as OcppConnectorStatus, OcppVersion, StopReason,
+};
 
 const COMMAND_WORDS: &[&str] = &[
-  "help",
-  "standards",
-  "clear",
-  "exit",
+  "status",
   "connect",
   "disconnect",
-  "status",
   "boot",
   "authorize",
   "data-transfer",
@@ -17,29 +15,16 @@ const COMMAND_WORDS: &[&str] = &[
   "send-meter",
   "heartbeat",
   "connector-status",
+  "clear",
+  "standards",
+  "help",
+  "exit",
 ];
-const STATUS_WORDS: &[&str] = &[
-  "Available",
-  "Preparing",
-  "Charging",
-  "SuspendedEVSE",
-  "SuspendedEV",
-  "Finishing",
-  "Reserved",
-  "Unavailable",
-  "Faulted",
-  "Occupied",
-];
-const ID_TOKEN_HINTS: &[&str] = &["TAG001", "TAG002", "REMOTE"];
-const STOP_REASON_HINTS: &[&str] = &[
-  StopReason::Local.as_str(),
-  StopReason::Remote.as_str(),
-  StopReason::EmergencyStop.as_str(),
-  StopReason::PowerLoss.as_str(),
-  StopReason::Other.as_str(),
-];
-const METER_HINTS: &[&str] = &["0", "1000", "10000"];
-const HEARTBEAT_HINTS: &[&str] = &["15", "30", "60"];
+const STATUS_WORDS_V1_6: &[OcppConnectorStatus] = OcppConnectorStatus::V1_6;
+const STATUS_WORDS_V2_X: &[OcppConnectorStatus] = OcppConnectorStatus::V2_X;
+const STOP_REASON_HINTS_V1_6: &[StopReason] = StopReason::V1_6;
+const STOP_REASON_HINTS_V2_0_1: &[StopReason] = StopReason::V2_0_1;
+const STOP_REASON_HINTS_V2_1: &[StopReason] = StopReason::V2_1;
 
 #[derive(Debug, Clone)]
 pub(super) struct CompletionState {
@@ -74,6 +59,7 @@ impl CompletionState {
 
 pub(super) fn completion_seed(
   input: &str,
+  protocol: OcppVersion,
   known_connectors: &[u16],
 ) -> Option<(String, Vec<String>)> {
   let ends_with_space = input.ends_with(char::is_whitespace);
@@ -90,39 +76,47 @@ pub(super) fn completion_seed(
   let command = parts[0].to_ascii_lowercase();
 
   match command.as_str() {
-    "authorize" => {
-      seed_for_position(&parts, ends_with_space, 1, ID_TOKEN_HINTS)
-    }
     "start" => {
-      seed_for_connectors(&parts, ends_with_space, 1, known_connectors).or_else(
-        || seed_for_position(&parts, ends_with_space, 2, ID_TOKEN_HINTS),
-      )
+      seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
     "stop" => seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-      .or_else(|| {
-        seed_for_position(&parts, ends_with_space, 2, STOP_REASON_HINTS)
+      .or_else(|| match protocol {
+        OcppVersion::V1_6 => seed_for_stop_reasons(
+          &parts,
+          ends_with_space,
+          2,
+          STOP_REASON_HINTS_V1_6,
+        ),
+        OcppVersion::V2_0_1 => seed_for_stop_reasons(
+          &parts,
+          ends_with_space,
+          2,
+          STOP_REASON_HINTS_V2_0_1,
+        ),
+        OcppVersion::V2_1 => seed_for_stop_reasons(
+          &parts,
+          ends_with_space,
+          2,
+          STOP_REASON_HINTS_V2_1,
+        ),
       }),
     "meter" => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-        .or_else(|| seed_for_position(&parts, ends_with_space, 2, METER_HINTS))
     }
     "send-meter" => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
-    "connector-status" => {
-      seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-        .or_else(|| seed_for_position(&parts, ends_with_space, 2, STATUS_WORDS))
-    }
     "heartbeat" => {
-      seed_for_position(&parts, ends_with_space, 1, &["start", "stop"]).or_else(
-        || {
-          if parts
-            .get(1)
-            .is_some_and(|value| value.eq_ignore_ascii_case("start"))
-          {
-            seed_for_position(&parts, ends_with_space, 2, HEARTBEAT_HINTS)
-          } else {
-            None
+      seed_for_position(&parts, ends_with_space, 1, &["start", "stop"])
+    }
+    "connector-status" => {
+      seed_for_connectors(&parts, ends_with_space, 1, known_connectors).or_else(
+        || match protocol {
+          OcppVersion::V1_6 => {
+            seed_for_statuses(&parts, ends_with_space, 2, STATUS_WORDS_V1_6)
+          }
+          OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
+            seed_for_statuses(&parts, ends_with_space, 2, STATUS_WORDS_V2_X)
           }
         },
       )
@@ -161,6 +155,34 @@ fn seed_for_position(
 ) -> Option<(String, Vec<String>)> {
   let owned: Vec<String> =
     words.iter().map(|value| value.to_string()).collect();
+  seed_for_position_owned(parts, ends_with_space, arg_index, owned)
+}
+
+/// Produces completion candidates from OCPP connector status values.
+fn seed_for_statuses(
+  parts: &[&str],
+  ends_with_space: bool,
+  arg_index: usize,
+  statuses: &[OcppConnectorStatus],
+) -> Option<(String, Vec<String>)> {
+  let owned = statuses
+    .iter()
+    .map(|status| status.as_str().to_string())
+    .collect();
+  seed_for_position_owned(parts, ends_with_space, arg_index, owned)
+}
+
+/// Produces completion candidates from OCPP stop reason values.
+fn seed_for_stop_reasons(
+  parts: &[&str],
+  ends_with_space: bool,
+  arg_index: usize,
+  reasons: &[StopReason],
+) -> Option<(String, Vec<String>)> {
+  let owned = reasons
+    .iter()
+    .map(|reason| reason.as_str().to_string())
+    .collect();
   seed_for_position_owned(parts, ends_with_space, arg_index, owned)
 }
 
@@ -242,4 +264,45 @@ fn completion_base(parts: &[&str], ends_with_space: bool) -> String {
   }
 
   format!("{} ", parts[..parts.len() - 1].join(" "))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  /// Verifies status completions only suggest values valid for the protocol.
+  fn status_completion_is_protocol_specific() {
+    let v1_6_words = completion_words("connector-status 1 ", OcppVersion::V1_6);
+    assert!(v1_6_words.contains(&"Charging".to_string()));
+    assert!(!v1_6_words.contains(&"Occupied".to_string()));
+
+    let v2_1_words = completion_words("connector-status 1 ", OcppVersion::V2_1);
+    assert!(v2_1_words.contains(&"Occupied".to_string()));
+    assert!(!v2_1_words.contains(&"Charging".to_string()));
+  }
+
+  #[test]
+  /// Verifies stop reason completions track per-version schema values.
+  fn stop_reason_completion_is_protocol_specific() {
+    let v1_6_words = completion_words("stop 1 ", OcppVersion::V1_6);
+    assert!(v1_6_words.contains(&"UnlockCommand".to_string()));
+    assert!(!v1_6_words.contains(&"Timeout".to_string()));
+
+    let v2_0_1_words = completion_words("stop 1 ", OcppVersion::V2_0_1);
+    assert!(v2_0_1_words.contains(&"Timeout".to_string()));
+    assert!(!v2_0_1_words.contains(&"ReqEnergyTransferRejected".to_string(),));
+
+    let v2_1_words = completion_words("stop 1 ", OcppVersion::V2_1);
+    assert!(v2_1_words.contains(&"ReqEnergyTransferRejected".to_string(),));
+  }
+
+  fn completion_words(input: &str, protocol: OcppVersion) -> Vec<String> {
+    let (_, candidates) =
+      completion_seed(input, protocol, &[1]).expect("completion candidates");
+    candidates
+      .into_iter()
+      .map(|candidate| candidate.trim_end().to_string())
+      .collect()
+  }
 }
