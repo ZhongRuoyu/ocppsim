@@ -98,15 +98,9 @@ jobs:
       - name: Set up Rust
         if: ${{ !fromJson(steps.setup-build.outputs.skip_setup_rust) }}
         run: |
-          # Workaround for https://github.com/rust-lang/rustup/issues/4755
-          default_host=(--default-host "$TARGET")
-          if [[ "$RUNNER_OS" = "Windows" ]]; then
-            default_host=()
-          fi
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
             sh -s -- -y --no-modify-path \
               --default-toolchain stable \
-              "${default_host[@]}" \
               --target "$TARGET"
       - name: Cache Cargo registry
         if: inputs.cache
