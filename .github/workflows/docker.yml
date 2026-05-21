@@ -67,12 +67,13 @@ jobs:
           cache_from=""
           cache_to=""
           outputs=()
+          if [[ ("$GITHUB_EVENT_NAME" = "push" && "$GITHUB_REF_TYPE" = "branch") ||
+                "$GITHUB_EVENT_NAME" = "pull_request" ]]; then
+            cache_from="type=registry,ref=$BUILD_CACHE_REPOSITORY:$ARCH"
+          fi
           if [[ "$GITHUB_EVENT_NAME" = "push" ]]; then
-            if [[ "$GITHUB_REF_TYPE" = "branch" ]]; then
-              cache_from="type=registry,ref=$BUILD_CACHE_REPOSITORY:$ARCH"
-              if [[ "$GITHUB_REF" = "refs/heads/main" ]]; then
-                cache_to="type=registry,ref=$BUILD_CACHE_REPOSITORY:$ARCH,mode=max"
-              fi
+            if [[ "$GITHUB_REF_TYPE" = "branch" && "$GITHUB_REF" = "refs/heads/main" ]]; then
+              cache_to="type=registry,ref=$BUILD_CACHE_REPOSITORY:$ARCH,mode=max"
             fi
             if [[ "$GITHUB_REF" = "refs/heads/main" || "$GITHUB_REF_TYPE" = "tag" ]]; then
               outputs+=(
