@@ -26,7 +26,29 @@ env:
   BUILD_CACHE_REPOSITORY: ghcr.io/zhongruoyu/ocppsim/cache
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.metadata.outputs.tags }}
+      labels: ${{ steps.metadata.outputs.labels }}
+    steps:
+      - name: Determine metadata
+        id: metadata
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: |
+            ${{ env.DOCKERHUB_REPOSITORY }}
+            ${{ env.GHCR_REPOSITORY }}
+          flavor: |
+            latest=${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha,enable=${{ github.event_name == 'push' && github.ref_type == 'branch' }},prefix=,format=long
+
   build:
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +166,7 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
+          labels: ${{ needs.metadata.outputs.labels }}
           build-args: |
             RUST_VERSION=${{ steps.setup.outputs.rust_version }}
           cache-from: ${{ steps.setup.outputs.cache_from }}
@@ -164,7 +187,7 @@ jobs:
 
   merge:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
-    needs: build
+    needs: [metadata, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -191,25 +214,7 @@ jobs:
           merge-multiple: true
       - name: Create manifest list and push
         run: |
-          tags=()
-          case "$GITHUB_REF_TYPE" in
-          "branch")
-            tags+=(
-              "$DOCKERHUB_REPOSITORY:main"
-              "$DOCKERHUB_REPOSITORY:$GITHUB_SHA"
-              "$GHCR_REPOSITORY:main"
-              "$GHCR_REPOSITORY:$GITHUB_SHA"
-            )
-            ;;
-          "tag")
-            tags+=(
-              "$DOCKERHUB_REPOSITORY:latest"
-              "$DOCKERHUB_REPOSITORY:$GITHUB_REF_NAME"
-              "$GHCR_REPOSITORY:latest"
-              "$GHCR_REPOSITORY:$GITHUB_REF_NAME"
-            )
-            ;;
-          esac
+          mapfile -t tags <<< "$TAGS"
           tag_args=()
           for tag in "${tags[@]}"; do
             tag_args+=(--tag="$tag")
@@ -219,3 +224,5 @@ jobs:
             "$GHCR_REPOSITORY@sha256:$(cat "$RUNNER_TEMP"/digests/aarch64)"
           )
           docker buildx imagetools create "${tag_args[@]}" "${images[@]}"
+        env:
+          TAGS: ${{ needs.metadata.outputs.tags }}
