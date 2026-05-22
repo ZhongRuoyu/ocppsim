@@ -107,7 +107,8 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
-            ~/.cargo/registry
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git/db
           key: build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
@@ -151,9 +152,10 @@ jobs:
               --mount "type=bind,source=$HOME/.cargo,target=/cargo"
             )
           else
-            mkdir -p ~/.cargo/registry ~/.cargo/git/db
+            mkdir -p ~/.cargo/registry/index ~/.cargo/registry/cache ~/.cargo/git/db
             docker_run_args=(
-              --mount "type=bind,source=$HOME/.cargo/registry,target=/usr/local/cargo/registry"
+              --mount "type=bind,source=$HOME/.cargo/registry/index,target=/usr/local/cargo/registry/index"
+              --mount "type=bind,source=$HOME/.cargo/registry/cache,target=/usr/local/cargo/registry/cache"
               --mount "type=bind,source=$HOME/.cargo/git/db,target=/usr/local/cargo/git/db"
             )
           fi
@@ -170,6 +172,7 @@ jobs:
             echo "PATH=/rustc-sysroot/bin:$(docker exec build sh -c 'echo $PATH')" > docker.env
             echo "CARGO=docker exec --env-file docker.env build cargo" >> "$GITHUB_ENV"
           else
+            docker exec --user root build chown -R "$(id -u):$(id -g)" /usr/local/cargo
             echo "CARGO=docker exec build cargo" >> "$GITHUB_ENV"
           fi
         env:
