@@ -53,6 +53,7 @@ jobs:
           key: tests-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             tests-cargo-
+          lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Cache build artifacts
         if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -62,6 +63,7 @@ jobs:
           key: tests-target-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             tests-target-
+          lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Run format check
         run: cargo fmt --all --check
       - name: Run build
