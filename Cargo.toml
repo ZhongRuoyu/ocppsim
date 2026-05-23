@@ -7,6 +7,8 @@ description = "A terminal OCPP-J charge point simulator."
 readme = "README.md"
 homepage = "https://github.com/ZhongRuoyu/ocppsim"
 repository = "https://github.com/ZhongRuoyu/ocppsim.git"
+keywords = ["ocpp", "ev-charging", "simulator", "ocpp-simulator"]
+categories = ["command-line-utilities", "simulation"]
 license = "MIT"
 
 [dependencies]
