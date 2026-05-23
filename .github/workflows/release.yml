@@ -26,6 +26,9 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    environment:
+      name: release
+      deployment: false
     permissions:
       artifact-metadata: write # for generating build provenance
       attestations: write # for generating build provenance
@@ -85,6 +88,9 @@ jobs:
   publish-crate:
     needs: release
     runs-on: ubuntu-latest
+    environment:
+      name: release
+      deployment: false
     permissions:
       contents: read
       id-token: write # for authenticating to crates.io
@@ -106,6 +112,9 @@ jobs:
   bump-homebrew-formula:
     needs: release
     runs-on: macos-latest
+    environment:
+      name: release
+      deployment: false
     steps:
       - name: Create bot token
         id: token
