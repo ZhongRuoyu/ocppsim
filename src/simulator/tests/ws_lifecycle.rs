@@ -13,9 +13,9 @@ use crate::ocpp::{OcppFrame, build_call_result, parse_frame};
 
 use super::*;
 
-// The tungstenite handshake callback trait requires this large error
-// type.
-#[allow(clippy::result_large_err)]
+// The tungstenite handshake callback trait requires this large error type
+// and result wrapping.
+#[allow(clippy::result_large_err, clippy::unnecessary_wraps)]
 fn accept_v1_6_subprotocol(
   _request: &Request,
   mut response: Response,
@@ -72,7 +72,7 @@ async fn capture_inbound_call_response_with_events(
     parse_frame(message.to_text().expect("text frame")).expect("parse response")
   });
 
-  let (client_stream, _) = connect_async(format!("ws://{}", address))
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
     .await
     .expect("connect client");
   let (mut write, _read) = client_stream.split();
@@ -161,7 +161,7 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
     assert_eq!(action, "BootNotification");
     let response = build_call_result(
       &message_id,
-      json!({
+      &json!({
         "status": "Accepted",
         "currentTime": now_timestamp(),
         "interval": 9
@@ -174,7 +174,7 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
   });
 
   let mut simulator = simulator_for_tests();
-  simulator.config.ws_url = format!("ws://{}", address);
+  simulator.config.ws_url = format!("ws://{address}");
   let mut connection = simulator.connect().await.expect("connect");
   simulator
     .try_send_next(&mut connection.write)
@@ -217,7 +217,7 @@ async fn malformed_remote_start_returns_call_error() {
     parse_frame(message.to_text().expect("text frame")).expect("parse response")
   });
 
-  let (client_stream, _) = connect_async(format!("ws://{}", address))
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
     .await
     .expect("connect client");
   let (mut write, _read) = client_stream.split();
@@ -510,7 +510,7 @@ async fn non_strict_mode_keeps_pragmatic_request_handling() {
 }
 
 #[tokio::test]
-async fn trigger_message_enqueues_requested_simulator_calls() {
+async fn trigger_message_v1_6_enqueues_requested_simulator_calls() {
   let (v1_6_frame, v1_6_simulator) = capture_inbound_call_response(
     OcppVersion::V1_6,
     "TriggerMessage",
@@ -527,8 +527,11 @@ async fn trigger_message_enqueues_requested_simulator_calls() {
       .iter()
       .any(|call| call.action == "Heartbeat")
   );
+}
 
-  let (v2_x_frame, v2_x_simulator) = capture_inbound_call_response(
+#[tokio::test]
+async fn trigger_message_v2_0_1_enqueues_requested_simulator_calls() {
+  let (v2_0_1_frame, v2_0_1_simulator) = capture_inbound_call_response(
     OcppVersion::V2_0_1,
     "TriggerMessage",
     json!({
@@ -537,11 +540,30 @@ async fn trigger_message_enqueues_requested_simulator_calls() {
     }),
   )
   .await;
-  let OcppFrame::CallResult { payload, .. } = v2_x_frame else {
+  let OcppFrame::CallResult { payload, .. } = v2_0_1_frame else {
     panic!("expected CALLRESULT frame");
   };
   assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
-  let status_payload = queued_payload(&v2_x_simulator, "StatusNotification");
+  let status_payload = queued_payload(&v2_0_1_simulator, "StatusNotification");
+  assert_eq!(status_payload["evseId"], json!(2));
+}
+
+#[tokio::test]
+async fn trigger_message_v2_1_enqueues_requested_simulator_calls() {
+  let (v2_1_frame, v2_1_simulator) = capture_inbound_call_response(
+    OcppVersion::V2_1,
+    "TriggerMessage",
+    json!({
+      "requestedMessage": "StatusNotification",
+      "evse": { "id": 2 }
+    }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = v2_1_frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  let status_payload = queued_payload(&v2_1_simulator, "StatusNotification");
   assert_eq!(status_payload["evseId"], json!(2));
 }
 
@@ -570,7 +592,7 @@ async fn mock_csms_remote_start_meter_and_stop_lifecycle() {
     frames
   });
 
-  let (client_stream, _) = connect_async(format!("ws://{}", address))
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
     .await
     .expect("connect client");
   let (mut write, _read) = client_stream.split();
@@ -652,7 +674,7 @@ async fn malformed_ws_text_returns_protocol_error() {
     parse_frame(message.to_text().expect("text frame")).expect("parse response")
   });
 
-  let (client_stream, _) = connect_async(format!("ws://{}", address))
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
     .await
     .expect("connect client");
   let (mut write, _read) = client_stream.split();

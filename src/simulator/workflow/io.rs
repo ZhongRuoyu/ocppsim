@@ -1,4 +1,9 @@
-use super::super::*;
+use super::super::{
+  ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
+  OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
+  SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel, Value, WsWrite,
+  build_call_error, build_call_result, json,
+};
 
 impl Simulator {
   /// Starts or restarts periodic heartbeat scheduling.
@@ -24,7 +29,7 @@ impl Simulator {
     self.heartbeat = Some(HeartbeatTask { seconds, handle });
     self.log(
       UiLogLevel::Info,
-      format!("Periodic heartbeat started: every {}s", seconds),
+      format!("Periodic heartbeat started: every {seconds}s"),
     );
     self.emit_snapshot();
   }
@@ -45,13 +50,13 @@ impl Simulator {
     message_id: &str,
     payload: Value,
   ) -> Result<()> {
-    let text = build_call_result(message_id, payload);
+    let text = build_call_result(message_id, &payload);
     self
       .send_text(
         write,
         text,
         UiLogLevel::Tx,
-        format!("CALLRESULT {}", message_id),
+        format!("CALLRESULT {message_id}"),
       )
       .await
   }
@@ -65,18 +70,18 @@ impl Simulator {
     description: &str,
     details: Value,
   ) -> Result<()> {
-    let text = build_call_error(message_id, code, description, details);
+    let text = build_call_error(message_id, code, description, &details);
     self
       .send_text(
         write,
         text,
         UiLogLevel::Tx,
-        format!("CALLERROR {} {}", message_id, code),
+        format!("CALLERROR {message_id} {code}"),
       )
       .await
   }
 
-  /// Sends a FormationViolation CALLERROR for invalid inbound payloads.
+  /// Sends a `FormationViolation` CALLERROR for invalid inbound payloads.
   pub(in crate::simulator) async fn send_formation_violation(
     &mut self,
     write: &mut WsWrite,
@@ -134,8 +139,7 @@ impl Simulator {
               "local={} remote={}",
               tx.local_id,
               tx.v1_6_transaction_id
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string())
+                .map_or_else(|| "-".to_string(), |value| value.to_string())
             ),
             OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
               format!("id={}", tx.transaction_uid)
@@ -151,8 +155,7 @@ impl Simulator {
 
     let connection_url = self
       .connection_url()
-      .map(|u| u.to_string())
-      .unwrap_or_else(|_| self.config.ws_url.clone());
+      .map_or_else(|_| self.config.ws_url.clone(), |u| u.to_string());
 
     let snapshot = SimulatorSnapshot {
       cp_id: self.config.cp_id.clone(),

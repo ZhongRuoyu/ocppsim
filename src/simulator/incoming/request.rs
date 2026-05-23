@@ -1,6 +1,10 @@
 #![allow(non_camel_case_types)]
 
-use super::super::*;
+use super::super::{
+  ConnectorStatus, Result, Value, anyhow, normalize_identifier,
+  optional_u16_field, required_i64_field, required_string_field,
+  required_u16_field, required_u64_field,
+};
 
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct RemoteStartTransactionRequestV1_6 {
@@ -328,7 +332,7 @@ fn required_nested_string_field<'a>(
     .and_then(|object| object.get(field))
     .and_then(Value::as_str)
     .filter(|value| !value.is_empty())
-    .ok_or_else(|| anyhow!("{}.{} is required.", object_field, field))
+    .ok_or_else(|| anyhow!("{object_field}.{field} is required."))
 }
 
 fn required_i64_any_field(payload: &Value, fields: &[&str]) -> Option<i64> {
@@ -347,15 +351,15 @@ fn optional_string_field(
   value
     .as_str()
     .map(|item| Some(item.to_string()))
-    .ok_or_else(|| anyhow!("{} must be a string.", field))
+    .ok_or_else(|| anyhow!("{field} must be a string."))
 }
 
 fn required_object_field(payload: &Value, field: &str) -> Result<Value> {
   let Some(value) = payload.get(field) else {
-    return Err(anyhow!("{} is required.", field));
+    return Err(anyhow!("{field} is required."));
   };
   if !value.is_object() {
-    return Err(anyhow!("{} must be an object.", field));
+    return Err(anyhow!("{field} must be an object."));
   }
   Ok(value.clone())
 }
@@ -370,19 +374,15 @@ fn optional_nested_u16_field(
   };
   let object = value
     .as_object()
-    .ok_or_else(|| anyhow!("{} must be an object.", object_field))?;
+    .ok_or_else(|| anyhow!("{object_field} must be an object."))?;
   let Some(value) = object.get(field) else {
     return Ok(None);
   };
   let raw = value.as_u64().ok_or_else(|| {
-    anyhow!("{}.{} must be an unsigned integer.", object_field, field)
+    anyhow!("{object_field}.{field} must be an unsigned integer.")
   })?;
   let parsed = u16::try_from(raw).map_err(|_| {
-    anyhow!(
-      "{}.{} is outside the supported connector range.",
-      object_field,
-      field
-    )
+    anyhow!("{object_field}.{field} is outside the supported connector range.")
   })?;
   Ok(Some(parsed))
 }

@@ -1,4 +1,7 @@
-use super::super::*;
+use super::super::{
+  Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
+  UiLogLevel, Value, WsWrite, anyhow, build_call_error, json, parse_frame,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IncomingRequestSchemaValidation {
@@ -18,18 +21,16 @@ impl Simulator {
         self.handle_ws_text(text.to_string(), write).await?;
       }
       Message::Close(close) => {
-        let reason = close
-          .as_ref()
-          .map(|item| item.reason.to_string())
-          .unwrap_or_else(|| "No reason".to_string());
+        let reason = close.as_ref().map_or_else(
+          || "No reason".to_string(),
+          |item| item.reason.to_string(),
+        );
         return Err(anyhow!("Connection closed by CSMS: {reason}"));
       }
       Message::Ping(payload) => {
         write.send(Message::Pong(payload)).await?;
       }
-      Message::Pong(_) => {}
-      Message::Binary(_) => {}
-      Message::Frame(_) => {}
+      Message::Pong(_) | Message::Binary(_) | Message::Frame(_) => {}
     }
     Ok(())
   }
@@ -45,50 +46,60 @@ impl Simulator {
     }
 
     match parse_frame(&text) {
-      Ok(OcppFrame::Call {
+      Ok(frame) => self.handle_parsed_ws_frame(frame, write).await?,
+      Err(error) => self.handle_malformed_ws_frame(write, error).await?,
+    }
+
+    Ok(())
+  }
+
+  async fn handle_parsed_ws_frame(
+    &mut self,
+    frame: OcppFrame,
+    write: &mut WsWrite,
+  ) -> Result<()> {
+    match frame {
+      OcppFrame::Call {
         message_id,
         action,
         payload,
-      }) => {
-        self.log(UiLogLevel::Rx, format!("CALL {} {}", message_id, action));
+      } => {
+        self.log(UiLogLevel::Rx, format!("CALL {message_id} {action}"));
         self
           .handle_incoming_call(write, &message_id, &action, payload)
           .await?;
       }
-      Ok(OcppFrame::CallResult {
+      OcppFrame::CallResult {
         message_id,
         payload,
-      }) => {
-        self.log(UiLogLevel::Rx, format!("CALLRESULT {}", message_id));
-        self.handle_call_result(&message_id, payload)?;
+      } => {
+        self.log(UiLogLevel::Rx, format!("CALLRESULT {message_id}"));
+        self.handle_call_result(&message_id, &payload)?;
       }
-      Ok(OcppFrame::CallError {
+      OcppFrame::CallError {
         message_id,
         code,
         description,
         details,
-      }) => {
+      } => {
         self.log(
           UiLogLevel::Rx,
-          format!("CALLERROR {} {} {}", message_id, code, description),
+          format!("CALLERROR {message_id} {code} {description}"),
         );
         if self.config.trace_frames {
           self.log(UiLogLevel::Rx, format!("CALLERROR details={details}"));
         }
         self.handle_call_error(&message_id, &code, &description)?;
       }
-      Ok(OcppFrame::CallResultError {
+      OcppFrame::CallResultError {
         message_id,
         code,
         description,
         details,
-      }) => {
+      } => {
         self.log(
           UiLogLevel::Warn,
-          format!(
-            "Received CALLRESULTERROR {} {} {}",
-            message_id, code, description
-          ),
+          format!("Received CALLRESULTERROR {message_id} {code} {description}"),
         );
         if self.config.trace_frames {
           self.log(
@@ -97,56 +108,57 @@ impl Simulator {
           );
         }
       }
-      Ok(OcppFrame::Send {
+      OcppFrame::Send {
         message_id,
         action,
         payload,
-      }) => {
+      } => {
         self.log(
           UiLogLevel::Warn,
-          format!(
-            "Received SEND {} {} (no response expected)",
-            message_id, action
-          ),
+          format!("Received SEND {message_id} {action} (no response expected)"),
         );
         if self.config.trace_frames {
           self.log(UiLogLevel::Rx, format!("SEND payload={payload}"));
         }
       }
-      Ok(OcppFrame::Unsupported {
+      OcppFrame::Unsupported {
         message_type,
         message_id,
-      }) => {
+      } => {
         let id = message_id.unwrap_or_else(|| "-1".to_string());
         self.log(
           UiLogLevel::Warn,
-          format!("Unsupported message type {}.", message_type),
+          format!("Unsupported message type {message_type}."),
         );
         let error = build_call_error(
           &id,
           OcppErrorCode::MessageTypeNotSupported.as_str(),
           "Unsupported OCPP message type",
-          json!({}),
+          &json!({}),
         );
         self
           .send_text(write, error, UiLogLevel::Tx, "CALLERROR".to_string())
           .await?;
       }
-      Err(error) => {
-        self.log(UiLogLevel::Warn, format!("Malformed OCPP frame: {error}"));
-        let call_error = build_call_error(
-          "-1",
-          OcppErrorCode::ProtocolError.as_str(),
-          "Malformed OCPP frame",
-          json!({ "reason": error }),
-        );
-        self
-          .send_text(write, call_error, UiLogLevel::Tx, "CALLERROR".to_string())
-          .await?;
-      }
     }
-
     Ok(())
+  }
+
+  async fn handle_malformed_ws_frame(
+    &mut self,
+    write: &mut WsWrite,
+    error: impl std::fmt::Display,
+  ) -> Result<()> {
+    self.log(UiLogLevel::Warn, format!("Malformed OCPP frame: {error}"));
+    let call_error = build_call_error(
+      "-1",
+      OcppErrorCode::ProtocolError.as_str(),
+      "Malformed OCPP frame",
+      &json!({ "reason": error.to_string() }),
+    );
+    self
+      .send_text(write, call_error, UiLogLevel::Tx, "CALLERROR".to_string())
+      .await
   }
 
   /// Dispatches an inbound CALL to the active protocol-version handler.

@@ -1,7 +1,7 @@
 /// Dispatches a fallible handler that returns `Result<ResponseStatus>`.
 ///
 /// On success, sends a CALLRESULT with a `{ "status": "..." }` payload.
-/// On error, sends a FormationViolation CALLERROR.
+/// On error, sends a `FormationViolation` CALLERROR.
 macro_rules! dispatch_status {
   ($self:ident, $write:ident, $mid:ident, $handler:expr) => {
     match $handler {
@@ -30,7 +30,7 @@ macro_rules! dispatch_status {
 /// Dispatches a fallible handler that returns `Result<Value>`.
 ///
 /// On success, sends the `Value` as a CALLRESULT payload.
-/// On error, sends a FormationViolation CALLERROR.
+/// On error, sends a `FormationViolation` CALLERROR.
 macro_rules! dispatch_response {
   ($self:ident, $write:ident, $mid:ident, $handler:expr) => {
     match $handler {
@@ -46,6 +46,7 @@ macro_rules! dispatch_response {
   };
 }
 
+mod dispatch;
 mod dispatch_v1_6;
 mod dispatch_v2_x;
 mod pending;

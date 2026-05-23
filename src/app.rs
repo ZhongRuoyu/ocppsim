@@ -62,7 +62,7 @@ impl TerminalSession {
   /// Polls keyboard and mouse input and maps it to an app action.
   ///
   /// Returns [`InputAction::None`] when no event is available.
-  pub fn poll_input(&mut self, app: &mut TerminalApp) -> Result<InputAction> {
+  pub fn poll_input(app: &mut TerminalApp) -> Result<InputAction> {
     // Wait up to 50ms for the first available event.
     if !event::poll(Duration::from_millis(50))? {
       return Ok(InputAction::None);
@@ -225,7 +225,7 @@ impl TerminalApp {
   /// Logs a submitted command and stores it in command history.
   pub fn push_user_input(&mut self, message: &str) {
     self.history.record(message);
-    self.push_log(UiLogLevel::Info, format!("> {}", message));
+    self.push_log(UiLogLevel::Info, format!("> {message}"));
   }
 
   /// Clears visible logs and resets scrolling to follow mode.
@@ -260,6 +260,10 @@ impl TerminalApp {
       return self.handle_alt_key(key);
     }
 
+    self.handle_plain_key_event(key)
+  }
+
+  fn handle_plain_key_event(&mut self, key: KeyEvent) -> InputAction {
     match key.code {
       KeyCode::BackTab => {
         self.leave_history_navigation();
@@ -291,18 +295,7 @@ impl TerminalApp {
         self.scroll_logs_full_page_down();
         InputAction::None
       }
-      KeyCode::Char(ch) => {
-        if key.modifiers != KeyModifiers::NONE
-          && key.modifiers != KeyModifiers::SHIFT
-        {
-          return InputAction::None;
-        }
-        self.clear_completion();
-        self.leave_history_navigation();
-        self.input.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
-        InputAction::None
-      }
+      KeyCode::Char(ch) => self.handle_char_key_event(ch, key.modifiers),
       KeyCode::Backspace => {
         self.clear_completion();
         self.leave_history_navigation();
@@ -364,6 +357,21 @@ impl TerminalApp {
     }
   }
 
+  fn handle_char_key_event(
+    &mut self,
+    ch: char,
+    modifiers: KeyModifiers,
+  ) -> InputAction {
+    if modifiers != KeyModifiers::NONE && modifiers != KeyModifiers::SHIFT {
+      return InputAction::None;
+    }
+    self.clear_completion();
+    self.leave_history_navigation();
+    self.input.insert(self.cursor, ch);
+    self.cursor += ch.len_utf8();
+    InputAction::None
+  }
+
   /// Renders the log pane and command input pane for the current frame.
   pub fn render(&mut self, frame: &mut Frame<'_>) {
     let areas = Layout::default()
@@ -394,7 +402,7 @@ impl TerminalApp {
     let logs = Paragraph::new(lines)
       .block(logs_block)
       .wrap(Wrap { trim: false })
-      .scroll((self.log_scroll as u16, 0));
+      .scroll((u16::try_from(self.log_scroll).unwrap_or(u16::MAX), 0));
     frame.render_widget(logs, areas[0]);
     frame.render_stateful_widget(
       Scrollbar::new(ScrollbarOrientation::VerticalRight),
@@ -408,14 +416,16 @@ impl TerminalApp {
 
     let max_cursor = areas[1].width.saturating_sub(3) as usize;
     let cursor = self.cursor_display_width().min(max_cursor);
-    frame.set_cursor_position((areas[1].x + 1 + cursor as u16, areas[1].y + 1));
+    frame.set_cursor_position((
+      areas[1].x + 1 + u16::try_from(cursor).unwrap_or(0),
+      areas[1].y + 1,
+    ));
   }
 
   /// Handles Ctrl-modified editing and exit shortcuts.
   fn handle_ctrl_key(&mut self, key: KeyEvent) -> InputAction {
     match key.code {
-      KeyCode::Char('c') => InputAction::ExitRequested,
-      KeyCode::Char('d') => InputAction::ExitRequested,
+      KeyCode::Char('c' | 'd') => InputAction::ExitRequested,
       KeyCode::Char('w') => {
         self.clear_completion();
         self.leave_history_navigation();
@@ -702,7 +712,7 @@ impl TerminalApp {
   fn push_snapshot(&mut self, snapshot: SimulatorSnapshot) {
     self.known_connectors =
       snapshot.connectors.iter().map(|item| item.id).collect();
-    self.ws_url = snapshot.connection_url.clone();
+    self.ws_url.clone_from(&snapshot.connection_url);
 
     self.push_log(
       UiLogLevel::Info,
@@ -734,9 +744,7 @@ fn format_connector_line(connector: ConnectorSnapshot) -> String {
 
 /// Formats heartbeat interval for display.
 fn display_heartbeat(value: Option<u64>) -> String {
-  value
-    .map(|seconds| format!("{seconds}s"))
-    .unwrap_or_else(|| "-".to_string())
+  value.map_or_else(|| "-".to_string(), |seconds| format!("{seconds}s"))
 }
 
 /// Returns the local timestamp string used in log entries.
@@ -749,8 +757,7 @@ fn previous_char_boundary(input: &str, index: usize) -> usize {
   input[..index]
     .char_indices()
     .next_back()
-    .map(|(position, _)| position)
-    .unwrap_or(0)
+    .map_or(0, |(position, _)| position)
 }
 
 /// Returns the byte index of the next UTF-8 character boundary.
@@ -758,8 +765,7 @@ fn next_char_boundary(input: &str, index: usize) -> usize {
   input[index..]
     .char_indices()
     .nth(1)
-    .map(|(position, _)| index + position)
-    .unwrap_or(input.len())
+    .map_or(input.len(), |(position, _)| index + position)
 }
 
 #[cfg(test)]

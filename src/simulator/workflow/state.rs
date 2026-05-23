@@ -1,4 +1,7 @@
-use super::super::*;
+use super::super::{
+  ConfigurationEntry, ConfigurationKey, ConnectorState, ConnectorStatus,
+  OcppVersion, ResponseStatus, Result, Simulator, anyhow,
+};
 
 impl Simulator {
   /// Updates a configuration value and applies key-specific side effects.
@@ -68,8 +71,7 @@ impl Simulator {
     self
       .configuration
       .get(&ConfigurationKey::AuthorizeRemoteTxRequests)
-      .map(|entry| entry.value.eq_ignore_ascii_case("true"))
-      .unwrap_or(true)
+      .is_none_or(|entry| entry.value.eq_ignore_ascii_case("true"))
   }
 
   /// Finds the first connector currently eligible for a new transaction.
@@ -91,15 +93,14 @@ impl Simulator {
     let state = self
       .connectors
       .get(&connector)
-      .ok_or_else(|| anyhow!("Connector {} does not exist.", connector))?;
+      .ok_or_else(|| anyhow!("Connector {connector} does not exist."))?;
     if state.transaction.is_some() {
       return Err(anyhow!(
-        "Connector {} already has an active transaction.",
-        connector
+        "Connector {connector} already has an active transaction."
       ));
     }
     if self.connector_has_reservation(connector) {
-      return Err(anyhow!("Connector {} is reserved.", connector));
+      return Err(anyhow!("Connector {connector} is reserved."));
     }
     match state.status {
       ConnectorStatus::Available | ConnectorStatus::Preparing => Ok(()),
@@ -164,7 +165,7 @@ impl Simulator {
   ) -> Result<()> {
     let connector_state = self.connector_mut(connector)?;
     let tx = connector_state.transaction.as_mut().ok_or_else(|| {
-      anyhow!("No active transaction on connector {}.", connector)
+      anyhow!("No active transaction on connector {connector}.")
     })?;
     if tx.local_id != local_tx_id {
       return Err(anyhow!(
@@ -178,7 +179,7 @@ impl Simulator {
     Ok(())
   }
 
-  /// Stores the transaction id returned by OCPP 1.6 StartTransaction.
+  /// Stores the transaction id returned by OCPP 1.6 `StartTransaction`.
   pub(in crate::simulator) fn set_v1_6_transaction_id(
     &mut self,
     connector: u16,
@@ -187,7 +188,7 @@ impl Simulator {
   ) -> Result<()> {
     let connector_state = self.connector_mut(connector)?;
     let tx = connector_state.transaction.as_mut().ok_or_else(|| {
-      anyhow!("No active transaction on connector {}.", connector)
+      anyhow!("No active transaction on connector {connector}.")
     })?;
     if tx.local_id != local_tx_id {
       return Err(anyhow!(
@@ -210,7 +211,7 @@ impl Simulator {
     let should_cancel = self
       .connectors
       .get(&connector)
-      .ok_or_else(|| anyhow!("Connector {} does not exist.", connector))?
+      .ok_or_else(|| anyhow!("Connector {connector} does not exist."))?
       .transaction
       .as_ref()
       .is_some_and(|tx| tx.local_id == local_tx_id);
@@ -233,7 +234,7 @@ impl Simulator {
     let should_complete = self
       .connectors
       .get(&connector)
-      .ok_or_else(|| anyhow!("Connector {} does not exist.", connector))?
+      .ok_or_else(|| anyhow!("Connector {connector} does not exist."))?
       .transaction
       .as_ref()
       .is_some_and(|tx| tx.local_id == local_tx_id);
@@ -278,7 +279,7 @@ impl Simulator {
     self.connectors.iter().find_map(|(connector, state)| {
       state.transaction.as_ref().and_then(|tx| {
         if tx.v1_6_transaction_id == Some(transaction_id)
-          || tx.local_id as i64 == transaction_id
+          || tx.local_id.cast_signed() == transaction_id
         {
           Some(*connector)
         } else {
@@ -325,7 +326,7 @@ impl Simulator {
     self
       .connectors
       .get(&connector)
-      .ok_or_else(|| anyhow!("Connector {} does not exist.", connector))
+      .ok_or_else(|| anyhow!("Connector {connector} does not exist."))
   }
 
   /// Returns a mutable connector state or an error if connector is unknown.
@@ -336,7 +337,7 @@ impl Simulator {
     self
       .connectors
       .get_mut(&connector)
-      .ok_or_else(|| anyhow!("Connector {} does not exist.", connector))
+      .ok_or_else(|| anyhow!("Connector {connector} does not exist."))
   }
 
   /// Sets the offered power limit for a connector.

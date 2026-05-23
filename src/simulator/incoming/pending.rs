@@ -1,16 +1,18 @@
-use super::super::*;
+use super::super::{
+  PendingContext, Result, Simulator, TxEventType, UiLogLevel, Value,
+};
 
 impl Simulator {
   /// Applies a CALLRESULT to the current pending request context.
   pub(in crate::simulator) fn handle_call_result(
     &mut self,
     message_id: &str,
-    payload: Value,
+    payload: &Value,
   ) -> Result<()> {
     let Some(pending) = &self.pending else {
       self.log(
         UiLogLevel::Warn,
-        format!("Unexpected CALLRESULT {} (no pending request).", message_id),
+        format!("Unexpected CALLRESULT {message_id} (no pending request)."),
       );
       return Ok(());
     };
@@ -26,7 +28,7 @@ impl Simulator {
     }
 
     let pending = self.pending.take().expect("pending exists");
-    self.apply_call_result_context(&pending.call.context, &payload)?;
+    self.apply_call_result_context(&pending.call.context, payload)?;
     Ok(())
   }
 
@@ -40,10 +42,7 @@ impl Simulator {
     let Some(pending) = &self.pending else {
       self.log(
         UiLogLevel::Warn,
-        format!(
-          "Unexpected CALLERROR {}: {} {}",
-          message_id, code, description
-        ),
+        format!("Unexpected CALLERROR {message_id}: {code} {description}"),
       );
       return Ok(());
     };
@@ -68,18 +67,8 @@ impl Simulator {
       PendingContext::StartTxV1_6 {
         connector,
         local_tx_id,
-      } => {
-        self.cancel_transaction_start(connector, local_tx_id)?;
-        self.enqueue_status_notification(connector)?;
       }
-      PendingContext::StopTxV1_6 {
-        connector,
-        local_tx_id,
-      } => {
-        self.restore_active_transaction_status(connector, local_tx_id)?;
-        self.enqueue_status_notification(connector)?;
-      }
-      PendingContext::TxEvent {
+      | PendingContext::TxEvent {
         connector,
         local_tx_id,
         event_type: TxEventType::Started,
@@ -87,7 +76,11 @@ impl Simulator {
         self.cancel_transaction_start(connector, local_tx_id)?;
         self.enqueue_status_notification(connector)?;
       }
-      PendingContext::TxEvent {
+      PendingContext::StopTxV1_6 {
+        connector,
+        local_tx_id,
+      }
+      | PendingContext::TxEvent {
         connector,
         local_tx_id,
         event_type: TxEventType::Ended,

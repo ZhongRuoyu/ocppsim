@@ -1,5 +1,8 @@
-use super::super::payloads::*;
-use super::super::*;
+use super::super::payloads::{ListVersionV1_6Response, to_value};
+use super::super::{
+  IncomingAction_V1_6, OcppErrorCode, ResponseStatus, Result, Simulator,
+  TriggerMessage_V1_6, UiLogLevel, Value, WsWrite, json,
+};
 use super::request::{
   RemoteStartTransactionRequestV1_6, RemoteStopTransactionRequestV1_6,
   TriggerMessageRequestV1_6,
@@ -14,182 +17,119 @@ impl Simulator {
     action: &str,
     payload: Value,
   ) -> Result<()> {
-    match IncomingAction_V1_6::parse(action) {
-      Some(IncomingAction_V1_6::GetConfiguration) => {
-        let response = self.configuration_response_v1_6(&payload);
+    let Some(parsed_action) = IncomingAction_V1_6::parse(action) else {
+      return self
+        .handle_unknown_incoming_action_v1_6(write, message_id, action)
+        .await;
+    };
+
+    self
+      .handle_parsed_incoming_call_v1_6_primary(
+        write,
+        message_id,
+        parsed_action,
+        &payload,
+      )
+      .await
+  }
+
+  async fn handle_parsed_incoming_call_v1_6_primary(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    action: IncomingAction_V1_6,
+    payload: &Value,
+  ) -> Result<()> {
+    match action {
+      IncomingAction_V1_6::GetConfiguration => {
+        let response = self.configuration_response_v1_6(payload);
         self
           .send_call_result(write, message_id, to_value(&response))
           .await?;
       }
-      Some(IncomingAction_V1_6::ChangeConfiguration) => {
-        let status = self.change_configuration_v1_6(&payload);
+      IncomingAction_V1_6::ChangeConfiguration => {
+        let status = self.change_configuration_v1_6(payload);
+        self.send_status_response(write, message_id, status).await?;
+      }
+      IncomingAction_V1_6::ClearCache => {
+        self
+          .send_status_response(write, message_id, ResponseStatus::Accepted)
+          .await?;
+      }
+      IncomingAction_V1_6::ChangeAvailability => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.change_availability_v1_6(payload)
+      ),
+      IncomingAction_V1_6::DataTransfer => {
         self
           .send_call_result(
             write,
             message_id,
-            to_value(&StatusPayload {
-              status: status.as_str(),
-            }),
+            Self::data_transfer_v1_6(payload),
           )
           .await?;
       }
-      Some(IncomingAction_V1_6::ClearCache) => {
+      IncomingAction_V1_6::GetDiagnostics => dispatch_response!(
+        self,
+        write,
+        message_id,
+        self.get_diagnostics_v1_6(payload)
+      ),
+      IncomingAction_V1_6::UpdateFirmware => {
         self
-          .send_call_result(
-            write,
-            message_id,
-            to_value(&StatusPayload {
-              status: ResponseStatus::Accepted.as_str(),
-            }),
-          )
+          .handle_update_firmware_call_v1_6(write, message_id, payload)
           .await?;
       }
-      Some(IncomingAction_V1_6::ChangeAvailability) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.change_availability_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::DataTransfer) => {
-        let response = self.data_transfer_v1_6(&payload);
-        self.send_call_result(write, message_id, response).await?;
-      }
-      Some(IncomingAction_V1_6::GetDiagnostics) => {
-        dispatch_response!(
-          self,
-          write,
-          message_id,
-          self.get_diagnostics_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::UpdateFirmware) => {
-        match self.update_firmware_v1_6(&payload) {
-          Ok(()) => {
-            self
-              .send_call_result(
-                write,
-                message_id,
-                to_value(&HeartbeatRequest {}),
-              )
-              .await?;
-          }
-          Err(error) => {
-            self
-              .send_formation_violation(write, message_id, &error.to_string())
-              .await?;
-          }
-        }
-      }
-      Some(IncomingAction_V1_6::RemoteStartTransaction) => {
-        let request = match RemoteStartTransactionRequestV1_6::parse(&payload) {
-          Ok(value) => value,
-          Err(error) => {
-            self
-              .send_formation_violation(write, message_id, &error.to_string())
-              .await?;
-            return Ok(());
-          }
-        };
-        let connector = match request.connector {
-          Some(value) => value,
-          None => match self.first_startable_connector() {
-            Some(value) => value,
-            None => {
-              self
-                .send_call_result(
-                  write,
-                  message_id,
-                  to_value(&StatusPayload {
-                    status: ResponseStatus::Rejected.as_str(),
-                  }),
-                )
-                .await?;
-              return Ok(());
-            }
-          },
-        };
-        let status = if self.authorize_remote_tx_requests() {
-          self.enqueue_remote_start_authorize_v1_6(connector, request.id_token);
-          ResponseStatus::Accepted
-        } else if self
-          .start_transaction(connector, request.id_token, true, None, true)
-          .is_ok()
-        {
-          ResponseStatus::Accepted
-        } else {
-          ResponseStatus::Rejected
-        };
+      IncomingAction_V1_6::RemoteStartTransaction => {
         self
-          .send_call_result(
-            write,
-            message_id,
-            to_value(&StatusPayload {
-              status: status.as_str(),
-            }),
+          .handle_remote_start_transaction_call_v1_6(write, message_id, payload)
+          .await?;
+      }
+      IncomingAction_V1_6::RemoteStopTransaction => {
+        self
+          .handle_remote_stop_transaction_call_v1_6(write, message_id, payload)
+          .await?;
+      }
+      other => {
+        self
+          .handle_parsed_incoming_call_v1_6_secondary(
+            write, message_id, other, payload,
           )
           .await?;
       }
-      Some(IncomingAction_V1_6::RemoteStopTransaction) => {
-        let request = match RemoteStopTransactionRequestV1_6::parse(&payload) {
-          Ok(value) => value,
-          Err(error) => {
-            self
-              .send_formation_violation(write, message_id, &error.to_string())
-              .await?;
-            return Ok(());
-          }
-        };
-        let connector = self.find_v1_6_transaction(request.transaction_id);
-        if let Some(connector_id) = connector {
-          self.stop_transaction(connector_id, None, true, true)?;
-          self
-            .send_call_result(
-              write,
-              message_id,
-              to_value(&StatusPayload {
-                status: ResponseStatus::Accepted.as_str(),
-              }),
-            )
-            .await?;
-        } else {
-          self
-            .send_call_result(
-              write,
-              message_id,
-              to_value(&StatusPayload {
-                status: ResponseStatus::Rejected.as_str(),
-              }),
-            )
-            .await?;
-        }
-      }
-      Some(IncomingAction_V1_6::ReserveNow) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.reserve_now_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::CancelReservation) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.cancel_reservation_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::UnlockConnector) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.unlock_connector_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::GetLocalListVersion) => {
+    }
+    Ok(())
+  }
+
+  async fn handle_parsed_incoming_call_v1_6_secondary(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    action: IncomingAction_V1_6,
+    payload: &Value,
+  ) -> Result<()> {
+    match action {
+      IncomingAction_V1_6::ReserveNow => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.reserve_now_v1_6(payload)
+      ),
+      IncomingAction_V1_6::CancelReservation => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.cancel_reservation_v1_6(payload)
+      ),
+      IncomingAction_V1_6::UnlockConnector => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.unlock_connector_v1_6(payload)
+      ),
+      IncomingAction_V1_6::GetLocalListVersion => {
         self
           .send_call_result(
             write,
@@ -200,143 +140,199 @@ impl Simulator {
           )
           .await?;
       }
-      Some(IncomingAction_V1_6::SendLocalList) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.send_local_list_v1_6(&payload)
-        );
+      IncomingAction_V1_6::SendLocalList => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.send_local_list_v1_6(payload)
+      ),
+      IncomingAction_V1_6::SetChargingProfile => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.set_charging_profile_v1_6(payload)
+      ),
+      IncomingAction_V1_6::ClearChargingProfile => {
+        let status = self.clear_charging_profile_v1_6(payload);
+        self.send_status_response(write, message_id, status).await?;
       }
-      Some(IncomingAction_V1_6::SetChargingProfile) => {
-        dispatch_status!(
-          self,
-          write,
-          message_id,
-          self.set_charging_profile_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::ClearChargingProfile) => {
-        let status = self.clear_charging_profile_v1_6(&payload);
+      IncomingAction_V1_6::GetCompositeSchedule => dispatch_response!(
+        self,
+        write,
+        message_id,
+        self.get_composite_schedule_v1_6(payload)
+      ),
+      IncomingAction_V1_6::TriggerMessage => {
         self
-          .send_call_result(
-            write,
-            message_id,
-            to_value(&StatusPayload {
-              status: status.as_str(),
-            }),
-          )
+          .handle_trigger_message_call_v1_6(write, message_id, payload)
           .await?;
       }
-      Some(IncomingAction_V1_6::GetCompositeSchedule) => {
-        dispatch_response!(
-          self,
-          write,
-          message_id,
-          self.get_composite_schedule_v1_6(&payload)
-        );
-      }
-      Some(IncomingAction_V1_6::TriggerMessage) => {
-        let request = match TriggerMessageRequestV1_6::parse(&payload) {
-          Ok(value) => value,
-          Err(error) => {
-            self
-              .send_formation_violation(write, message_id, &error.to_string())
-              .await?;
-            return Ok(());
-          }
-        };
-        let parsed_message =
-          TriggerMessage_V1_6::parse(&request.requested_message);
-        match parsed_message {
-          Some(message) => {
-            match self.trigger_message_v1_6(message, request.connector) {
-              Ok(()) => {
-                self
-                  .send_call_result(
-                    write,
-                    message_id,
-                    to_value(&StatusPayload {
-                      status: ResponseStatus::Accepted.as_str(),
-                    }),
-                  )
-                  .await?;
-              }
-              Err(error) => {
-                self
-                  .send_formation_violation(
-                    write,
-                    message_id,
-                    &error.to_string(),
-                  )
-                  .await?;
-              }
-            }
-          }
-          None => {
-            self
-              .send_call_result(
-                write,
-                message_id,
-                to_value(&StatusPayload {
-                  status: ResponseStatus::NotImplemented.as_str(),
-                }),
-              )
-              .await?;
-          }
-        }
-      }
-      Some(IncomingAction_V1_6::Reset) => {
+      IncomingAction_V1_6::Reset => {
         self.log(
           UiLogLevel::Info,
           "Received Reset request. Simulator will acknowledge only.",
         );
         self
-          .send_call_result(
-            write,
-            message_id,
-            to_value(&StatusPayload {
-              status: ResponseStatus::Accepted.as_str(),
-            }),
-          )
+          .send_status_response(write, message_id, ResponseStatus::Accepted)
           .await?;
       }
-      None => {
-        if IncomingAction_V1_6::is_known_unsupported(action) {
-          self.log(
-            UiLogLevel::Warn,
-            format!(
-              "Action `{action}` is known for OCPP 1.6 but is not supported."
-            ),
-          );
-          self
-            .send_call_error(
-              write,
-              message_id,
-              OcppErrorCode::NotSupported.as_str(),
-              &format!(
-                "Action `{action}` is outside the supported base schemas."
-              ),
-              json!({}),
-            )
-            .await?;
-        } else {
-          self.log(
-            UiLogLevel::Warn,
-            format!("Action `{action}` is not implemented."),
-          );
-          self
-            .send_call_error(
-              write,
-              message_id,
-              OcppErrorCode::NotImplemented.as_str(),
-              &format!("Action `{action}` is not implemented."),
-              json!({}),
-            )
-            .await?;
-        }
-      }
+      IncomingAction_V1_6::GetConfiguration
+      | IncomingAction_V1_6::ChangeConfiguration
+      | IncomingAction_V1_6::ClearCache
+      | IncomingAction_V1_6::ChangeAvailability
+      | IncomingAction_V1_6::DataTransfer
+      | IncomingAction_V1_6::GetDiagnostics
+      | IncomingAction_V1_6::UpdateFirmware
+      | IncomingAction_V1_6::RemoteStartTransaction
+      | IncomingAction_V1_6::RemoteStopTransaction => unreachable!(),
     }
     Ok(())
+  }
+
+  async fn handle_update_firmware_call_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    match self.update_firmware_v1_6(payload) {
+      Ok(()) => self.send_call_result(write, message_id, json!({})).await,
+      Err(error) => {
+        self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await
+      }
+    }
+  }
+
+  async fn handle_remote_start_transaction_call_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    let request = match RemoteStartTransactionRequestV1_6::parse(payload) {
+      Ok(value) => value,
+      Err(error) => {
+        return self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await;
+      }
+    };
+    let connector = match request.connector {
+      Some(value) => value,
+      None => match self.first_startable_connector() {
+        Some(value) => value,
+        None => {
+          return self
+            .send_status_response(write, message_id, ResponseStatus::Rejected)
+            .await;
+        }
+      },
+    };
+    let status = if self.authorize_remote_tx_requests() {
+      self.enqueue_remote_start_authorize_v1_6(connector, request.id_token);
+      ResponseStatus::Accepted
+    } else if self
+      .start_transaction(connector, request.id_token, true, None, true)
+      .is_ok()
+    {
+      ResponseStatus::Accepted
+    } else {
+      ResponseStatus::Rejected
+    };
+    self.send_status_response(write, message_id, status).await
+  }
+
+  async fn handle_remote_stop_transaction_call_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    let request = match RemoteStopTransactionRequestV1_6::parse(payload) {
+      Ok(value) => value,
+      Err(error) => {
+        return self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await;
+      }
+    };
+    let status = if let Some(connector_id) =
+      self.find_v1_6_transaction(request.transaction_id)
+    {
+      self.stop_transaction(connector_id, None, true, true)?;
+      ResponseStatus::Accepted
+    } else {
+      ResponseStatus::Rejected
+    };
+    self.send_status_response(write, message_id, status).await
+  }
+
+  async fn handle_trigger_message_call_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    let request = match TriggerMessageRequestV1_6::parse(payload) {
+      Ok(value) => value,
+      Err(error) => {
+        return self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await;
+      }
+    };
+    let Some(message) = TriggerMessage_V1_6::parse(&request.requested_message)
+    else {
+      return self
+        .send_status_response(write, message_id, ResponseStatus::NotImplemented)
+        .await;
+    };
+    match self.trigger_message_v1_6(message, request.connector) {
+      Ok(()) => {
+        self
+          .send_status_response(write, message_id, ResponseStatus::Accepted)
+          .await
+      }
+      Err(error) => {
+        self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await
+      }
+    }
+  }
+
+  async fn handle_unknown_incoming_action_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    action: &str,
+  ) -> Result<()> {
+    let (code, description) =
+      if IncomingAction_V1_6::is_known_unsupported(action) {
+        self.log(
+          UiLogLevel::Warn,
+          format!(
+            "Action `{action}` is known for OCPP 1.6 but is not supported."
+          ),
+        );
+        (
+          OcppErrorCode::NotSupported.as_str(),
+          format!("Action `{action}` is outside the supported base schemas."),
+        )
+      } else {
+        self.log(
+          UiLogLevel::Warn,
+          format!("Action `{action}` is not implemented."),
+        );
+        (
+          OcppErrorCode::NotImplemented.as_str(),
+          format!("Action `{action}` is not implemented."),
+        )
+      };
+    self
+      .send_call_error(write, message_id, code, &description, json!({}))
+      .await
   }
 }

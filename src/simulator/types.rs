@@ -185,14 +185,13 @@ impl ConnectorStatus {
     match self {
       Self::Available => OcppConnectorStatus::Available,
       Self::Preparing => OcppConnectorStatus::Preparing,
-      Self::Charging => OcppConnectorStatus::Charging,
+      Self::Charging | Self::Occupied => OcppConnectorStatus::Charging,
       Self::SuspendedEvse => OcppConnectorStatus::SuspendedEvse,
       Self::SuspendedEv => OcppConnectorStatus::SuspendedEv,
       Self::Finishing => OcppConnectorStatus::Finishing,
       Self::Reserved => OcppConnectorStatus::Reserved,
       Self::Unavailable => OcppConnectorStatus::Unavailable,
       Self::Faulted => OcppConnectorStatus::Faulted,
-      Self::Occupied => OcppConnectorStatus::Charging,
     }
   }
 
@@ -203,12 +202,12 @@ impl ConnectorStatus {
       Self::Reserved => OcppConnectorStatus::Reserved,
       Self::Unavailable => OcppConnectorStatus::Unavailable,
       Self::Faulted => OcppConnectorStatus::Faulted,
-      Self::Occupied => OcppConnectorStatus::Occupied,
-      Self::Preparing => OcppConnectorStatus::Occupied,
-      Self::Charging => OcppConnectorStatus::Occupied,
-      Self::SuspendedEvse => OcppConnectorStatus::Occupied,
-      Self::SuspendedEv => OcppConnectorStatus::Occupied,
-      Self::Finishing => OcppConnectorStatus::Occupied,
+      Self::Occupied
+      | Self::Preparing
+      | Self::Charging
+      | Self::SuspendedEvse
+      | Self::SuspendedEv
+      | Self::Finishing => OcppConnectorStatus::Occupied,
     }
   }
 
@@ -376,7 +375,7 @@ pub(in crate::simulator) struct Simulator {
 pub(in crate::simulator) fn normalize_identifier(text: &str) -> String {
   text
     .chars()
-    .filter(|ch| ch.is_ascii_alphanumeric())
+    .filter(char::is_ascii_alphanumeric)
     .map(|ch| ch.to_ascii_lowercase())
     .collect()
 }

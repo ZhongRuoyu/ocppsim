@@ -18,7 +18,7 @@ fn stop_transaction_timeout_restores_v1_6_status() {
     .map(|tx| tx.local_id)
     .expect("local transaction");
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should enqueue");
   let stop_call = simulator
     .queue
@@ -70,7 +70,7 @@ fn transaction_event_end_timeout_restores_v2_status() {
     .map(|tx| tx.local_id)
     .expect("local transaction");
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should enqueue");
   let end_call = simulator
     .queue
@@ -132,7 +132,7 @@ fn stop_ack_enqueues_scheduled_v1_6_status() {
     ResponseStatus::Scheduled
   );
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should enqueue");
   assert!(
     !simulator
@@ -171,7 +171,7 @@ fn end_ack_enqueues_scheduled_v2_status() {
     ResponseStatus::Scheduled
   );
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should enqueue");
   assert!(
     !simulator
@@ -203,7 +203,7 @@ fn stop_transaction_v1_6_remote_reason_is_preserved() {
   simulator.queue.clear();
 
   simulator
-    .stop_transaction(1, Some("Remote".to_string()), false, true)
+    .stop_transaction(1, Some("Remote"), false, true)
     .expect("stop should enqueue");
 
   let payload = queued_payload(&simulator, "StopTransaction");
@@ -219,7 +219,7 @@ fn stop_transaction_v2_0_1_remote_reason_is_preserved() {
   simulator.queue.clear();
 
   simulator
-    .stop_transaction(1, Some("Remote".to_string()), false, true)
+    .stop_transaction(1, Some("Remote"), false, true)
     .expect("stop should enqueue");
 
   let payload = queued_payload(&simulator, "TransactionEvent");
@@ -249,7 +249,7 @@ fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
   simulator
     .handle_call_result(
       "start-ack",
-      json!({
+      &json!({
         "idTagInfo": { "status": "Accepted" },
         "transactionId": 1234
       }),
@@ -283,7 +283,7 @@ fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
   simulator
     .handle_call_result(
       "auth-ack",
-      json!({
+      &json!({
         "idTagInfo": { "status": "Accepted" }
       }),
     )
@@ -319,7 +319,7 @@ fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
   simulator
     .handle_call_result(
       "auth-concurrent",
-      json!({
+      &json!({
         "idTagInfo": { "status": "ConcurrentTx" }
       }),
     )
@@ -363,7 +363,7 @@ fn start_transaction_v1_6_rejection_rolls_back_local_state() {
   simulator
     .handle_call_result(
       "start-rejected",
-      json!({
+      &json!({
         "idTagInfo": { "status": "Rejected" }
       }),
     )
@@ -451,7 +451,7 @@ fn v2_x_multi_connector_transactions_progress_independently() {
   simulator.queue.clear();
 
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("first stop should enqueue");
   let first_end_context = simulator
     .queue
@@ -496,7 +496,7 @@ fn v2_x_multi_connector_transactions_progress_independently() {
 
   simulator.queue.clear();
   simulator
-    .stop_transaction(2, Some("Local".to_string()), false, true)
+    .stop_transaction(2, Some("Local"), false, true)
     .expect("second stop should enqueue");
   let second_end_call = simulator
     .queue
@@ -548,7 +548,7 @@ fn stop_transaction_v2_0_1_queues_ended_transaction_event() {
   simulator.queue.clear();
 
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should succeed");
 
   let payload = queued_payload(&simulator, "TransactionEvent");
@@ -589,7 +589,7 @@ fn stop_transaction_v2_1_queues_ended_transaction_event() {
   simulator.queue.clear();
 
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, true)
+    .stop_transaction(1, Some("Local"), false, true)
     .expect("stop should succeed");
 
   let payload = queued_payload(&simulator, "TransactionEvent");

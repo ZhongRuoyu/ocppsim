@@ -80,124 +80,149 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
   }
 
   let command = parts[0].to_ascii_lowercase();
+  if let Some(result) = parse_simple_command(command.as_str(), &parts) {
+    return result;
+  }
+
   match command.as_str() {
-    "status" => {
-      ensure_exact(&parts, 1, USAGE_STATUS)?;
-      Ok(UserCommand::Status)
-    }
-    "connect" => {
-      ensure_exact(&parts, 1, USAGE_CONNECT)?;
-      Ok(UserCommand::Connect)
-    }
-    "disconnect" => {
-      ensure_exact(&parts, 1, USAGE_DISCONNECT)?;
-      Ok(UserCommand::Disconnect)
-    }
-    "boot" => {
-      ensure_exact(&parts, 1, USAGE_BOOT)?;
-      Ok(UserCommand::Boot)
-    }
-    "authorize" => {
-      ensure_exact(&parts, 2, USAGE_AUTHORIZE)?;
-      let id_token = parse_required(parts.get(1), USAGE_AUTHORIZE)?;
-      Ok(UserCommand::Authorize {
-        id_token: id_token.to_string(),
-      })
-    }
-    "data-transfer" => {
-      ensure_range(&parts, 2.., USAGE_DATA_TRANSFER)?;
-      let vendor_id = parse_required(parts.get(1), USAGE_DATA_TRANSFER)?;
-      let message_id = parts.get(2).map(|value| (*value).to_string());
-      let data = if parts.len() > 3 {
-        Some(parts[3..].join(" "))
-      } else {
-        None
-      };
-      Ok(UserCommand::DataTransfer {
-        vendor_id: vendor_id.to_string(),
-        message_id,
-        data,
-      })
-    }
-    "start" => {
-      ensure_exact(&parts, 3, USAGE_START)?;
-      let connector = parse_u16(parts.get(1), USAGE_START)?;
-      let id_token = parse_required(parts.get(2), USAGE_START)?;
-      Ok(UserCommand::Start {
-        connector,
-        id_token: id_token.to_string(),
-      })
-    }
-    "stop" => {
-      ensure_range(&parts, 2..=3, USAGE_STOP)?;
-      let connector = parse_u16(parts.get(1), USAGE_STOP)?;
-      let reason = if parts.len() > 2 {
-        Some(parts[2].to_string())
-      } else {
-        None
-      };
-      Ok(UserCommand::Stop { connector, reason })
-    }
-    "connector-status" => {
-      ensure_exact(&parts, 3, USAGE_CONNECTOR_STATUS)?;
-      let connector = parse_u16(parts.get(1), USAGE_CONNECTOR_STATUS)?;
-      let status = parse_required(parts.get(2), USAGE_CONNECTOR_STATUS)?;
-      Ok(UserCommand::SetConnectorStatus {
-        connector,
-        status: status.to_string(),
-      })
-    }
-    "meter" => {
-      ensure_exact(&parts, 3, USAGE_METER)?;
-      let connector = parse_u16(parts.get(1), USAGE_METER)?;
-      let value_wh = parse_i64(parts.get(2), USAGE_METER)?;
-      Ok(UserCommand::Meter {
-        connector,
-        value_wh,
-      })
-    }
-    "send-meter" => {
-      ensure_exact(&parts, 2, USAGE_SEND_METER)?;
-      let connector = parse_u16(parts.get(1), USAGE_SEND_METER)?;
-      Ok(UserCommand::SendMeter { connector })
-    }
-    "heartbeat" => {
-      if parts.len() == 1 {
-        return Ok(UserCommand::Heartbeat);
-      }
-      if parts.len() == 3 && parts[1].eq_ignore_ascii_case("start") {
-        let seconds = parse_u64(parts.get(2), USAGE_HEARTBEAT_START)?;
-        if seconds == 0 {
-          return Err("Heartbeat interval must be positive.".to_string());
-        }
-        return Ok(UserCommand::HeartbeatStart { seconds });
-      }
-      if parts.len() == 2 && parts[1].eq_ignore_ascii_case("stop") {
-        return Ok(UserCommand::HeartbeatStop);
-      }
-      Err(USAGE_HEARTBEAT_ALL.to_string())
-    }
-    "clear" => {
-      ensure_exact(&parts, 1, USAGE_CLEAR)?;
-      Ok(UserCommand::Clear)
-    }
-    "standards" => {
-      ensure_exact(&parts, 1, USAGE_STANDARDS)?;
-      Ok(UserCommand::Standards)
-    }
-    "help" | "h" | "?" => {
-      ensure_exact(&parts, 1, USAGE_HELP)?;
-      Ok(UserCommand::Help)
-    }
-    "exit" | "quit" => {
-      ensure_exact(&parts, 1, USAGE_EXIT)?;
-      Ok(UserCommand::Exit)
-    }
+    "authorize" => parse_authorize_command(&parts),
+    "data-transfer" => parse_data_transfer_command(&parts),
+    "start" => parse_start_command(&parts),
+    "stop" => parse_stop_command(&parts),
+    "connector-status" => parse_connector_status_command(&parts),
+    "meter" => parse_meter_command(&parts),
+    "send-meter" => parse_send_meter_command(&parts),
+    "heartbeat" => parse_heartbeat_command(&parts),
     _ => Err(format!(
       "Unknown command `{}`. Type `help` for available commands.",
       parts[0]
     )),
   }
+}
+
+fn parse_simple_command(
+  command: &str,
+  parts: &[&str],
+) -> Option<Result<UserCommand, String>> {
+  let result = match command {
+    "status" => {
+      parse_zero_arg_command(parts, USAGE_STATUS, UserCommand::Status)
+    }
+    "connect" => {
+      parse_zero_arg_command(parts, USAGE_CONNECT, UserCommand::Connect)
+    }
+    "disconnect" => {
+      parse_zero_arg_command(parts, USAGE_DISCONNECT, UserCommand::Disconnect)
+    }
+    "boot" => parse_zero_arg_command(parts, USAGE_BOOT, UserCommand::Boot),
+    "clear" => parse_zero_arg_command(parts, USAGE_CLEAR, UserCommand::Clear),
+    "standards" => {
+      parse_zero_arg_command(parts, USAGE_STANDARDS, UserCommand::Standards)
+    }
+    "help" | "h" | "?" => {
+      parse_zero_arg_command(parts, USAGE_HELP, UserCommand::Help)
+    }
+    "exit" | "quit" => {
+      parse_zero_arg_command(parts, USAGE_EXIT, UserCommand::Exit)
+    }
+    _ => return None,
+  };
+  Some(result)
+}
+
+fn parse_zero_arg_command(
+  parts: &[&str],
+  usage: &str,
+  command: UserCommand,
+) -> Result<UserCommand, String> {
+  ensure_exact(parts, 1, usage)?;
+  Ok(command)
+}
+
+fn parse_authorize_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_exact(parts, 2, USAGE_AUTHORIZE)?;
+  let id_token = parse_required(parts.get(1), USAGE_AUTHORIZE)?;
+  Ok(UserCommand::Authorize {
+    id_token: id_token.to_string(),
+  })
+}
+
+fn parse_data_transfer_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_range(parts, 2.., USAGE_DATA_TRANSFER)?;
+  let vendor_id = parse_required(parts.get(1), USAGE_DATA_TRANSFER)?;
+  let message_id = parts.get(2).map(|value| (*value).to_string());
+  let data = if parts.len() > 3 {
+    Some(parts[3..].join(" "))
+  } else {
+    None
+  };
+  Ok(UserCommand::DataTransfer {
+    vendor_id: vendor_id.to_string(),
+    message_id,
+    data,
+  })
+}
+
+fn parse_start_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_exact(parts, 3, USAGE_START)?;
+  let connector = parse_u16(parts.get(1), USAGE_START)?;
+  let id_token = parse_required(parts.get(2), USAGE_START)?;
+  Ok(UserCommand::Start {
+    connector,
+    id_token: id_token.to_string(),
+  })
+}
+
+fn parse_stop_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_range(parts, 2..=3, USAGE_STOP)?;
+  let connector = parse_u16(parts.get(1), USAGE_STOP)?;
+  let reason = parts.get(2).map(|value| (*value).to_string());
+  Ok(UserCommand::Stop { connector, reason })
+}
+
+fn parse_connector_status_command(
+  parts: &[&str],
+) -> Result<UserCommand, String> {
+  ensure_exact(parts, 3, USAGE_CONNECTOR_STATUS)?;
+  let connector = parse_u16(parts.get(1), USAGE_CONNECTOR_STATUS)?;
+  let status = parse_required(parts.get(2), USAGE_CONNECTOR_STATUS)?;
+  Ok(UserCommand::SetConnectorStatus {
+    connector,
+    status: status.to_string(),
+  })
+}
+
+fn parse_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_exact(parts, 3, USAGE_METER)?;
+  let connector = parse_u16(parts.get(1), USAGE_METER)?;
+  let value_wh = parse_i64(parts.get(2), USAGE_METER)?;
+  Ok(UserCommand::Meter {
+    connector,
+    value_wh,
+  })
+}
+
+fn parse_send_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
+  ensure_exact(parts, 2, USAGE_SEND_METER)?;
+  let connector = parse_u16(parts.get(1), USAGE_SEND_METER)?;
+  Ok(UserCommand::SendMeter { connector })
+}
+
+fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
+  if parts.len() == 1 {
+    return Ok(UserCommand::Heartbeat);
+  }
+  if parts.len() == 3 && parts[1].eq_ignore_ascii_case("start") {
+    let seconds = parse_u64(parts.get(2), USAGE_HEARTBEAT_START)?;
+    if seconds == 0 {
+      return Err("Heartbeat interval must be positive.".to_string());
+    }
+    return Ok(UserCommand::HeartbeatStart { seconds });
+  }
+  if parts.len() == 2 && parts[1].eq_ignore_ascii_case("stop") {
+    return Ok(UserCommand::HeartbeatStop);
+  }
+  Err(USAGE_HEARTBEAT_ALL.to_string())
 }
 
 /// Returns formatted interactive help text for the terminal command palette.

@@ -76,7 +76,7 @@ pub(super) fn completion_seed(
   let command = parts[0].to_ascii_lowercase();
 
   match command.as_str() {
-    "start" => {
+    "start" | "meter" | "send-meter" => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
     "stop" => seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
@@ -100,12 +100,6 @@ pub(super) fn completion_seed(
           STOP_REASON_HINTS_V2_1,
         ),
       }),
-    "meter" => {
-      seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-    }
-    "send-meter" => {
-      seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-    }
     "heartbeat" => {
       seed_for_position(&parts, ends_with_space, 1, &["start", "stop"])
     }
@@ -127,7 +121,7 @@ pub(super) fn completion_seed(
 
 /// Filters static command words by prefix and appends trailing spaces.
 fn complete_static(prefix: &str, words: &[&str]) -> Vec<String> {
-  let owned: Vec<String> = words.iter().map(|word| word.to_string()).collect();
+  let owned: Vec<String> = words.iter().map(ToString::to_string).collect();
   let mut candidates = filter_words(prefix, &owned);
   for candidate in &mut candidates {
     candidate.push(' ');
@@ -143,7 +137,7 @@ fn seed_for_connectors(
   known_connectors: &[u16],
 ) -> Option<(String, Vec<String>)> {
   let connector_words = connector_words(known_connectors);
-  seed_for_position_owned(parts, ends_with_space, arg_index, connector_words)
+  seed_for_position_owned(parts, ends_with_space, arg_index, &connector_words)
 }
 
 /// Produces completion candidates from a borrowed static string table.
@@ -153,9 +147,8 @@ fn seed_for_position(
   arg_index: usize,
   words: &[&str],
 ) -> Option<(String, Vec<String>)> {
-  let owned: Vec<String> =
-    words.iter().map(|value| value.to_string()).collect();
-  seed_for_position_owned(parts, ends_with_space, arg_index, owned)
+  let owned: Vec<String> = words.iter().map(ToString::to_string).collect();
+  seed_for_position_owned(parts, ends_with_space, arg_index, &owned)
 }
 
 /// Produces completion candidates from OCPP connector status values.
@@ -168,8 +161,8 @@ fn seed_for_statuses(
   let owned = statuses
     .iter()
     .map(|status| status.as_str().to_string())
-    .collect();
-  seed_for_position_owned(parts, ends_with_space, arg_index, owned)
+    .collect::<Vec<_>>();
+  seed_for_position_owned(parts, ends_with_space, arg_index, &owned)
 }
 
 /// Produces completion candidates from OCPP stop reason values.
@@ -182,8 +175,8 @@ fn seed_for_stop_reasons(
   let owned = reasons
     .iter()
     .map(|reason| reason.as_str().to_string())
-    .collect();
-  seed_for_position_owned(parts, ends_with_space, arg_index, owned)
+    .collect::<Vec<_>>();
+  seed_for_position_owned(parts, ends_with_space, arg_index, &owned)
 }
 
 /// Produces completion candidates for one argument position.
@@ -191,7 +184,7 @@ fn seed_for_position_owned(
   parts: &[&str],
   ends_with_space: bool,
   arg_index: usize,
-  words: Vec<String>,
+  words: &[String],
 ) -> Option<(String, Vec<String>)> {
   let token_index = if ends_with_space {
     parts.len()
@@ -210,7 +203,7 @@ fn seed_for_position_owned(
     parts.last().copied().unwrap_or("")
   };
 
-  let mut candidates = filter_words(prefix, &words);
+  let mut candidates = filter_words(prefix, words);
   for candidate in &mut candidates {
     candidate.push(' ');
   }
@@ -224,7 +217,7 @@ fn connector_words(known_connectors: &[u16]) -> Vec<String> {
     return vec!["1".to_string()];
   }
 
-  known_connectors.iter().map(|id| id.to_string()).collect()
+  known_connectors.iter().map(ToString::to_string).collect()
 }
 
 /// Returns case-insensitive prefix matches from a candidate word list.

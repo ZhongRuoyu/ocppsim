@@ -239,8 +239,7 @@ impl CliArgs {
       let config_path = self
         .config_path
         .clone()
-        .map(|path| expand_tilde_path(&path))
-        .unwrap_or_else(default_config_path);
+        .map_or_else(default_config_path, |path| expand_tilde_path(&path));
       let defaults = ProfileDefaults {
         connectors: DEFAULT_CONNECTORS,
         protocol: DEFAULT_PROTOCOL,
@@ -325,8 +324,7 @@ fn resolve_with_direct_args(cli: &CliArgs) -> Result<ResolvedCliArgs> {
     connectors: DEFAULT_CONNECTORS,
     protocol: cli
       .protocol
-      .map(ProtocolArg::to_version)
-      .unwrap_or(DEFAULT_PROTOCOL),
+      .map_or(DEFAULT_PROTOCOL, ProtocolArg::to_version),
     vendor: DEFAULT_VENDOR.to_string(),
     model: DEFAULT_MODEL.to_string(),
     firmware: DEFAULT_FIRMWARE.to_string(),
@@ -359,13 +357,13 @@ fn apply_cli_overrides(
     resolved.protocol = protocol.to_version();
   }
   if let Some(vendor) = &cli.vendor {
-    resolved.vendor = vendor.clone();
+    resolved.vendor.clone_from(vendor);
   }
   if let Some(model) = &cli.model {
-    resolved.model = model.clone();
+    resolved.model.clone_from(model);
   }
   if let Some(firmware) = &cli.firmware {
-    resolved.firmware = firmware.clone();
+    resolved.firmware.clone_from(firmware);
   }
   if let Some(path) = &cli.log_path {
     resolved.log_path = Some(expand_tilde_path(path));
@@ -1468,14 +1466,14 @@ connectors = 3
   }
 
   #[test]
-  /// Verifies that expand_tilde_path leaves non-tilde paths unchanged.
+  /// Verifies that [`expand_tilde_path`] leaves non-tilde paths unchanged.
   fn expand_tilde_path_leaves_absolute_unchanged() {
     let path = Path::new("/usr/local/bin/ocppsim");
     assert_eq!(expand_tilde_path(path), PathBuf::from(path));
   }
 
   #[test]
-  /// Verifies that expand_tilde_path leaves relative paths unchanged.
+  /// Verifies that [`expand_tilde_path`] leaves relative paths unchanged.
   fn expand_tilde_path_leaves_relative_unchanged() {
     let path = Path::new("relative/path.toml");
     assert_eq!(expand_tilde_path(path), PathBuf::from(path));

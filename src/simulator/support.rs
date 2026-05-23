@@ -132,15 +132,13 @@ pub(in crate::simulator) fn validate_negotiated_subprotocol<'a>(
 ) -> Result<&'a str> {
   let Some(actual) = negotiated else {
     return Err(anyhow!(
-      "CSMS did not negotiate required WebSocket subprotocol `{}`.",
-      expected
+      "CSMS did not negotiate required WebSocket subprotocol `{expected}`."
     ));
   };
   if actual != expected {
     return Err(anyhow!(
-      "CSMS negotiated WebSocket subprotocol `{}` but `{}` was requested.",
-      actual,
-      expected
+      "CSMS negotiated WebSocket subprotocol `{actual}` \
+      but `{expected}` was requested."
     ));
   }
   Ok(actual)
@@ -155,7 +153,7 @@ pub(in crate::simulator) fn required_string_field<'a>(
     .get(field)
     .and_then(Value::as_str)
     .filter(|value| !value.is_empty())
-    .ok_or_else(|| anyhow!("{} is required.", field))
+    .ok_or_else(|| anyhow!("{field} is required."))
 }
 
 /// Reads a required integer field from an inbound request payload.
@@ -166,7 +164,7 @@ pub(in crate::simulator) fn required_i64_field(
   payload
     .get(field)
     .and_then(Value::as_i64)
-    .ok_or_else(|| anyhow!("{} is required.", field))
+    .ok_or_else(|| anyhow!("{field} is required."))
 }
 
 /// Reads a required connector-like `u16` field from a request payload.
@@ -175,7 +173,7 @@ pub(in crate::simulator) fn required_u16_field(
   field: &str,
 ) -> Result<u16> {
   optional_u16_field(payload, field)?.ok_or_else(|| {
-    anyhow!("{} is required and must be an unsigned integer.", field)
+    anyhow!("{field} is required and must be an unsigned integer.")
   })
 }
 
@@ -187,7 +185,7 @@ pub(in crate::simulator) fn required_u64_field(
   payload
     .get(field)
     .and_then(Value::as_u64)
-    .ok_or_else(|| anyhow!("{} is required and must be unsigned.", field))
+    .ok_or_else(|| anyhow!("{field} is required and must be unsigned."))
 }
 
 /// Reads an optional connector-like `u16` field from a request payload.
@@ -200,9 +198,9 @@ pub(in crate::simulator) fn optional_u16_field(
   };
   let raw = value
     .as_u64()
-    .ok_or_else(|| anyhow!("{} must be an unsigned integer.", field))?;
+    .ok_or_else(|| anyhow!("{field} must be an unsigned integer."))?;
   let parsed = u16::try_from(raw).map_err(|_| {
-    anyhow!("{} is outside the supported connector range.", field)
+    anyhow!("{field} is outside the supported connector range.")
   })?;
   Ok(Some(parsed))
 }

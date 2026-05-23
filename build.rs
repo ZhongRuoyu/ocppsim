@@ -11,7 +11,6 @@ fn main() {
   let git_hash = git_hash();
   let build_date = build_date();
   let target = target();
-
   println!("cargo:rustc-env=OCPPSIM_GIT_HASH={git_hash}");
   println!("cargo:rustc-env=OCPPSIM_BUILD_DATE={build_date}");
   println!("cargo:rustc-env=OCPPSIM_TARGET={target}");
@@ -24,8 +23,7 @@ fn git_hash() -> String {
     .ok()
     .filter(|o| o.status.success())
     .and_then(|o| String::from_utf8(o.stdout).ok())
-    .map(|s| s.trim().to_owned())
-    .unwrap_or_else(|| "unknown".to_owned())
+    .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned())
 }
 
 fn build_date() -> String {
@@ -34,14 +32,15 @@ fn build_date() -> String {
   } else {
     SystemTime::now()
       .duration_since(UNIX_EPOCH)
-      .map(|d| d.as_secs())
-      .unwrap_or(0)
+      .map_or(0, |d| d.as_secs())
   };
   Utc
-    .timestamp_opt(secs as i64, 0)
+    .timestamp_opt(secs.cast_signed(), 0)
     .single()
-    .map(|dt| dt.format("%Y-%m-%d").to_string())
-    .unwrap_or_else(|| "unknown".to_owned())
+    .map_or_else(
+      || "unknown".to_owned(),
+      |dt| dt.format("%Y-%m-%d").to_string(),
+    )
 }
 
 fn target() -> String {

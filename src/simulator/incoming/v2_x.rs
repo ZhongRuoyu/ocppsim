@@ -1,5 +1,14 @@
-use super::super::payloads::*;
-use super::super::*;
+use super::super::payloads::{
+  ChargingSchedulePeriod, CompositeSchedule_V2_X, DataTransferResponse,
+  GetCompositeSchedule_V2_X_Response, GetLog_V2_X_Response,
+  GetVariables_V2_X_Response, SetVariables_V2_X_Response, VariableResult_V2_X,
+  to_value,
+};
+use super::super::{
+  ChargingRateUnit, ConnectorStatus, ResponseStatus, Result, Simulator,
+  UiLogLevel, Value, VariableAttributeType, anyhow, json, normalize_identifier,
+  now_timestamp,
+};
 use super::request::{
   AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequest_V2_X,
   ReserveNowRequest_V2_X, SendLocalListRequest_V2_X,
@@ -58,10 +67,7 @@ impl Simulator {
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 2.x.
-  pub(in crate::simulator) fn data_transfer_v2_x(
-    &self,
-    payload: &Value,
-  ) -> Value {
+  pub(in crate::simulator) fn data_transfer_v2_x(payload: &Value) -> Value {
     if payload.get("vendorId").and_then(Value::as_str).is_none() {
       return to_value(&DataTransferResponse {
         status: ResponseStatus::UnknownVendorId.as_str(),
@@ -92,7 +98,7 @@ impl Simulator {
       .ok_or_else(|| anyhow!("log.remoteLocation is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received GetLog request for {}", location),
+      format!("Received GetLog request for {location}"),
     );
     self.enqueue_log_status_notification(
       ResponseStatus::Uploading.as_str(),
@@ -198,7 +204,7 @@ impl Simulator {
       .ok_or_else(|| anyhow!("firmware.location is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received UpdateFirmware request from {}", location),
+      format!("Received UpdateFirmware request from {location}"),
     );
     self.enqueue_firmware_status_notification(
       ResponseStatus::Downloading.as_str(),

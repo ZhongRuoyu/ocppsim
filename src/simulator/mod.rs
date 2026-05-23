@@ -28,7 +28,12 @@ use crate::ocpp::{
 mod support;
 mod types;
 
-pub(in crate::simulator) use support::*;
+pub(in crate::simulator) use support::{
+  authorize_status, default_configuration_entries, map_stop_reason_v1_6,
+  map_stop_reason_v2_x, now_timestamp, optional_u16_field, required_i64_field,
+  required_string_field, required_u16_field, required_u64_field,
+  validate_negotiated_subprotocol,
+};
 pub(in crate::simulator) use types::{
   ConfigurationEntry, ConnectorState, ConnectorStatus, HeartbeatTask,
   PendingCall, PendingContext, QueuedCall, Simulator, TransactionEventRequest,
@@ -52,28 +57,7 @@ pub async fn run_simulator(
   self_cmd_tx: UnboundedSender<SimulatorCommand>,
 ) {
   let mut simulator = Simulator::new(config, ui_tx, self_cmd_tx);
-  simulator.log(
-    UiLogLevel::Info,
-    "OCPP framing follows CALL/CALLRESULT/CALLERROR arrays from OCPP-J.",
-  );
-  simulator.log(
-    UiLogLevel::Info,
-    format!(
-      "Configured WebSocket subprotocol: {}",
-      simulator.config.protocol.subprotocol()
-    ),
-  );
-  if simulator.config.strict {
-    simulator.log(
-      UiLogLevel::Info,
-      "Strict inbound schema validation is enabled.",
-    );
-  }
-  simulator.emit_snapshot();
-
-  if let Some(seconds) = simulator.config.heartbeat_seconds {
-    simulator.start_heartbeat(seconds);
-  }
+  initialize_simulator_runtime(&mut simulator);
 
   let mut connection: Option<Connection> = None;
   let mut timeout_tick = tokio::time::interval(Duration::from_millis(200));
@@ -164,27 +148,65 @@ pub async fn run_simulator(
           break 'outer;
         }
       }
-    } else {
-      match cmd_rx.recv().await {
-        Some(command) => {
-          match simulator.handle_offline_command(command).await {
-            Ok(OfflineOutcome::Continue) => {}
-            Ok(OfflineOutcome::Connect(new_connection)) => {
-              connection = Some(new_connection);
-            }
-            Ok(OfflineOutcome::Exit) => break 'outer,
-            Err(error) => {
-              simulator
-                .log(UiLogLevel::Error, format!("Command failed: {error}"));
-            }
-          }
-        }
-        None => break 'outer,
-      }
+    } else if !handle_offline_loop_step(
+      &mut simulator,
+      &mut cmd_rx,
+      &mut connection,
+    )
+    .await
+    {
+      break 'outer;
     }
   }
 
   simulator.stop_heartbeat();
+}
+
+fn initialize_simulator_runtime(simulator: &mut Simulator) {
+  simulator.log(
+    UiLogLevel::Info,
+    "OCPP framing follows CALL/CALLRESULT/CALLERROR arrays from OCPP-J.",
+  );
+  simulator.log(
+    UiLogLevel::Info,
+    format!(
+      "Configured WebSocket subprotocol: {}",
+      simulator.config.protocol.subprotocol()
+    ),
+  );
+  if simulator.config.strict {
+    simulator.log(
+      UiLogLevel::Info,
+      "Strict inbound schema validation is enabled.",
+    );
+  }
+  simulator.emit_snapshot();
+
+  if let Some(seconds) = simulator.config.heartbeat_seconds {
+    simulator.start_heartbeat(seconds);
+  }
+}
+
+async fn handle_offline_loop_step(
+  simulator: &mut Simulator,
+  cmd_rx: &mut UnboundedReceiver<SimulatorCommand>,
+  connection: &mut Option<Connection>,
+) -> bool {
+  match cmd_rx.recv().await {
+    Some(command) => match simulator.handle_offline_command(command).await {
+      Ok(OfflineOutcome::Continue) => true,
+      Ok(OfflineOutcome::Connect(new_connection)) => {
+        *connection = Some(new_connection);
+        true
+      }
+      Ok(OfflineOutcome::Exit) => false,
+      Err(error) => {
+        simulator.log(UiLogLevel::Error, format!("Command failed: {error}"));
+        true
+      }
+    },
+    None => false,
+  }
 }
 
 #[derive(Debug)]
@@ -337,7 +359,11 @@ impl Simulator {
           );
           return Ok(());
         }
-        self.enqueue_data_transfer(vendor_id, message_id, data);
+        self.enqueue_data_transfer(
+          vendor_id.as_str(),
+          message_id.as_deref(),
+          data.as_deref(),
+        );
       }
       SimulatorCommand::StartTransaction {
         connector,
@@ -352,7 +378,12 @@ impl Simulator {
         )?;
       }
       SimulatorCommand::StopTransaction { connector, reason } => {
-        self.stop_transaction(connector, reason, false, is_connected)?;
+        self.stop_transaction(
+          connector,
+          reason.as_deref(),
+          false,
+          is_connected,
+        )?;
       }
       SimulatorCommand::SetMeter {
         connector,
@@ -445,7 +476,7 @@ impl Simulator {
     if self.config.append_cp_id {
       let mut segments = url
         .path_segments_mut()
-        .map_err(|_| anyhow!("WebSocket URL cannot be a base URL."))?;
+        .map_err(|()| anyhow!("WebSocket URL cannot be a base URL."))?;
       segments.pop_if_empty().push(&self.config.cp_id);
     }
     Ok(url)
@@ -475,7 +506,7 @@ impl Simulator {
     };
 
     let message_id = self.next_message_id();
-    let payload = build_call(&message_id, &call.action, call.payload.clone());
+    let payload = build_call(&message_id, &call.action, &call.payload);
     self
       .send_text(
         write,
@@ -509,8 +540,7 @@ impl Simulator {
     self.log(
       UiLogLevel::Warn,
       format!(
-        "Timed out waiting for response to {} (messageId={}).",
-        action, message_id
+        "Timed out waiting for response to {action} (messageId={message_id})."
       ),
     );
     self.handle_pending_timeout_context(&context);

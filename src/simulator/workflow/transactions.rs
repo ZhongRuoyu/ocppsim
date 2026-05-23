@@ -1,5 +1,12 @@
-use super::super::payloads::*;
-use super::super::*;
+use super::super::payloads::{
+  StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
+};
+use super::super::{
+  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext, Result,
+  Simulator, StopReason, TransactionEventRequest, TransactionState,
+  TransactionTriggerReason, TxEventType, UiLogLevel, anyhow,
+  map_stop_reason_v1_6, map_stop_reason_v2_x, now_timestamp,
+};
 
 impl Simulator {
   /// Starts a local transaction and enqueues protocol-specific start messages.
@@ -24,7 +31,7 @@ impl Simulator {
 
     {
       let connector_state = self.connector_mut(connector)?;
-      let tx_uid = format!("tx-{}", local_tx_id);
+      let tx_uid = format!("tx-{local_tx_id}");
       connector_state.transaction = Some(TransactionState {
         local_id: local_tx_id,
         transaction_uid: tx_uid,
@@ -39,8 +46,7 @@ impl Simulator {
     self.log(
       UiLogLevel::Info,
       format!(
-        "Transaction started locally on connector {} with idToken {}",
-        connector, id_token
+        "Transaction started locally on connector {connector} with idToken {id_token}"
       ),
     );
 
@@ -57,8 +63,7 @@ impl Simulator {
         let meter_start = self
           .connectors
           .get(&connector)
-          .map(|state| state.meter_wh)
-          .unwrap_or(0);
+          .map_or(0, |state| state.meter_wh);
         let timestamp = now_timestamp();
         let payload = to_value(&StartTransactionV1_6Request {
           connector_id: connector,
@@ -82,7 +87,7 @@ impl Simulator {
         } else {
           TransactionTriggerReason::Authorized
         };
-        self.enqueue_transaction_event(TransactionEventRequest {
+        self.enqueue_transaction_event(&TransactionEventRequest {
           connector,
           local_tx_id,
           event_type: TxEventType::Started,
@@ -100,17 +105,14 @@ impl Simulator {
   pub(in crate::simulator) fn stop_transaction(
     &mut self,
     connector: u16,
-    reason: Option<String>,
+    reason: Option<&str>,
     remote_stop: bool,
     is_connected: bool,
   ) -> Result<()> {
     let (local_tx_id, tx_uid, v1_6_tx_id, remote_start_id, token) = {
       let connector_state = self.connector_mut(connector)?;
       let Some(transaction) = connector_state.transaction.as_ref() else {
-        return Err(anyhow!(
-          "No active transaction on connector {}.",
-          connector
-        ));
+        return Err(anyhow!("No active transaction on connector {connector}."));
       };
       (
         transaction.local_id,
@@ -131,7 +133,7 @@ impl Simulator {
 
         self.log(
           UiLogLevel::Info,
-          format!("Transaction stopped locally on connector {}", connector),
+          format!("Transaction stopped locally on connector {connector}"),
         );
 
         if !is_connected {
@@ -144,9 +146,9 @@ impl Simulator {
         }
 
         let connector_state = self.connector_ref(connector)?;
-        let tx_id = v1_6_tx_id.unwrap_or(local_tx_id as i64);
+        let tx_id = v1_6_tx_id.unwrap_or(local_tx_id.cast_signed());
         let timestamp = now_timestamp();
-        let stop_reason = map_stop_reason_v1_6(reason.as_deref(), remote_stop);
+        let stop_reason = map_stop_reason_v1_6(reason, remote_stop);
         let reason_str =
           stop_reason.as_v1_6().unwrap_or(StopReason::Local.as_str());
         let payload = to_value(&StopTransactionV1_6Request {
@@ -171,7 +173,7 @@ impl Simulator {
           self.complete_transaction_stop(connector, local_tx_id)?;
           self.log(
             UiLogLevel::Info,
-            format!("Transaction stopped locally on connector {}", connector),
+            format!("Transaction stopped locally on connector {connector}"),
           );
           self.log(
             UiLogLevel::Warn,
@@ -185,12 +187,9 @@ impl Simulator {
         } else {
           TransactionTriggerReason::StopAuthorized
         };
-        let stopped_reason = map_stop_reason_v2_x(
-          self.config.protocol,
-          reason.as_deref(),
-          remote_stop,
-        );
-        self.enqueue_transaction_event(TransactionEventRequest {
+        let stopped_reason =
+          map_stop_reason_v2_x(self.config.protocol, reason, remote_stop);
+        self.enqueue_transaction_event(&TransactionEventRequest {
           connector,
           local_tx_id,
           event_type: TxEventType::Ended,
@@ -203,7 +202,7 @@ impl Simulator {
         self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
         self.log(
           UiLogLevel::Info,
-          format!("Transaction stopped locally on connector {}", connector),
+          format!("Transaction stopped locally on connector {connector}"),
         );
       }
     }
@@ -220,7 +219,7 @@ impl Simulator {
     connector_state.meter_wh = value_wh;
     self.log(
       UiLogLevel::Info,
-      format!("Connector {} meter set to {} Wh", connector, value_wh),
+      format!("Connector {connector} meter set to {value_wh} Wh"),
     );
     Ok(())
   }
@@ -244,7 +243,7 @@ impl Simulator {
       let tx = connector_state.transaction.as_ref();
       (
         tx.is_some(),
-        tx.map(|item| item.local_id).unwrap_or(0),
+        tx.map_or(0, |item| item.local_id),
         tx.and_then(|item| item.remote_start_id),
       )
     };
@@ -256,7 +255,7 @@ impl Simulator {
       OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
         if has_tx {
           self.bump_seq_no(connector, local_tx_id)?;
-          self.enqueue_transaction_event(TransactionEventRequest {
+          self.enqueue_transaction_event(&TransactionEventRequest {
             connector,
             local_tx_id,
             event_type: TxEventType::Updated,

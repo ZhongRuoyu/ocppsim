@@ -1,5 +1,12 @@
-use super::super::payloads::*;
-use super::super::*;
+use super::super::payloads::{
+  ChargingSchedulePeriod, ChargingScheduleV1_6, ConfigurationKeyEntry,
+  DataTransferResponse, GetCompositeScheduleV1_6Response,
+  GetConfigurationV1_6Response, GetDiagnosticsV1_6Response, to_value,
+};
+use super::super::{
+  ChargingRateUnit, ConfigurationKey, ConnectorStatus, ResponseStatus, Result,
+  Simulator, UiLogLevel, Value, anyhow, now_timestamp, optional_u16_field,
+};
 use super::request::{
   AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequestV1_6,
   ReserveNowRequestV1_6, SendLocalListRequestV1_6,
@@ -124,10 +131,7 @@ impl Simulator {
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 1.6.
-  pub(in crate::simulator) fn data_transfer_v1_6(
-    &self,
-    payload: &Value,
-  ) -> Value {
+  pub(in crate::simulator) fn data_transfer_v1_6(payload: &Value) -> Value {
     if payload.get("vendorId").and_then(Value::as_str).is_none() {
       return to_value(&DataTransferResponse {
         status: ResponseStatus::UnknownVendorId.as_str(),
@@ -155,7 +159,7 @@ impl Simulator {
       .ok_or_else(|| anyhow!("location is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received GetDiagnostics request for {}", location),
+      format!("Received GetDiagnostics request for {location}"),
     );
     self.enqueue_diagnostics_status_notification(
       ResponseStatus::Uploading.as_str(),
@@ -187,7 +191,7 @@ impl Simulator {
     }
     self.log(
       UiLogLevel::Info,
-      format!("Received UpdateFirmware request from {}", location),
+      format!("Received UpdateFirmware request from {location}"),
     );
     self.enqueue_firmware_status_notification(
       ResponseStatus::Downloading.as_str(),
@@ -363,9 +367,9 @@ impl Simulator {
     &mut self,
     payload: &Value,
   ) -> ResponseStatus {
-    let targets = match self.clear_profile_targets(payload, "connectorId") {
-      Some(value) => value,
-      None => return ResponseStatus::Unknown,
+    let Some(targets) = self.clear_profile_targets(payload, "connectorId")
+    else {
+      return ResponseStatus::Unknown;
     };
     let profile_id = payload.get("id").and_then(Value::as_i64);
     let purpose = payload
@@ -394,7 +398,7 @@ impl Simulator {
     field: &str,
   ) -> Option<Vec<u16>> {
     match optional_u16_field(payload, field) {
-      Ok(Some(0)) | Ok(None) => Some(self.connectors.keys().copied().collect()),
+      Ok(Some(0) | None) => Some(self.connectors.keys().copied().collect()),
       Ok(Some(connector)) => {
         if self.connectors.contains_key(&connector) {
           Some(vec![connector])
@@ -420,8 +424,7 @@ impl Simulator {
       let should_remove = self
         .charging_profiles
         .get(&connector)
-        .map(&matches_profile)
-        .unwrap_or(false);
+        .is_some_and(&matches_profile);
       if should_remove {
         self.charging_profiles.remove(&connector);
         cleared.push(connector);

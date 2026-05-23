@@ -196,7 +196,7 @@ pub fn profile_names(config_path: &Path) -> Result<Vec<String>> {
 
   let mut names = charge_points
     .iter()
-    .filter_map(|(name, value)| value.as_table().map(|_| name.to_string()))
+    .filter_map(|(name, value)| value.as_table().map(|_| name.clone()))
     .collect::<Vec<_>>();
   names.sort();
   Ok(names)
@@ -248,7 +248,7 @@ fn parse_protocol_label(label: &str) -> Result<OcppVersion> {
     "1.6" => Ok(OcppVersion::V1_6),
     "2.0.1" => Ok(OcppVersion::V2_0_1),
     "2.1" => Ok(OcppVersion::V2_1),
-    _ => bail!("Expected one of: 1.6, 2.0.1, 2.1. Got `{}`.", label),
+    _ => bail!("Expected one of: 1.6, 2.0.1, 2.1. Got `{label}`."),
   }
 }
 

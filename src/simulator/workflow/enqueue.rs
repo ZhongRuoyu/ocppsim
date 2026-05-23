@@ -1,5 +1,20 @@
-use super::super::payloads::*;
-use super::super::*;
+use super::super::payloads::{
+  Authorize_V2_X_Request, AuthorizeV1_6Request, BootNotification_V2_X_Request,
+  BootNotificationV1_6Request, ChargingStationInfo, DataTransferRequestPayload,
+  EvsePayload, FirmwareStatus_V2_X_Payload, HeartbeatRequest, IdTokenPayload,
+  LogStatusPayload, MeterValueEntry, MeterValues_V2_X_Request,
+  MeterValuesV1_6Request, SampledValue_V2_X, SampledValueV1_6,
+  StatusNotification_V2_X_Request, StatusNotificationV1_6Request,
+  StatusPayload, TransactionEvent_V2_X_Request, TransactionInfoPayload,
+  UnitOfMeasure, to_value,
+};
+use super::super::{
+  BootReason, ConnectorState, ConnectorStatus, IdTokenType, Measurand,
+  MeterUnit, OcppVersion, OutgoingAction, PendingContext,
+  QUEUE_DEPTH_WARN_THRESHOLD, QueuedCall, ReadingContext, Result, Simulator,
+  StatusNotificationErrorCode, TransactionEventRequest, TransactionState,
+  TxEventType, UiLogLevel, Value, anyhow, now_timestamp,
+};
 
 impl Simulator {
   /// Enqueues a CALL with its payload and post-response context.
@@ -18,9 +33,8 @@ impl Simulator {
       self.log(
         UiLogLevel::Warn,
         format!(
-          "Outbound OCPP queue reached {} messages; \
-          check CSMS responses or reduce command rate.",
-          QUEUE_DEPTH_WARN_THRESHOLD
+          "Outbound OCPP queue reached {QUEUE_DEPTH_WARN_THRESHOLD} messages; \
+          check CSMS responses or reduce command rate."
         ),
       );
     }
@@ -83,26 +97,20 @@ impl Simulator {
   /// Enqueues a charge-point initiated `DataTransfer` request.
   pub(in crate::simulator) fn enqueue_data_transfer(
     &mut self,
-    vendor_id: String,
-    message_id: Option<String>,
-    data: Option<String>,
+    vendor_id: &str,
+    message_id: Option<&str>,
+    data: Option<&str>,
   ) {
     let payload = match self.config.protocol {
-      OcppVersion::V1_6 => Self::data_transfer_v1_6_payload(
-        &vendor_id,
-        message_id.as_deref(),
-        data.as_deref(),
-      ),
-      OcppVersion::V2_0_1 => Self::data_transfer_v2_0_1_payload(
-        &vendor_id,
-        message_id.as_deref(),
-        data.as_deref(),
-      ),
-      OcppVersion::V2_1 => Self::data_transfer_v2_1_payload(
-        &vendor_id,
-        message_id.as_deref(),
-        data.as_deref(),
-      ),
+      OcppVersion::V1_6 => {
+        Self::data_transfer_v1_6_payload(vendor_id, message_id, data)
+      }
+      OcppVersion::V2_0_1 => {
+        Self::data_transfer_v2_0_1_payload(vendor_id, message_id, data)
+      }
+      OcppVersion::V2_1 => {
+        Self::data_transfer_v2_1_payload(vendor_id, message_id, data)
+      }
     };
     self.enqueue_call(
       OutgoingAction::DataTransfer.as_str(),
@@ -169,13 +177,13 @@ impl Simulator {
     let status = connector_state.status;
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => {
-        self.status_notification_v1_6_payload(connector, status)
+        Self::status_notification_v1_6_payload(connector, status)
       }
       OcppVersion::V2_0_1 => {
-        self.status_notification_v2_0_1_payload(connector, status)
+        Self::status_notification_v2_0_1_payload(connector, status)
       }
       OcppVersion::V2_1 => {
-        self.status_notification_v2_1_payload(connector, status)
+        Self::status_notification_v2_1_payload(connector, status)
       }
     };
     self.enqueue_call(
@@ -230,7 +238,7 @@ impl Simulator {
   /// Inputs describe event semantics plus optional id token and stop reason.
   pub(in crate::simulator) fn enqueue_transaction_event(
     &mut self,
-    request: TransactionEventRequest,
+    request: &TransactionEventRequest,
   ) -> Result<()> {
     let state = self.connector_ref(request.connector)?;
 
@@ -249,7 +257,7 @@ impl Simulator {
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => unreachable!("TransactionEvent is not OCPP 1.6"),
       OcppVersion::V2_0_1 => Self::transaction_event_v2_0_1_payload(
-        &request,
+        request,
         transaction,
         state.meter_wh,
         &timestamp,
@@ -258,7 +266,7 @@ impl Simulator {
         OcppVersion::V2_0_1,
       ),
       OcppVersion::V2_1 => Self::transaction_event_v2_1_payload(
-        &request,
+        request,
         transaction,
         state.meter_wh,
         &timestamp,
@@ -394,7 +402,6 @@ impl Simulator {
   }
 
   fn status_notification_v1_6_payload(
-    &self,
     connector: u16,
     status: ConnectorStatus,
   ) -> Value {
@@ -411,7 +418,6 @@ impl Simulator {
   }
 
   fn status_notification_v2_0_1_payload(
-    &self,
     connector: u16,
     status: ConnectorStatus,
   ) -> Value {
@@ -428,7 +434,6 @@ impl Simulator {
   }
 
   fn status_notification_v2_1_payload(
-    &self,
     connector: u16,
     status: ConnectorStatus,
   ) -> Value {

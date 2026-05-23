@@ -1019,7 +1019,7 @@ wire_enum! {
 fn normalize_wire_identifier(value: &str) -> String {
   value
     .chars()
-    .filter(|ch| ch.is_ascii_alphanumeric())
+    .filter(char::is_ascii_alphanumeric)
     .map(|ch| ch.to_ascii_lowercase())
     .collect()
 }
@@ -1306,234 +1306,147 @@ pub enum ResponseStatus {
   VersionMismatch,
 }
 
+macro_rules! response_status_map {
+  ($callback:ident, $value:expr) => {
+    $callback! {
+      $value;
+      Accepted => "Accepted",
+      AcceptedCanceled => "AcceptedCanceled",
+      Available => "Available",
+      BadMessage => "BadMessage",
+      Blocked => "Blocked",
+      Canceled => "Canceled",
+      CertChainError => "CertChainError",
+      CertificateExpired => "CertificateExpired",
+      CertificateRevoked => "CertificateRevoked",
+      Charging => "Charging",
+      ChecksumVerified => "ChecksumVerified",
+      ConcurrentTx => "ConcurrentTx",
+      ConditionNotSupported => "ConditionNotSupported",
+      ContractCancelled => "ContractCancelled",
+      Crl => "CRL",
+      Downloaded => "Downloaded",
+      DownloadFailed => "DownloadFailed",
+      Downloading => "Downloading",
+      DownloadOngoing => "DownloadOngoing",
+      DownloadPaused => "DownloadPaused",
+      DownloadScheduled => "DownloadScheduled",
+      Duplicate => "Duplicate",
+      DuplicateTariffId => "DuplicateTariffId",
+      EmptyResultSet => "EmptyResultSet",
+      Expired => "Expired",
+      Failed => "Failed",
+      Faulted => "Faulted",
+      Finishing => "Finishing",
+      Good => "Good",
+      Idle => "Idle",
+      Inoperative => "Inoperative",
+      InstallationFailed => "InstallationFailed",
+      Installed => "Installed",
+      Installing => "Installing",
+      InstallRebooting => "InstallRebooting",
+      InstallScheduled => "InstallScheduled",
+      InstallVerificationFailed => "InstallVerificationFailed",
+      Invalid => "Invalid",
+      InvalidCertificate => "InvalidCertificate",
+      InvalidChecksum => "InvalidChecksum",
+      InvalidSignature => "InvalidSignature",
+      LanguageNotSupported => "LanguageNotSupported",
+      NoCertificateAvailable => "NoCertificateAvailable",
+      NoChargingProfile => "NoChargingProfile",
+      NoCredit => "NoCredit",
+      NoCurrencyChange => "NoCurrencyChange",
+      NoFirmware => "NoFirmware",
+      NoProfile => "NoProfile",
+      NoProfiles => "NoProfiles",
+      NotAllowedTypeEVSE => "NotAllowedTypeEVSE",
+      NoTariff => "NoTariff",
+      NotAtThisLocation => "NotAtThisLocation",
+      NotAtThisTime => "NotAtThisTime",
+      NotFound => "NotFound",
+      NotImplemented => "NotImplemented",
+      NoTransaction => "NoTransaction",
+      NotReady => "NotReady",
+      NotSupported => "NotSupported",
+      NotSupportedAttributeType => "NotSupportedAttributeType",
+      NotSupportedMessageFormat => "NotSupportedMessageFormat",
+      NotSupportedOperation => "NotSupportedOperation",
+      NotSupportedPriority => "NotSupportedPriority",
+      NotSupportedState => "NotSupportedState",
+      Occupied => "Occupied",
+      Ocsp => "OCSP",
+      OngoingAuthorizedTransaction => "OngoingAuthorizedTransaction",
+      Operative => "Operative",
+      Pending => "Pending",
+      PermissionDenied => "PermissionDenied",
+      Preconditioning => "Preconditioning",
+      Preparing => "Preparing",
+      Processing => "Processing",
+      Published => "Published",
+      PublishFailed => "PublishFailed",
+      Ready => "Ready",
+      RebootRequired => "RebootRequired",
+      Rejected => "Rejected",
+      Removed => "Removed",
+      Reserved => "Reserved",
+      Revoked => "Revoked",
+      RevokedCertificate => "RevokedCertificate",
+      Scheduled => "Scheduled",
+      Settled => "Settled",
+      SignatureError => "SignatureError",
+      SignatureVerified => "SignatureVerified",
+      SuspendedEV => "SuspendedEV",
+      SuspendedEVSE => "SuspendedEVSE",
+      TooManyElements => "TooManyElements",
+      TxNotFound => "TxNotFound",
+      Unavailable => "Unavailable",
+      Unknown => "Unknown",
+      UnknownComponent => "UnknownComponent",
+      UnknownConnector => "UnknownConnector",
+      UnknownMessageId => "UnknownMessageId",
+      UnknownTransaction => "UnknownTransaction",
+      UnknownVariable => "UnknownVariable",
+      UnknownVendorId => "UnknownVendorId",
+      Unlocked => "Unlocked",
+      UnlockFailed => "UnlockFailed",
+      Unpublished => "Unpublished",
+      Unsupported => "Unsupported",
+      UnsupportedMonitorType => "UnsupportedMonitorType",
+      Uploaded => "Uploaded",
+      UploadFailed => "UploadFailed",
+      UploadFailure => "UploadFailure",
+      Uploading => "Uploading",
+      VersionMismatch => "VersionMismatch",
+    }
+  };
+}
+
+macro_rules! response_status_as_str_impl {
+  ($value:expr; $($variant:ident => $token:literal,)*) => {
+    match $value {
+      $(ResponseStatus::$variant => $token,)*
+    }
+  };
+}
+
+macro_rules! response_status_parse_impl {
+  ($value:expr; $($variant:ident => $token:literal,)*) => {
+    match $value {
+      $($token => Some(ResponseStatus::$variant),)*
+      _ => None,
+    }
+  };
+}
+
 impl ResponseStatus {
   /// Returns the wire-format status token used in OCPP payloads.
   pub fn as_str(self) -> &'static str {
-    match self {
-      Self::Accepted => "Accepted",
-      Self::AcceptedCanceled => "AcceptedCanceled",
-      Self::Available => "Available",
-      Self::BadMessage => "BadMessage",
-      Self::Blocked => "Blocked",
-      Self::Canceled => "Canceled",
-      Self::CertChainError => "CertChainError",
-      Self::CertificateExpired => "CertificateExpired",
-      Self::CertificateRevoked => "CertificateRevoked",
-      Self::Charging => "Charging",
-      Self::ChecksumVerified => "ChecksumVerified",
-      Self::ConcurrentTx => "ConcurrentTx",
-      Self::ConditionNotSupported => "ConditionNotSupported",
-      Self::ContractCancelled => "ContractCancelled",
-      Self::Crl => "CRL",
-      Self::Downloaded => "Downloaded",
-      Self::DownloadFailed => "DownloadFailed",
-      Self::Downloading => "Downloading",
-      Self::DownloadOngoing => "DownloadOngoing",
-      Self::DownloadPaused => "DownloadPaused",
-      Self::DownloadScheduled => "DownloadScheduled",
-      Self::Duplicate => "Duplicate",
-      Self::DuplicateTariffId => "DuplicateTariffId",
-      Self::EmptyResultSet => "EmptyResultSet",
-      Self::Expired => "Expired",
-      Self::Failed => "Failed",
-      Self::Faulted => "Faulted",
-      Self::Finishing => "Finishing",
-      Self::Good => "Good",
-      Self::Idle => "Idle",
-      Self::Inoperative => "Inoperative",
-      Self::InstallationFailed => "InstallationFailed",
-      Self::Installed => "Installed",
-      Self::Installing => "Installing",
-      Self::InstallRebooting => "InstallRebooting",
-      Self::InstallScheduled => "InstallScheduled",
-      Self::InstallVerificationFailed => "InstallVerificationFailed",
-      Self::Invalid => "Invalid",
-      Self::InvalidCertificate => "InvalidCertificate",
-      Self::InvalidChecksum => "InvalidChecksum",
-      Self::InvalidSignature => "InvalidSignature",
-      Self::LanguageNotSupported => "LanguageNotSupported",
-      Self::NoCertificateAvailable => "NoCertificateAvailable",
-      Self::NoChargingProfile => "NoChargingProfile",
-      Self::NoCredit => "NoCredit",
-      Self::NoCurrencyChange => "NoCurrencyChange",
-      Self::NoFirmware => "NoFirmware",
-      Self::NoProfile => "NoProfile",
-      Self::NoProfiles => "NoProfiles",
-      Self::NotAllowedTypeEVSE => "NotAllowedTypeEVSE",
-      Self::NoTariff => "NoTariff",
-      Self::NotAtThisLocation => "NotAtThisLocation",
-      Self::NotAtThisTime => "NotAtThisTime",
-      Self::NotFound => "NotFound",
-      Self::NotImplemented => "NotImplemented",
-      Self::NoTransaction => "NoTransaction",
-      Self::NotReady => "NotReady",
-      Self::NotSupported => "NotSupported",
-      Self::NotSupportedAttributeType => "NotSupportedAttributeType",
-      Self::NotSupportedMessageFormat => "NotSupportedMessageFormat",
-      Self::NotSupportedOperation => "NotSupportedOperation",
-      Self::NotSupportedPriority => "NotSupportedPriority",
-      Self::NotSupportedState => "NotSupportedState",
-      Self::Occupied => "Occupied",
-      Self::Ocsp => "OCSP",
-      Self::OngoingAuthorizedTransaction => "OngoingAuthorizedTransaction",
-      Self::Operative => "Operative",
-      Self::Pending => "Pending",
-      Self::PermissionDenied => "PermissionDenied",
-      Self::Preconditioning => "Preconditioning",
-      Self::Preparing => "Preparing",
-      Self::Processing => "Processing",
-      Self::Published => "Published",
-      Self::PublishFailed => "PublishFailed",
-      Self::Ready => "Ready",
-      Self::RebootRequired => "RebootRequired",
-      Self::Rejected => "Rejected",
-      Self::Removed => "Removed",
-      Self::Reserved => "Reserved",
-      Self::Revoked => "Revoked",
-      Self::RevokedCertificate => "RevokedCertificate",
-      Self::Scheduled => "Scheduled",
-      Self::Settled => "Settled",
-      Self::SignatureError => "SignatureError",
-      Self::SignatureVerified => "SignatureVerified",
-      Self::SuspendedEV => "SuspendedEV",
-      Self::SuspendedEVSE => "SuspendedEVSE",
-      Self::TooManyElements => "TooManyElements",
-      Self::TxNotFound => "TxNotFound",
-      Self::Unavailable => "Unavailable",
-      Self::Unknown => "Unknown",
-      Self::UnknownComponent => "UnknownComponent",
-      Self::UnknownConnector => "UnknownConnector",
-      Self::UnknownMessageId => "UnknownMessageId",
-      Self::UnknownTransaction => "UnknownTransaction",
-      Self::UnknownVariable => "UnknownVariable",
-      Self::UnknownVendorId => "UnknownVendorId",
-      Self::Unlocked => "Unlocked",
-      Self::UnlockFailed => "UnlockFailed",
-      Self::Unpublished => "Unpublished",
-      Self::Unsupported => "Unsupported",
-      Self::UnsupportedMonitorType => "UnsupportedMonitorType",
-      Self::Uploaded => "Uploaded",
-      Self::UploadFailed => "UploadFailed",
-      Self::UploadFailure => "UploadFailure",
-      Self::Uploading => "Uploading",
-      Self::VersionMismatch => "VersionMismatch",
-    }
+    response_status_map!(response_status_as_str_impl, self)
   }
 
   /// Parses a wire-format status token into the internal enum.
   pub fn parse(value: &str) -> Option<Self> {
-    match value {
-      "Accepted" => Some(Self::Accepted),
-      "AcceptedCanceled" => Some(Self::AcceptedCanceled),
-      "Available" => Some(Self::Available),
-      "BadMessage" => Some(Self::BadMessage),
-      "Blocked" => Some(Self::Blocked),
-      "Canceled" => Some(Self::Canceled),
-      "CertChainError" => Some(Self::CertChainError),
-      "CertificateExpired" => Some(Self::CertificateExpired),
-      "CertificateRevoked" => Some(Self::CertificateRevoked),
-      "Charging" => Some(Self::Charging),
-      "ChecksumVerified" => Some(Self::ChecksumVerified),
-      "ConcurrentTx" => Some(Self::ConcurrentTx),
-      "ConditionNotSupported" => Some(Self::ConditionNotSupported),
-      "ContractCancelled" => Some(Self::ContractCancelled),
-      "CRL" => Some(Self::Crl),
-      "Downloaded" => Some(Self::Downloaded),
-      "DownloadFailed" => Some(Self::DownloadFailed),
-      "Downloading" => Some(Self::Downloading),
-      "DownloadOngoing" => Some(Self::DownloadOngoing),
-      "DownloadPaused" => Some(Self::DownloadPaused),
-      "DownloadScheduled" => Some(Self::DownloadScheduled),
-      "Duplicate" => Some(Self::Duplicate),
-      "DuplicateTariffId" => Some(Self::DuplicateTariffId),
-      "EmptyResultSet" => Some(Self::EmptyResultSet),
-      "Expired" => Some(Self::Expired),
-      "Failed" => Some(Self::Failed),
-      "Faulted" => Some(Self::Faulted),
-      "Finishing" => Some(Self::Finishing),
-      "Good" => Some(Self::Good),
-      "Idle" => Some(Self::Idle),
-      "Inoperative" => Some(Self::Inoperative),
-      "InstallationFailed" => Some(Self::InstallationFailed),
-      "Installed" => Some(Self::Installed),
-      "Installing" => Some(Self::Installing),
-      "InstallRebooting" => Some(Self::InstallRebooting),
-      "InstallScheduled" => Some(Self::InstallScheduled),
-      "InstallVerificationFailed" => Some(Self::InstallVerificationFailed),
-      "Invalid" => Some(Self::Invalid),
-      "InvalidCertificate" => Some(Self::InvalidCertificate),
-      "InvalidChecksum" => Some(Self::InvalidChecksum),
-      "InvalidSignature" => Some(Self::InvalidSignature),
-      "LanguageNotSupported" => Some(Self::LanguageNotSupported),
-      "NoCertificateAvailable" => Some(Self::NoCertificateAvailable),
-      "NoChargingProfile" => Some(Self::NoChargingProfile),
-      "NoCredit" => Some(Self::NoCredit),
-      "NoCurrencyChange" => Some(Self::NoCurrencyChange),
-      "NoFirmware" => Some(Self::NoFirmware),
-      "NoProfile" => Some(Self::NoProfile),
-      "NoProfiles" => Some(Self::NoProfiles),
-      "NotAllowedTypeEVSE" => Some(Self::NotAllowedTypeEVSE),
-      "NoTariff" => Some(Self::NoTariff),
-      "NotAtThisLocation" => Some(Self::NotAtThisLocation),
-      "NotAtThisTime" => Some(Self::NotAtThisTime),
-      "NotFound" => Some(Self::NotFound),
-      "NotImplemented" => Some(Self::NotImplemented),
-      "NoTransaction" => Some(Self::NoTransaction),
-      "NotReady" => Some(Self::NotReady),
-      "NotSupported" => Some(Self::NotSupported),
-      "NotSupportedAttributeType" => Some(Self::NotSupportedAttributeType),
-      "NotSupportedMessageFormat" => Some(Self::NotSupportedMessageFormat),
-      "NotSupportedOperation" => Some(Self::NotSupportedOperation),
-      "NotSupportedPriority" => Some(Self::NotSupportedPriority),
-      "NotSupportedState" => Some(Self::NotSupportedState),
-      "Occupied" => Some(Self::Occupied),
-      "OCSP" => Some(Self::Ocsp),
-      "OngoingAuthorizedTransaction" => {
-        Some(Self::OngoingAuthorizedTransaction)
-      }
-      "Operative" => Some(Self::Operative),
-      "Pending" => Some(Self::Pending),
-      "PermissionDenied" => Some(Self::PermissionDenied),
-      "Preconditioning" => Some(Self::Preconditioning),
-      "Preparing" => Some(Self::Preparing),
-      "Processing" => Some(Self::Processing),
-      "Published" => Some(Self::Published),
-      "PublishFailed" => Some(Self::PublishFailed),
-      "Ready" => Some(Self::Ready),
-      "RebootRequired" => Some(Self::RebootRequired),
-      "Rejected" => Some(Self::Rejected),
-      "Removed" => Some(Self::Removed),
-      "Reserved" => Some(Self::Reserved),
-      "Revoked" => Some(Self::Revoked),
-      "RevokedCertificate" => Some(Self::RevokedCertificate),
-      "Scheduled" => Some(Self::Scheduled),
-      "Settled" => Some(Self::Settled),
-      "SignatureError" => Some(Self::SignatureError),
-      "SignatureVerified" => Some(Self::SignatureVerified),
-      "SuspendedEV" => Some(Self::SuspendedEV),
-      "SuspendedEVSE" => Some(Self::SuspendedEVSE),
-      "TooManyElements" => Some(Self::TooManyElements),
-      "TxNotFound" => Some(Self::TxNotFound),
-      "Unavailable" => Some(Self::Unavailable),
-      "Unknown" => Some(Self::Unknown),
-      "UnknownComponent" => Some(Self::UnknownComponent),
-      "UnknownConnector" => Some(Self::UnknownConnector),
-      "UnknownMessageId" => Some(Self::UnknownMessageId),
-      "UnknownTransaction" => Some(Self::UnknownTransaction),
-      "UnknownVariable" => Some(Self::UnknownVariable),
-      "UnknownVendorId" => Some(Self::UnknownVendorId),
-      "Unlocked" => Some(Self::Unlocked),
-      "UnlockFailed" => Some(Self::UnlockFailed),
-      "Unpublished" => Some(Self::Unpublished),
-      "Unsupported" => Some(Self::Unsupported),
-      "UnsupportedMonitorType" => Some(Self::UnsupportedMonitorType),
-      "Uploaded" => Some(Self::Uploaded),
-      "UploadFailed" => Some(Self::UploadFailed),
-      "UploadFailure" => Some(Self::UploadFailure),
-      "Uploading" => Some(Self::Uploading),
-      "VersionMismatch" => Some(Self::VersionMismatch),
-      _ => None,
-    }
+    response_status_map!(response_status_parse_impl, value)
   }
 }
 
@@ -1591,7 +1504,7 @@ pub fn parse_frame(text: &str) -> Result<OcppFrame, String> {
   let message_id = array[1].as_str().map(ToOwned::to_owned);
 
   match OcppMessageTypeId::from_i64(message_type) {
-    Some(OcppMessageTypeId::Call) | Some(OcppMessageTypeId::Send) => {
+    Some(OcppMessageTypeId::Call | OcppMessageTypeId::Send) => {
       if array.len() != 4 {
         return Err(format!(
           "CALL/SEND frame must have 4 items, got {}.",
@@ -1636,8 +1549,7 @@ pub fn parse_frame(text: &str) -> Result<OcppFrame, String> {
         payload,
       })
     }
-    Some(OcppMessageTypeId::CallError)
-    | Some(OcppMessageTypeId::CallResultError) => {
+    Some(OcppMessageTypeId::CallError | OcppMessageTypeId::CallResultError) => {
       if array.len() != 5 {
         return Err(format!(
           "CALLERROR frame must have 5 items, got {}.",
@@ -1681,13 +1593,13 @@ pub fn parse_frame(text: &str) -> Result<OcppFrame, String> {
 }
 
 /// Builds a CALL frame string (`[2, messageId, action, payload]`).
-pub fn build_call(message_id: &str, action: &str, payload: Value) -> String {
+pub fn build_call(message_id: &str, action: &str, payload: &Value) -> String {
   json!([OcppMessageTypeId::Call.value(), message_id, action, payload])
     .to_string()
 }
 
 /// Builds a CALLRESULT frame string (`[3, messageId, payload]`).
-pub fn build_call_result(message_id: &str, payload: Value) -> String {
+pub fn build_call_result(message_id: &str, payload: &Value) -> String {
   json!([OcppMessageTypeId::CallResult.value(), message_id, payload])
     .to_string()
 }
@@ -1697,7 +1609,7 @@ pub fn build_call_error(
   message_id: &str,
   code: &str,
   description: &str,
-  details: Value,
+  details: &Value,
 ) -> String {
   json!([
     OcppMessageTypeId::CallError.value(),
@@ -2023,7 +1935,7 @@ mod tests {
   }
 
   #[test]
-  /// Verifies OCPP 1.6 StatusNotification error codes are typed.
+  /// Verifies OCPP 1.6 `StatusNotification` error codes are typed.
   fn v1_6_status_error_codes_cover_schema_tokens() {
     let error_codes = enum_tokens_at_path(
       "schemas/1.6/StatusNotification.json",
@@ -2039,7 +1951,7 @@ mod tests {
   #[test]
   /// Verifies OCPP-J CALL builders round-trip through frame parsing.
   fn call_builder_round_trips_through_parser() {
-    let text = build_call("m1", "Heartbeat", json!({}));
+    let text = build_call("m1", "Heartbeat", &json!({}));
     let frame = parse_frame(&text).expect("parse built call");
 
     let OcppFrame::Call {

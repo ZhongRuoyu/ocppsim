@@ -44,7 +44,7 @@ fn change_configuration_rejects_read_only_key() {
 #[test]
 fn get_variables_v2_0_1_reads_configuration() {
   assert_get_variables_reads_configuration(
-    simulator_for_tests_v2_0_1(),
+    &simulator_for_tests_v2_0_1(),
     "schemas/2.0.1/GetVariablesResponse.json",
   );
 }
@@ -52,13 +52,13 @@ fn get_variables_v2_0_1_reads_configuration() {
 #[test]
 fn get_variables_v2_1_reads_configuration() {
   assert_get_variables_reads_configuration(
-    simulator_for_tests_v2_1(),
+    &simulator_for_tests_v2_1(),
     "schemas/2.1/GetVariablesResponse.json",
   );
 }
 
 fn assert_get_variables_reads_configuration(
-  simulator: Simulator,
+  simulator: &Simulator,
   schema: &str,
 ) {
   let response = simulator
@@ -160,19 +160,28 @@ fn assert_set_variables_updates_configuration(
 }
 
 #[test]
-fn data_transfer_reports_missing_vendor_for_both_protocol_families() {
-  let v1_6_simulator = simulator_for_tests();
-  let v2_x_simulator = simulator_for_tests_v2_0_1();
-
-  let v1_6_response = v1_6_simulator.data_transfer_v1_6(&json!({}));
-  let v2_x_response = v2_x_simulator.data_transfer_v2_x(&json!({}));
-
+fn data_transfer_v1_6_reports_missing_vendor() {
+  let response = Simulator::data_transfer_v1_6(&json!({}));
   assert_eq!(
-    v1_6_response["status"],
+    response["status"],
     json!(ResponseStatus::UnknownVendorId.as_str())
   );
+}
+
+#[test]
+fn data_transfer_v2_0_1_reports_missing_vendor() {
+  let response = Simulator::data_transfer_v2_x(&json!({}));
   assert_eq!(
-    v2_x_response["status"],
+    response["status"],
+    json!(ResponseStatus::UnknownVendorId.as_str())
+  );
+}
+
+#[test]
+fn data_transfer_v2_1_reports_missing_vendor() {
+  let response = Simulator::data_transfer_v2_x(&json!({}));
+  assert_eq!(
+    response["status"],
     json!(ResponseStatus::UnknownVendorId.as_str())
   );
 }

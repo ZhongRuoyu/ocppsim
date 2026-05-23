@@ -24,6 +24,11 @@ use tokio::sync::mpsc;
 use version::version_string;
 
 /// Runs the interactive OCPP simulator command-line application.
+///
+/// # Errors
+///
+/// Returns an error if the terminal cannot be initialized, the WebSocket
+/// connection fails, or a critical runtime error occurs.
 pub async fn run() -> Result<()> {
   install_panic_hook();
   args::complete_from_env();
@@ -71,7 +76,7 @@ pub async fn run() -> Result<()> {
     }
 
     terminal.draw(&mut app)?;
-    match terminal.poll_input(&mut app)? {
+    match TerminalSession::poll_input(&mut app)? {
       InputAction::None => {}
       InputAction::ExitRequested => {
         should_exit = true;
@@ -113,22 +118,22 @@ fn install_panic_hook() {
 
     let current_thread = thread::current();
     let thread_name = current_thread.name().unwrap_or("<unnamed>").to_string();
-    let location = info
-      .location()
-      .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
-      .unwrap_or_else(|| "<unknown>".to_string());
+    let location = info.location().map_or_else(
+      || "<unknown>".to_string(),
+      |loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
+    );
     let message = panic_message(info);
     let backtrace = Backtrace::force_capture();
 
     eprintln!();
     eprintln!("==================================================");
     eprintln!("ocppsim panic");
-    eprintln!("thread:   {}", thread_name);
-    eprintln!("location: {}", location);
-    eprintln!("message:  {}", message);
+    eprintln!("thread:   {thread_name}");
+    eprintln!("location: {location}");
+    eprintln!("message:  {message}");
     eprintln!();
     eprintln!("backtrace:");
-    eprintln!("{}", backtrace);
+    eprintln!("{backtrace}");
     eprintln!("==================================================");
     eprintln!();
 
@@ -152,12 +157,11 @@ fn log_profile_source(app: &mut TerminalApp, resolved: &ResolvedCliArgs) {
   let Some(profile) = &resolved.profile else {
     return;
   };
-  let path = resolved
-    .config_path
-    .as_ref()
-    .map(|item| item.display().to_string())
-    .unwrap_or_else(|| "<unknown>".to_string());
-  app.push_info(format!("Loaded profile `{}` from {}", profile, path));
+  let path = resolved.config_path.as_ref().map_or_else(
+    || "<unknown>".to_string(),
+    |item| item.display().to_string(),
+  );
+  app.push_info(format!("Loaded profile `{profile}` from {path}"));
 }
 
 /// Converts a parsed user command into simulator actions.
@@ -277,11 +281,9 @@ mod tests {
   use super::*;
 
   #[test]
-  /// Verifies parsed interactive commands dispatch to simulator commands.
-  fn parsed_commands_dispatch_to_simulator_commands() {
-    let protocol = ocpp::OcppVersion::V2_1;
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
-    let mut app = TerminalApp::new(protocol);
+  /// Verifies connection-oriented commands dispatch the expected variants.
+  fn parsed_connection_commands_dispatch_to_simulator_commands() {
+    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
     assert!(!dispatch("connect", protocol, &cmd_tx, &mut app));
     assert!(matches!(
@@ -297,6 +299,18 @@ mod tests {
 
     assert!(!dispatch("boot", protocol, &cmd_tx, &mut app));
     assert!(matches!(next_command(&mut cmd_rx), SimulatorCommand::Boot));
+
+    assert!(!dispatch("disconnect", protocol, &cmd_tx, &mut app));
+    assert!(matches!(
+      next_command(&mut cmd_rx),
+      SimulatorCommand::Disconnect
+    ));
+  }
+
+  #[test]
+  /// Verifies transaction-oriented commands retain their parsed fields.
+  fn parsed_transaction_commands_dispatch_to_simulator_commands() {
+    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
     assert!(!dispatch("authorize TOKEN", protocol, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
@@ -348,6 +362,12 @@ mod tests {
       }
       other => panic!("unexpected command: {other:?}"),
     }
+  }
+
+  #[test]
+  /// Verifies metering, heartbeat, and connector commands dispatch correctly.
+  fn parsed_runtime_commands_dispatch_to_simulator_commands() {
+    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
     assert!(!dispatch("meter 2 1234", protocol, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
@@ -398,12 +418,6 @@ mod tests {
       }
       other => panic!("unexpected command: {other:?}"),
     }
-
-    assert!(!dispatch("disconnect", protocol, &cmd_tx, &mut app));
-    assert!(matches!(
-      next_command(&mut cmd_rx),
-      SimulatorCommand::Disconnect
-    ));
   }
 
   #[test]
@@ -441,5 +455,17 @@ mod tests {
     cmd_rx: &mut mpsc::UnboundedReceiver<SimulatorCommand>,
   ) -> SimulatorCommand {
     cmd_rx.try_recv().expect("simulator command")
+  }
+
+  fn command_test_context() -> (
+    ocpp::OcppVersion,
+    mpsc::UnboundedSender<SimulatorCommand>,
+    mpsc::UnboundedReceiver<SimulatorCommand>,
+    TerminalApp,
+  ) {
+    let protocol = ocpp::OcppVersion::V1_6;
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+    let app = TerminalApp::new(protocol);
+    (protocol, cmd_tx, cmd_rx, app)
   }
 }

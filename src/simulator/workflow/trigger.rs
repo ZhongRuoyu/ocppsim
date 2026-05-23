@@ -1,4 +1,6 @@
-use super::super::*;
+use super::super::{
+  Result, Simulator, TriggerMessage_V1_6, TriggerMessage_V2_X,
+};
 
 impl Simulator {
   /// Handles OCPP 1.6 `TriggerMessage.req` by enqueueing requested messages.

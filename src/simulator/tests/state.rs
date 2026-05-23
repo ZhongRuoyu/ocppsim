@@ -99,7 +99,7 @@ fn scheduled_availability_applies_after_stop() {
 
   assert_eq!(status, ResponseStatus::Scheduled);
   simulator
-    .stop_transaction(1, Some("Local".to_string()), false, false)
+    .stop_transaction(1, Some("Local"), false, false)
     .expect("stop should succeed");
   assert_eq!(
     simulator
@@ -232,11 +232,7 @@ fn repeated_pending_timeouts_unblock_queued_calls() {
   let mut simulator = simulator_for_tests();
   simulator.config.request_timeout = std::time::Duration::from_millis(1);
   simulator.enqueue_heartbeat();
-  simulator.enqueue_data_transfer(
-    "ocppsim".to_string(),
-    Some("Message".to_string()),
-    Some("hello".to_string()),
-  );
+  simulator.enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"));
   simulator.enqueue_authorize("TOKEN".to_string());
 
   let mut timed_out_actions = Vec::new();
