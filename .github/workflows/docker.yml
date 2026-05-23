@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - '**'
+      - "**"
   pull_request:
 
 concurrency:
@@ -73,6 +73,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Cache Cargo registry
+        # zizmor: ignore[cache-poisoning] We only save cache for pushes to the main branch.
         id: cache-cargo
         if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -86,6 +87,7 @@ jobs:
             docker-cargo-${{ matrix.arch }}-
           lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Cache build artifacts
+        # zizmor: ignore[cache-poisoning] We only save cache for pushes to the main branch.
         id: cache-target
         if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
