@@ -19,10 +19,12 @@ RUN \
   --mount=type=cache,target=/app/target \
   <<RUN
   set -eux
-  cargo build --locked --release
-  cp target/release/ocppsim /bin/ocppsim
+  cargo build --locked --bins --all-features --release
+  cargo install --locked --bins --all-features --no-track \
+    --path . \
+    --root /usr/local
 RUN
 
 FROM scratch
-COPY --from=build /bin/ocppsim /bin/ocppsim
-ENTRYPOINT ["/bin/ocppsim"]
+COPY --from=build /usr/local/bin/ocppsim /usr/local/bin/ocppsim
+ENTRYPOINT ["/usr/local/bin/ocppsim"]
