@@ -38,6 +38,7 @@ jobs:
             runs-on: windows-latest
           - target: aarch64-pc-windows-msvc
             runs-on: windows-11-arm
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runs-on }}
     permissions:
       contents: read

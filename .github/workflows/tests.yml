@@ -20,6 +20,7 @@ defaults:
 
 jobs:
   build:
+    name: Build
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -29,6 +30,7 @@ jobs:
       cache: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request' }}
 
   tests:
+    name: Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
