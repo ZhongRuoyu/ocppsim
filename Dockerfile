@@ -18,7 +18,7 @@ RUN \
   --mount=type=cache,target=/usr/local/cargo/git/db \
   --mount=type=cache,target=/app/target \
   <<RUN
-  set -ex
+  set -eux
   cargo build --locked --release
   cp target/release/ocppsim /bin/ocppsim
 RUN
