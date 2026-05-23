@@ -3,6 +3,8 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
+    allow:
+      - dependency-type: all
     schedule:
       interval: weekly
     cooldown:
@@ -13,6 +15,8 @@ updates:
           - "*"
   - package-ecosystem: docker
     directory: /
+    allow:
+      - dependency-type: all
     schedule:
       interval: weekly
     cooldown:
@@ -23,6 +27,8 @@ updates:
           - "*"
   - package-ecosystem: github-actions
     directory: /
+    allow:
+      - dependency-type: all
     schedule:
       interval: weekly
     cooldown:
