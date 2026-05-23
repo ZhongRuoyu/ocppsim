@@ -27,10 +27,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      artifact-metadata: write
-      attestations: write
-      contents: write
-      id-token: write
+      artifact-metadata: write # for generating build provenance
+      attestations: write # for generating build provenance
+      contents: write # for creating tag and release
+      id-token: write # for generating build provenance
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # for authenticating to crates.io
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
