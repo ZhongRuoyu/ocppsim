@@ -4,8 +4,8 @@ use super::super::payloads::{
   GetConfigurationV1_6Response, GetDiagnosticsV1_6Response, to_value,
 };
 use super::super::{
-  ChargingRateUnit, ConfigurationKey, ConnectorStatus, ResponseStatus, Result,
-  Simulator, UiLogLevel, Value, anyhow, now_timestamp, optional_u16_field,
+  ChargingRateUnit, ConfigurationKey, ResponseStatus, Result, Simulator,
+  UiLogLevel, Value, anyhow, now_timestamp,
 };
 use super::request::{
   AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequestV1_6,
@@ -86,48 +86,7 @@ impl Simulator {
     &mut self,
     payload: &Value,
   ) -> Result<ResponseStatus> {
-    let request = AvailabilityRequest::parse_v1_6(payload)?;
-    let Some(target_status) = request.target_status else {
-      return Ok(ResponseStatus::Rejected);
-    };
-    let targets: Vec<u16> = if request.connector.unwrap_or(0) == 0 {
-      self.connectors.keys().copied().collect()
-    } else if let Some(connector) = request.connector
-      && self.connectors.contains_key(&connector)
-    {
-      vec![connector]
-    } else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    let mut scheduled = false;
-    let mut changed = Vec::new();
-    for connector in targets {
-      let has_active_tx = self
-        .connectors
-        .get(&connector)
-        .and_then(|item| item.transaction.as_ref())
-        .is_some();
-      if has_active_tx && target_status == ConnectorStatus::Unavailable {
-        self.schedule_availability_status(connector, target_status)?;
-        scheduled = true;
-        continue;
-      }
-
-      self.apply_availability_status(connector, target_status)?;
-      changed.push(connector);
-    }
-
-    for connector in changed {
-      self.enqueue_status_notification(connector)?;
-    }
-    self.emit_snapshot();
-
-    if scheduled {
-      Ok(ResponseStatus::Scheduled)
-    } else {
-      Ok(ResponseStatus::Accepted)
-    }
+    self.apply_change_availability(AvailabilityRequest::parse_v1_6(payload)?)
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 1.6.
@@ -221,62 +180,6 @@ impl Simulator {
     self.reserve_connector(request.connector, request.reservation_id)
   }
 
-  /// Applies shared reservation semantics for one connector or auto-pick.
-  pub(in crate::simulator) fn reserve_connector(
-    &mut self,
-    requested_connector: u16,
-    reservation_id: i64,
-  ) -> Result<ResponseStatus> {
-    let connector = if requested_connector == 0 {
-      let mut chosen = None;
-      for (connector_id, state) in &self.connectors {
-        let is_reserved = self.connector_has_reservation(*connector_id);
-        let is_available = !matches!(
-          state.status,
-          ConnectorStatus::Unavailable | ConnectorStatus::Faulted
-        );
-        if state.transaction.is_none() && !is_reserved && is_available {
-          chosen = Some(*connector_id);
-          break;
-        }
-      }
-      let Some(connector_id) = chosen else {
-        return Ok(ResponseStatus::Occupied);
-      };
-      connector_id
-    } else if self.connectors.contains_key(&requested_connector) {
-      requested_connector
-    } else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    if self.reservations.contains_key(&reservation_id) {
-      return Ok(ResponseStatus::Rejected);
-    }
-
-    if self.connector_has_reservation(connector) {
-      return Ok(ResponseStatus::Occupied);
-    }
-
-    {
-      let state = self.connector_mut(connector)?;
-      if state.transaction.is_some() {
-        return Ok(ResponseStatus::Occupied);
-      }
-      if state.status == ConnectorStatus::Unavailable
-        || state.status == ConnectorStatus::Faulted
-      {
-        return Ok(ResponseStatus::Unavailable);
-      }
-      state.status = ConnectorStatus::Reserved;
-    }
-
-    self.reservations.insert(reservation_id, connector);
-    self.enqueue_status_notification(connector)?;
-    self.emit_snapshot();
-    Ok(ResponseStatus::Accepted)
-  }
-
   /// Handles `CancelReservation.req` and updates connector state.
   pub(in crate::simulator) fn cancel_reservation_v1_6(
     &mut self,
@@ -284,29 +187,6 @@ impl Simulator {
   ) -> Result<ResponseStatus> {
     let request = CancelReservationRequest::parse_v1_6(payload)?;
     self.cancel_reservation(request.reservation_id)
-  }
-
-  /// Applies shared reservation cancellation semantics.
-  pub(in crate::simulator) fn cancel_reservation(
-    &mut self,
-    reservation_id: i64,
-  ) -> Result<ResponseStatus> {
-    let Some(connector) = self.reservations.remove(&reservation_id) else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    let has_active_tx = self
-      .connectors
-      .get(&connector)
-      .and_then(|item| item.transaction.as_ref())
-      .is_some();
-    if !has_active_tx {
-      let state = self.connector_mut(connector)?;
-      state.status = ConnectorStatus::Available;
-      self.enqueue_status_notification(connector)?;
-    }
-    self.emit_snapshot();
-    Ok(ResponseStatus::Accepted)
   }
 
   /// Handles `UnlockConnector.req` with a transaction-state based response.
@@ -331,8 +211,7 @@ impl Simulator {
     payload: &Value,
   ) -> Result<ResponseStatus> {
     let request = SendLocalListRequestV1_6::parse(payload)?;
-    self.local_auth_list_version = request.list_version;
-    Ok(ResponseStatus::Accepted)
+    Ok(self.apply_local_list_version(request.list_version))
   }
 
   /// Handles `SetChargingProfile.req` and applies profile-derived limits.
@@ -341,25 +220,7 @@ impl Simulator {
     payload: &Value,
   ) -> Result<ResponseStatus> {
     let request = SetChargingProfileRequestV1_6::parse(payload)?;
-    let targets: Vec<u16> = if request.connector == 0 {
-      self.connectors.keys().copied().collect()
-    } else if self.connectors.contains_key(&request.connector) {
-      vec![request.connector]
-    } else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    let limit = Self::extract_profile_limit(&request.profile);
-    for target in targets {
-      self
-        .charging_profiles
-        .insert(target, request.profile.clone());
-      if let Some(limit_value) = limit {
-        self.set_offered_limit(target, Some(limit_value))?;
-        self.apply_charging_profile_state(target)?;
-      }
-    }
-    Ok(ResponseStatus::Accepted)
+    self.apply_set_charging_profile(request.connector, &request.profile)
   }
 
   /// Handles `ClearChargingProfile.req` for matching connector/profile data.
@@ -389,57 +250,6 @@ impl Simulator {
         profile.get("stackLevel").and_then(Value::as_i64) == Some(value)
       })
     })
-  }
-
-  /// Builds target connectors for a charging-profile clear request.
-  pub(in crate::simulator) fn clear_profile_targets(
-    &self,
-    payload: &Value,
-    field: &str,
-  ) -> Option<Vec<u16>> {
-    match optional_u16_field(payload, field) {
-      Ok(Some(0) | None) => Some(self.connectors.keys().copied().collect()),
-      Ok(Some(connector)) => {
-        if self.connectors.contains_key(&connector) {
-          Some(vec![connector])
-        } else {
-          None
-        }
-      }
-      Err(_) => None,
-    }
-  }
-
-  /// Clears stored charging profiles that match a predicate.
-  pub(in crate::simulator) fn clear_charging_profiles_matching<F>(
-    &mut self,
-    targets: Vec<u16>,
-    matches_profile: F,
-  ) -> ResponseStatus
-  where
-    F: Fn(&Value) -> bool,
-  {
-    let mut cleared = Vec::new();
-    for connector in targets {
-      let should_remove = self
-        .charging_profiles
-        .get(&connector)
-        .is_some_and(&matches_profile);
-      if should_remove {
-        self.charging_profiles.remove(&connector);
-        cleared.push(connector);
-      }
-    }
-
-    if cleared.is_empty() {
-      return ResponseStatus::Unknown;
-    }
-
-    for connector in cleared {
-      let _ = self.set_offered_limit(connector, None);
-      let _ = self.apply_charging_profile_state(connector);
-    }
-    ResponseStatus::Accepted
   }
 
   /// Handles `GetCompositeSchedule.req` for OCPP 1.6.
@@ -483,55 +293,5 @@ impl Simulator {
         }],
       }),
     }))
-  }
-
-  /// Extracts the first charging limit value from supported profile shapes.
-  pub(in crate::simulator) fn extract_profile_limit(
-    profile: &Value,
-  ) -> Option<f64> {
-    let path_1 = profile
-      .get("chargingSchedule")
-      .and_then(Value::as_object)
-      .and_then(|value| value.get("chargingSchedulePeriod"))
-      .and_then(Value::as_array)
-      .and_then(|value| value.first())
-      .and_then(|value| value.get("limit"));
-    if let Some(limit) = path_1 {
-      return Self::extract_limit_value(limit);
-    }
-
-    let path_2 = profile
-      .get("chargingSchedule")
-      .and_then(Value::as_array)
-      .and_then(|value| value.first())
-      .and_then(Value::as_object)
-      .and_then(|value| value.get("chargingSchedulePeriod"))
-      .and_then(Value::as_array)
-      .and_then(|value| value.first())
-      .and_then(|value| value.get("limit"));
-    if let Some(limit) = path_2 {
-      return Self::extract_limit_value(limit);
-    }
-
-    let path_3 = profile
-      .get("chargingSchedulePeriod")
-      .and_then(Value::as_array)
-      .and_then(|value| value.first())
-      .and_then(|value| value.get("limit"));
-    if let Some(limit) = path_3 {
-      return Self::extract_limit_value(limit);
-    }
-
-    None
-  }
-
-  /// Parses a charging limit from JSON number or numeric string.
-  pub(in crate::simulator) fn extract_limit_value(
-    value: &Value,
-  ) -> Option<f64> {
-    if let Some(limit) = value.as_f64() {
-      return Some(limit);
-    }
-    value.as_str().and_then(|limit| limit.parse::<f64>().ok())
   }
 }

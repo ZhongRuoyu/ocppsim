@@ -51,6 +51,7 @@ mod dispatch_v1_6;
 mod dispatch_v2_x;
 mod pending;
 mod request;
+mod shared;
 mod v1_6;
 mod v2_x;
 mod ws;

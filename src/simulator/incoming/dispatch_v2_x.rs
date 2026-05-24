@@ -172,13 +172,7 @@ impl Simulator {
         self.update_firmware_v2_x(payload)
       ),
       IncomingAction_V2_X::Reset => {
-        self.log(
-          UiLogLevel::Info,
-          "Received Reset request. Simulator will acknowledge only.",
-        );
-        self
-          .send_status_response(write, message_id, ResponseStatus::Accepted)
-          .await?;
+        self.handle_reset_only_call(write, message_id).await?;
       }
       IncomingAction_V2_X::ChangeAvailability
       | IncomingAction_V2_X::ClearCache
@@ -206,16 +200,11 @@ impl Simulator {
           .await;
       }
     };
-    let connector = match request.connector {
-      Some(value) => value,
-      None => match self.first_startable_connector() {
-        Some(value) => value,
-        None => {
-          return self
-            .send_status_response(write, message_id, ResponseStatus::Rejected)
-            .await;
-        }
-      },
+    let Some(connector) = self
+      .resolve_start_connector_or_reject(write, message_id, request.connector)
+      .await?
+    else {
+      return Ok(());
     };
 
     if let Some(existing) = self.active_transaction_uid(connector) {

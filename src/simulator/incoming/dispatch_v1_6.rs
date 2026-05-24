@@ -168,13 +168,7 @@ impl Simulator {
           .await?;
       }
       IncomingAction_V1_6::Reset => {
-        self.log(
-          UiLogLevel::Info,
-          "Received Reset request. Simulator will acknowledge only.",
-        );
-        self
-          .send_status_response(write, message_id, ResponseStatus::Accepted)
-          .await?;
+        self.handle_reset_only_call(write, message_id).await?;
       }
       IncomingAction_V1_6::GetConfiguration
       | IncomingAction_V1_6::ChangeConfiguration
@@ -219,16 +213,11 @@ impl Simulator {
           .await;
       }
     };
-    let connector = match request.connector {
-      Some(value) => value,
-      None => match self.first_startable_connector() {
-        Some(value) => value,
-        None => {
-          return self
-            .send_status_response(write, message_id, ResponseStatus::Rejected)
-            .await;
-        }
-      },
+    let Some(connector) = self
+      .resolve_start_connector_or_reject(write, message_id, request.connector)
+      .await?
+    else {
+      return Ok(());
     };
     let status = if self.authorize_remote_tx_requests() {
       self.enqueue_remote_start_authorize_v1_6(connector, request.id_token);

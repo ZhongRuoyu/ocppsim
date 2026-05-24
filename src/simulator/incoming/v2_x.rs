@@ -5,9 +5,8 @@ use super::super::payloads::{
   to_value,
 };
 use super::super::{
-  ChargingRateUnit, ConnectorStatus, ResponseStatus, Result, Simulator,
-  UiLogLevel, Value, VariableAttributeType, anyhow, json, normalize_identifier,
-  now_timestamp,
+  ChargingRateUnit, ResponseStatus, Result, Simulator, UiLogLevel, Value,
+  VariableAttributeType, anyhow, json, normalize_identifier, now_timestamp,
 };
 use super::request::{
   AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequest_V2_X,
@@ -22,48 +21,7 @@ impl Simulator {
     &mut self,
     payload: &Value,
   ) -> Result<ResponseStatus> {
-    let request = AvailabilityRequest::parse_v2_x(payload)?;
-    let Some(target_status) = request.target_status else {
-      return Ok(ResponseStatus::Rejected);
-    };
-    let targets: Vec<u16> = if request.connector.unwrap_or(0) == 0 {
-      self.connectors.keys().copied().collect()
-    } else if let Some(connector) = request.connector
-      && self.connectors.contains_key(&connector)
-    {
-      vec![connector]
-    } else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    let mut scheduled = false;
-    let mut changed = Vec::new();
-    for connector in targets {
-      let has_active_tx = self
-        .connectors
-        .get(&connector)
-        .and_then(|item| item.transaction.as_ref())
-        .is_some();
-      if has_active_tx && target_status == ConnectorStatus::Unavailable {
-        self.schedule_availability_status(connector, target_status)?;
-        scheduled = true;
-        continue;
-      }
-
-      self.apply_availability_status(connector, target_status)?;
-      changed.push(connector);
-    }
-
-    for connector in changed {
-      self.enqueue_status_notification(connector)?;
-    }
-    self.emit_snapshot();
-
-    if scheduled {
-      Ok(ResponseStatus::Scheduled)
-    } else {
-      Ok(ResponseStatus::Accepted)
-    }
+    self.apply_change_availability(AvailabilityRequest::parse_v2_x(payload)?)
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 2.x.
@@ -167,8 +125,7 @@ impl Simulator {
     payload: &Value,
   ) -> Result<ResponseStatus> {
     let request = SendLocalListRequest_V2_X::parse(payload)?;
-    self.local_auth_list_version = request.version_number;
-    Ok(ResponseStatus::Accepted)
+    Ok(self.apply_local_list_version(request.version_number))
   }
 
   /// Handles `UnlockConnector.req` for OCPP 2.x connector addressing.
@@ -250,25 +207,7 @@ impl Simulator {
     payload: &Value,
   ) -> Result<ResponseStatus> {
     let request = SetChargingProfileRequest_V2_X::parse(payload)?;
-    let targets: Vec<u16> = if request.connector == 0 {
-      self.connectors.keys().copied().collect()
-    } else if self.connectors.contains_key(&request.connector) {
-      vec![request.connector]
-    } else {
-      return Ok(ResponseStatus::Rejected);
-    };
-
-    let limit = Self::extract_profile_limit(&request.profile);
-    for target in targets {
-      self
-        .charging_profiles
-        .insert(target, request.profile.clone());
-      if let Some(limit_value) = limit {
-        self.set_offered_limit(target, Some(limit_value))?;
-        self.apply_charging_profile_state(target)?;
-      }
-    }
-    Ok(ResponseStatus::Accepted)
+    self.apply_set_charging_profile(request.connector, &request.profile)
   }
 
   /// Handles `ClearChargingProfile.req` for matching connector/profile data.
