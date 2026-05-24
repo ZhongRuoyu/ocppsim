@@ -23,6 +23,7 @@ RUN \
   cargo install --locked --bins --all-features --no-track \
     --path . \
     --root /usr/local
+  cargo clean --locked --workspace --release
 RUN
 
 FROM scratch

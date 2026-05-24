@@ -59,6 +59,7 @@ jobs:
           lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Cache build artifacts
         # zizmor: ignore[cache-poisoning] We only save cache for pushes to the main branch.
+        id: cache-target
         if: (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'pull_request'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -78,3 +79,8 @@ jobs:
         run: cargo test --locked --all-targets --all-features
       - name: Build and check docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
+      - name: Prune build artifacts for caching
+        if: >
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          !steps.cache-target.outputs.cache-hit
+        run: cargo clean --locked --workspace
