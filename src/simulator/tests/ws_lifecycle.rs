@@ -277,7 +277,7 @@ async fn remote_start_v1_6_authorizes_before_start_when_configured() {
 }
 
 #[tokio::test]
-async fn malformed_request_start_v2_returns_call_error() {
+async fn malformed_request_start_v2_x_returns_call_error() {
   let malformed_payloads = [
     json!({ "idToken": { "idToken": "TOKEN" } }),
     json!({ "remoteStartId": 11, "idToken": {} }),
@@ -288,13 +288,38 @@ async fn malformed_request_start_v2_returns_call_error() {
     }),
   ];
 
-  for payload in malformed_payloads {
+  for protocol in v2_x_protocols() {
+    for payload in malformed_payloads.clone() {
+      let (frame, simulator) = capture_inbound_call_response(
+        protocol,
+        "RequestStartTransaction",
+        payload,
+      )
+      .await;
+      let OcppFrame::CallError { code, .. } = frame else {
+        panic!("expected CALLERROR frame");
+      };
+      assert_eq!(code, "FormationViolation");
+      assert!(
+        simulator
+          .connectors
+          .values()
+          .all(|connector| connector.transaction.is_none())
+      );
+    }
+  }
+}
+
+#[tokio::test]
+async fn malformed_request_stop_v2_x_returns_call_error() {
+  for protocol in v2_x_protocols() {
     let (frame, simulator) = capture_inbound_call_response(
-      OcppVersion::V2_0_1,
-      "RequestStartTransaction",
-      payload,
+      protocol,
+      "RequestStopTransaction",
+      json!({}),
     )
     .await;
+
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
@@ -309,29 +334,8 @@ async fn malformed_request_start_v2_returns_call_error() {
 }
 
 #[tokio::test]
-async fn malformed_request_stop_v2_returns_call_error() {
-  let (frame, simulator) = capture_inbound_call_response(
-    OcppVersion::V2_0_1,
-    "RequestStopTransaction",
-    json!({}),
-  )
-  .await;
-
-  let OcppFrame::CallError { code, .. } = frame else {
-    panic!("expected CALLERROR frame");
-  };
-  assert_eq!(code, "FormationViolation");
-  assert!(
-    simulator
-      .connectors
-      .values()
-      .all(|connector| connector.transaction.is_none())
-  );
-}
-
-#[tokio::test]
 async fn malformed_supported_requests_return_formation_violation() {
-  let cases = [
+  let mut cases = vec![
     (
       OcppVersion::V1_6,
       "ReserveNow",
@@ -349,23 +353,20 @@ async fn malformed_supported_requests_return_formation_violation() {
       json!({ "connectorId": 1 }),
     ),
     (OcppVersion::V1_6, "TriggerMessage", json!({})),
-    (
-      OcppVersion::V2_0_1,
-      "UnlockConnector",
-      json!({ "evseId": 1 }),
-    ),
-    (
-      OcppVersion::V2_0_1,
-      "SetChargingProfile",
-      json!({ "chargingProfile": {} }),
-    ),
-    (
-      OcppVersion::V2_0_1,
-      "GetCompositeSchedule",
-      json!({ "evseId": 1 }),
-    ),
-    (OcppVersion::V2_0_1, "TriggerMessage", json!({})),
   ];
+
+  for protocol in v2_x_protocols() {
+    cases.extend([
+      (protocol, "UnlockConnector", json!({ "evseId": 1 })),
+      (
+        protocol,
+        "SetChargingProfile",
+        json!({ "chargingProfile": {} }),
+      ),
+      (protocol, "GetCompositeSchedule", json!({ "evseId": 1 })),
+      (protocol, "TriggerMessage", json!({})),
+    ]);
+  }
 
   for (protocol, action, payload) in cases {
     let (frame, simulator) =
@@ -455,19 +456,21 @@ async fn strict_mode_rejects_schema_invalid_v1_6_requests() {
 
 #[tokio::test]
 async fn strict_mode_rejects_schema_invalid_v2_x_requests() {
-  let (frame, simulator) = capture_inbound_call_response_with_strict(
-    OcppVersion::V2_0_1,
-    true,
-    "Reset",
-    json!({}),
-  )
-  .await;
+  for protocol in v2_x_protocols() {
+    let (frame, simulator) = capture_inbound_call_response_with_strict(
+      protocol,
+      true,
+      "Reset",
+      json!({}),
+    )
+    .await;
 
-  let OcppFrame::CallError { code, .. } = frame else {
-    panic!("expected CALLERROR frame");
-  };
-  assert_eq!(code, "FormationViolation");
-  assert!(simulator.queue.is_empty());
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "FormationViolation");
+    assert!(simulator.queue.is_empty());
+  }
 }
 
 #[tokio::test]
@@ -498,15 +501,16 @@ async fn strict_mode_warns_when_request_schema_is_missing() {
 }
 
 #[tokio::test]
-async fn non_strict_mode_keeps_pragmatic_request_handling() {
-  let (frame, _) =
-    capture_inbound_call_response(OcppVersion::V2_0_1, "Reset", json!({}))
-      .await;
+async fn non_strict_mode_keeps_pragmatic_v2_x_request_handling() {
+  for protocol in v2_x_protocols() {
+    let (frame, _) =
+      capture_inbound_call_response(protocol, "Reset", json!({})).await;
 
-  let OcppFrame::CallResult { payload, .. } = frame else {
-    panic!("expected CALLRESULT frame");
-  };
-  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+    let OcppFrame::CallResult { payload, .. } = frame else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  }
 }
 
 #[tokio::test]
@@ -530,130 +534,115 @@ async fn trigger_message_v1_6_enqueues_requested_simulator_calls() {
 }
 
 #[tokio::test]
-async fn trigger_message_v2_0_1_enqueues_requested_simulator_calls() {
-  let (v2_0_1_frame, v2_0_1_simulator) = capture_inbound_call_response(
-    OcppVersion::V2_0_1,
-    "TriggerMessage",
-    json!({
-      "requestedMessage": "StatusNotification",
-      "evse": { "id": 2 }
-    }),
-  )
-  .await;
-  let OcppFrame::CallResult { payload, .. } = v2_0_1_frame else {
-    panic!("expected CALLRESULT frame");
-  };
-  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
-  let status_payload = queued_payload(&v2_0_1_simulator, "StatusNotification");
-  assert_eq!(status_payload["evseId"], json!(2));
-}
-
-#[tokio::test]
-async fn trigger_message_v2_1_enqueues_requested_simulator_calls() {
-  let (v2_1_frame, v2_1_simulator) = capture_inbound_call_response(
-    OcppVersion::V2_1,
-    "TriggerMessage",
-    json!({
-      "requestedMessage": "StatusNotification",
-      "evse": { "id": 2 }
-    }),
-  )
-  .await;
-  let OcppFrame::CallResult { payload, .. } = v2_1_frame else {
-    panic!("expected CALLRESULT frame");
-  };
-  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
-  let status_payload = queued_payload(&v2_1_simulator, "StatusNotification");
-  assert_eq!(status_payload["evseId"], json!(2));
-}
-
-#[tokio::test]
-async fn mock_csms_remote_start_meter_and_stop_lifecycle() {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    let mut frames = Vec::new();
-    for _ in 0..2 {
-      let message = server_read
-        .next()
-        .await
-        .expect("response frame")
-        .expect("response frame ok");
-      frames.push(
-        parse_frame(message.to_text().expect("text frame"))
-          .expect("parse response"),
-      );
-    }
-    frames
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, _read) = client_stream.split();
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .handle_incoming_call_v2_x(
-      &mut write,
-      "remote-start",
-      "RequestStartTransaction",
+async fn trigger_message_v2_x_enqueues_requested_simulator_calls() {
+  for protocol in v2_x_protocols() {
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "TriggerMessage",
       json!({
-        "remoteStartId": 99,
-        "idToken": { "idToken": "TOKEN" },
-        "evseId": 1
+        "requestedMessage": "StatusNotification",
+        "evse": { "id": 2 }
       }),
     )
-    .await
-    .expect("handle request start");
-  simulator
-    .send_meter(1, true)
-    .expect("meter should enqueue update");
-  let transaction_id = simulator
-    .active_transaction_uid(1)
-    .expect("active transaction uid");
-  simulator
-    .handle_incoming_call_v2_x(
-      &mut write,
-      "remote-stop",
-      "RequestStopTransaction",
-      json!({ "transactionId": transaction_id }),
-    )
-    .await
-    .expect("handle request stop");
-  drop(write);
+    .await;
+    let OcppFrame::CallResult { payload, .. } = frame else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+    let status_payload = queued_payload(&simulator, "StatusNotification");
+    assert_eq!(status_payload["evseId"], json!(2));
+  }
+}
 
-  let frames = server.await.expect("server task");
-  assert_eq!(frames.len(), 2);
-  assert!(frames.iter().all(|frame| {
-    matches!(
-      frame,
-      OcppFrame::CallResult {
-        payload,
-        ..
-      } if payload.get("status").and_then(Value::as_str)
-        == Some(ResponseStatus::Accepted.as_str())
-    )
-  }));
-  assert!(
+#[tokio::test]
+async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
+  for protocol in v2_x_protocols() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+      .await
+      .expect("bind listener");
+    let address = listener.local_addr().expect("local address");
+    let server = tokio::spawn(async move {
+      let (stream, _) = listener.accept().await.expect("accept client");
+      let websocket = accept_async(stream).await.expect("accept websocket");
+      let (_server_write, mut server_read) = websocket.split();
+      let mut frames = Vec::new();
+      for _ in 0..2 {
+        let message = server_read
+          .next()
+          .await
+          .expect("response frame")
+          .expect("response frame ok");
+        frames.push(
+          parse_frame(message.to_text().expect("text frame"))
+            .expect("parse response"),
+        );
+      }
+      frames
+    });
+
+    let (client_stream, _) = connect_async(format!("ws://{address}"))
+      .await
+      .expect("connect client");
+    let (mut write, _read) = client_stream.split();
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
     simulator
-      .queue
-      .iter()
-      .filter(|call| call.action == "TransactionEvent")
-      .count()
-      >= 3
-  );
-  assert_eq!(
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "remote-start",
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 99,
+          "idToken": { "idToken": "TOKEN" },
+          "evseId": 1
+        }),
+      )
+      .await
+      .expect("handle request start");
     simulator
-      .connectors
-      .get(&1)
-      .map(|item| item.status.display()),
-    Some("Finishing")
-  );
+      .send_meter(1, true)
+      .expect("meter should enqueue update");
+    let transaction_id = simulator
+      .active_transaction_uid(1)
+      .expect("active transaction uid");
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "remote-stop",
+        "RequestStopTransaction",
+        json!({ "transactionId": transaction_id }),
+      )
+      .await
+      .expect("handle request stop");
+    drop(write);
+
+    let frames = server.await.expect("server task");
+    assert_eq!(frames.len(), 2);
+    assert!(frames.iter().all(|frame| {
+      matches!(
+        frame,
+        OcppFrame::CallResult {
+          payload,
+          ..
+        } if payload.get("status").and_then(Value::as_str)
+          == Some(ResponseStatus::Accepted.as_str())
+      )
+    }));
+    assert!(
+      simulator
+        .queue
+        .iter()
+        .filter(|call| call.action == "TransactionEvent")
+        .count()
+        >= 3
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|item| item.status.display()),
+      Some("Finishing")
+    );
+  }
 }
 
 #[tokio::test]

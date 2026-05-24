@@ -57,63 +57,64 @@ fn stop_transaction_timeout_restores_v1_6_status() {
 }
 
 #[test]
-fn transaction_event_end_timeout_restores_v2_status() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator.config.request_timeout = Duration::from_millis(1);
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, false)
-    .expect("start should succeed");
-  let local_tx_id = simulator
-    .connectors
-    .get(&1)
-    .and_then(|state| state.transaction.as_ref())
-    .map(|tx| tx.local_id)
-    .expect("local transaction");
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("stop should enqueue");
-  let end_call = simulator
-    .queue
-    .iter()
-    .find(|call| {
-      matches!(
-        &call.context,
-        PendingContext::TxEvent {
-          event_type: TxEventType::Ended,
-          ..
-        }
-      )
-    })
-    .expect("queued end event")
-    .clone();
-  simulator.pending = Some(PendingCall {
-    message_id: "end-timeout".to_string(),
-    sent_at: Instant::now()
-      .checked_sub(Duration::from_secs(1))
-      .expect("past instant"),
-    call: end_call,
-  });
-
-  simulator.check_pending_timeout();
-
-  assert!(simulator.pending.is_none());
-  assert_eq!(
+fn transaction_event_end_timeout_restores_v2_x_status() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator.config.request_timeout = Duration::from_millis(1);
     simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, false)
+      .expect("start should succeed");
+    let local_tx_id = simulator
       .connectors
       .get(&1)
       .and_then(|state| state.transaction.as_ref())
-      .map(|tx| tx.local_id),
-    Some(local_tx_id)
-  );
-  assert_eq!(
+      .map(|tx| tx.local_id)
+      .expect("local transaction");
     simulator
-      .connectors
-      .get(&1)
-      .map(|item| item.status.display()),
-    Some("Occupied")
-  );
-  let status_payload = queued_payload(&simulator, "StatusNotification");
-  assert_eq!(status_payload["connectorStatus"], json!("Occupied"));
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("stop should enqueue");
+    let end_call = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          &call.context,
+          PendingContext::TxEvent {
+            event_type: TxEventType::Ended,
+            ..
+          }
+        )
+      })
+      .expect("queued end event")
+      .clone();
+    simulator.pending = Some(PendingCall {
+      message_id: "end-timeout".to_string(),
+      sent_at: Instant::now()
+        .checked_sub(Duration::from_secs(1))
+        .expect("past instant"),
+      call: end_call,
+    });
+
+    simulator.check_pending_timeout();
+
+    assert!(simulator.pending.is_none());
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .map(|tx| tx.local_id),
+      Some(local_tx_id)
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|item| item.status.display()),
+      Some("Occupied")
+    );
+    let status_payload = queued_payload(&simulator, "StatusNotification");
+    assert_eq!(status_payload["connectorStatus"], json!("Occupied"));
+  });
 }
 
 #[test]
@@ -156,42 +157,43 @@ fn stop_ack_enqueues_scheduled_v1_6_status() {
 }
 
 #[test]
-fn end_ack_enqueues_scheduled_v2_status() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, false)
-    .expect("start should succeed");
-  assert_eq!(
+fn end_ack_enqueues_scheduled_v2_x_status() {
+  for_each_v2_x_simulator(|_, mut simulator| {
     simulator
-      .change_availability_v2_x(&json!({
-        "operationalStatus": "Inoperative",
-        "evse": { "id": 1 }
-      }))
-      .expect("change availability"),
-    ResponseStatus::Scheduled
-  );
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("stop should enqueue");
-  assert!(
-    !simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, false)
+      .expect("start should succeed");
+    assert_eq!(
+      simulator
+        .change_availability_v2_x(&json!({
+          "operationalStatus": "Inoperative",
+          "evse": { "id": 1 }
+        }))
+        .expect("change availability"),
+      ResponseStatus::Scheduled
+    );
+    simulator
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("stop should enqueue");
+    assert!(
+      !simulator
+        .queue
+        .iter()
+        .any(|call| { call.action == "StatusNotification" })
+    );
+
+    let context = simulator
       .queue
       .iter()
-      .any(|call| { call.action == "StatusNotification" })
-  );
+      .find(|call| matches!(call.context, PendingContext::TxEvent { .. }))
+      .map(|call| call.context.clone())
+      .expect("queued transaction event");
+    simulator
+      .apply_call_result_context(&context, &json!({}))
+      .expect("end acknowledgement should apply");
 
-  let context = simulator
-    .queue
-    .iter()
-    .find(|call| matches!(call.context, PendingContext::TxEvent { .. }))
-    .map(|call| call.context.clone())
-    .expect("queued transaction event");
-  simulator
-    .apply_call_result_context(&context, &json!({}))
-    .expect("end acknowledgement should apply");
-
-  let status_payload = queued_payload(&simulator, "StatusNotification");
-  assert_eq!(status_payload["connectorStatus"], json!("Unavailable"));
+    let status_payload = queued_payload(&simulator, "StatusNotification");
+    assert_eq!(status_payload["connectorStatus"], json!("Unavailable"));
+  });
 }
 
 #[test]
@@ -211,20 +213,21 @@ fn stop_transaction_v1_6_remote_reason_is_preserved() {
 }
 
 #[test]
-fn stop_transaction_v2_0_1_remote_reason_is_preserved() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should succeed");
-  simulator.queue.clear();
+fn stop_transaction_v2_x_remote_reason_is_preserved() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start should succeed");
+    simulator.queue.clear();
 
-  simulator
-    .stop_transaction(1, Some("Remote"), false, true)
-    .expect("stop should enqueue");
+    simulator
+      .stop_transaction(1, Some("Remote"), false, true)
+      .expect("stop should enqueue");
 
-  let payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(payload["eventType"], json!("Ended"));
-  assert_eq!(payload["transactionInfo"]["stoppedReason"], json!("Remote"));
+    let payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(payload["eventType"], json!("Ended"));
+    assert_eq!(payload["transactionInfo"]["stoppedReason"], json!("Remote"));
+  });
 }
 
 #[test]
@@ -389,234 +392,182 @@ fn start_transaction_v1_6_rejection_rolls_back_local_state() {
 
 #[test]
 fn transaction_event_start_error_rolls_back_v2_x_local_state() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should enqueue");
-  let start_call = simulator
-    .queue
-    .iter()
-    .find(|call| {
-      matches!(
-        call.context,
-        PendingContext::TxEvent {
-          event_type: TxEventType::Started,
-          ..
-        }
-      )
-    })
-    .expect("queued start event")
-    .clone();
-  simulator.queue.clear();
-  simulator.pending = Some(PendingCall {
-    message_id: "event-error".to_string(),
-    sent_at: Instant::now(),
-    call: start_call,
-  });
-
-  simulator
-    .handle_call_error("event-error", "InternalError", "boom")
-    .expect("start error should roll back");
-
-  assert!(simulator.pending.is_none());
-  assert!(
+  for_each_v2_x_simulator(|_, mut simulator| {
     simulator
-      .connectors
-      .get(&1)
-      .and_then(|state| state.transaction.as_ref())
-      .is_none()
-  );
-  let status_payload = queued_payload(&simulator, "StatusNotification");
-  assert_eq!(status_payload["connectorStatus"], json!("Available"));
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start should enqueue");
+    let start_call = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          call.context,
+          PendingContext::TxEvent {
+            event_type: TxEventType::Started,
+            ..
+          }
+        )
+      })
+      .expect("queued start event")
+      .clone();
+    simulator.queue.clear();
+    simulator.pending = Some(PendingCall {
+      message_id: "event-error".to_string(),
+      sent_at: Instant::now(),
+      call: start_call,
+    });
+
+    simulator
+      .handle_call_error("event-error", "InternalError", "boom")
+      .expect("start error should roll back");
+
+    assert!(simulator.pending.is_none());
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_none()
+    );
+    let status_payload = queued_payload(&simulator, "StatusNotification");
+    assert_eq!(status_payload["connectorStatus"], json!("Available"));
+  });
 }
 
 #[test]
 fn v2_x_multi_connector_transactions_progress_independently() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .start_transaction(1, "TOKEN-1".to_string(), false, None, true)
-    .expect("first start should succeed");
-  simulator
-    .start_transaction(2, "TOKEN-2".to_string(), false, None, true)
-    .expect("second start should succeed");
-  simulator.queue.clear();
-
-  simulator.set_meter(1, 1200).expect("set meter");
-  simulator
-    .send_meter(1, true)
-    .expect("meter update should enqueue");
-  let update_payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(update_payload["eventType"], json!("Updated"));
-  assert_eq!(update_payload["evse"]["id"], json!(1));
-  simulator.queue.clear();
-
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("first stop should enqueue");
-  let first_end_context = simulator
-    .queue
-    .iter()
-    .find(|call| {
-      matches!(
-        call.context,
-        PendingContext::TxEvent {
-          connector: 1,
-          event_type: TxEventType::Ended,
-          ..
-        }
-      )
-    })
-    .map(|call| call.context.clone())
-    .expect("first end context");
-  simulator
-    .apply_call_result_context(&first_end_context, &json!({}))
-    .expect("first end acknowledgement");
-
-  assert!(
+  for_each_v2_x_simulator(|_, mut simulator| {
     simulator
-      .connectors
-      .get(&1)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_none()
-  );
-  assert!(
+      .start_transaction(1, "TOKEN-1".to_string(), false, None, true)
+      .expect("first start should succeed");
     simulator
-      .connectors
-      .get(&2)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_some()
-  );
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&2)
-      .map(|connector| connector.status.display()),
-    Some("Occupied")
-  );
+      .start_transaction(2, "TOKEN-2".to_string(), false, None, true)
+      .expect("second start should succeed");
+    simulator.queue.clear();
 
-  simulator.queue.clear();
-  simulator
-    .stop_transaction(2, Some("Local"), false, true)
-    .expect("second stop should enqueue");
-  let second_end_call = simulator
-    .queue
-    .iter()
-    .find(|call| {
-      matches!(
-        call.context,
-        PendingContext::TxEvent {
-          connector: 2,
-          event_type: TxEventType::Ended,
-          ..
-        }
-      )
-    })
-    .expect("second end call")
-    .clone();
-  simulator.queue.clear();
-  simulator.pending = Some(PendingCall {
-    message_id: "second-end-error".to_string(),
-    sent_at: Instant::now(),
-    call: second_end_call,
+    simulator.set_meter(1, 1200).expect("set meter");
+    simulator
+      .send_meter(1, true)
+      .expect("meter update should enqueue");
+    let update_payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(update_payload["eventType"], json!("Updated"));
+    assert_eq!(update_payload["evse"]["id"], json!(1));
+    simulator.queue.clear();
+
+    simulator
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("first stop should enqueue");
+    let first_end_context = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          call.context,
+          PendingContext::TxEvent {
+            connector: 1,
+            event_type: TxEventType::Ended,
+            ..
+          }
+        )
+      })
+      .map(|call| call.context.clone())
+      .expect("first end context");
+    simulator
+      .apply_call_result_context(&first_end_context, &json!({}))
+      .expect("first end ack should apply");
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_none()
+    );
+    assert!(
+      simulator
+        .connectors
+        .get(&2)
+        .and_then(|state| state.transaction.as_ref())
+        .is_some()
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&2)
+        .map(|state| state.status.display()),
+      Some("Occupied")
+    );
+
+    simulator.queue.clear();
+    simulator
+      .stop_transaction(2, Some("Local"), false, true)
+      .expect("second stop should enqueue");
+    let second_end_context = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          call.context,
+          PendingContext::TxEvent {
+            connector: 2,
+            event_type: TxEventType::Ended,
+            ..
+          }
+        )
+      })
+      .map(|call| call.context.clone())
+      .expect("second end context");
+    simulator
+      .apply_call_result_context(&second_end_context, &json!({}))
+      .expect("second end ack should apply");
+    assert!(
+      simulator
+        .connectors
+        .values()
+        .all(|state| state.transaction.is_none())
+    );
   });
-
-  simulator
-    .handle_call_error("second-end-error", "InternalError", "boom")
-    .expect("second end error should restore transaction");
-  assert!(
-    simulator
-      .connectors
-      .get(&2)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_some()
-  );
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&2)
-      .map(|connector| connector.status.display()),
-    Some("Occupied")
-  );
 }
 
 #[test]
-fn stop_transaction_v2_0_1_queues_ended_transaction_event() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should succeed");
-  simulator.queue.clear();
-
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("stop should succeed");
-
-  let payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(payload["eventType"], json!("Ended"));
-  assert_schema_valid("schemas/2.0.1/TransactionEventRequest.json", &payload);
-  assert!(
+fn stop_transaction_v2_x_queues_ended_transaction_event() {
+  for_each_v2_x_simulator(|protocol, mut simulator| {
+    let schema =
+      schema_path(v2_x_schema_dir(protocol), "TransactionEventRequest.json");
     simulator
-      .connectors
-      .get(&1)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_some()
-  );
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start should succeed");
+    simulator.queue.clear();
 
-  let context = simulator
-    .queue
-    .iter()
-    .find(|call| call.action == "TransactionEvent")
-    .map(|call| call.context.clone())
-    .expect("transaction event context");
-  simulator
-    .apply_call_result_context(&context, &json!({}))
-    .expect("apply acknowledgement");
-  assert!(
     simulator
-      .connectors
-      .get(&1)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_none()
-  );
-}
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("stop should succeed");
 
-#[test]
-fn stop_transaction_v2_1_queues_ended_transaction_event() {
-  let mut simulator = simulator_for_tests_v2_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should succeed");
-  simulator.queue.clear();
+    let payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(payload["eventType"], json!("Ended"));
+    assert_schema_valid(&schema, &payload);
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|connector| connector.transaction.as_ref())
+        .is_some()
+    );
 
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("stop should succeed");
-
-  let payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(payload["eventType"], json!("Ended"));
-  assert_schema_valid("schemas/2.1/TransactionEventRequest.json", &payload);
-  assert!(
+    let context = simulator
+      .queue
+      .iter()
+      .find(|call| call.action == "TransactionEvent")
+      .map(|call| call.context.clone())
+      .expect("transaction event context");
     simulator
-      .connectors
-      .get(&1)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_some()
-  );
-
-  let context = simulator
-    .queue
-    .iter()
-    .find(|call| call.action == "TransactionEvent")
-    .map(|call| call.context.clone())
-    .expect("transaction event context");
-  simulator
-    .apply_call_result_context(&context, &json!({}))
-    .expect("apply acknowledgement");
-  assert!(
-    simulator
-      .connectors
-      .get(&1)
-      .and_then(|connector| connector.transaction.as_ref())
-      .is_none()
-  );
+      .apply_call_result_context(&context, &json!({}))
+      .expect("apply acknowledgement");
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|connector| connector.transaction.as_ref())
+        .is_none()
+    );
+  });
 }

@@ -1722,10 +1722,11 @@ mod tests {
   #[test]
   /// Verifies all schema stop reason tokens are represented by `StopReason`.
   fn stop_reason_covers_schema_reason_enums() {
-    let mut reasons = enum_tokens_at_path(
+    let mut reasons = BTreeSet::new();
+    reasons.extend(enum_tokens_at_path(
       "schemas/1.6/StopTransaction.json",
       &["properties", "reason", "enum"],
-    );
+    ));
     reasons.extend(definition_enum_tokens(
       "schemas/2.0.1/TransactionEventRequest.json",
       "ReasonEnumType",
@@ -1741,10 +1742,11 @@ mod tests {
   #[test]
   /// Verifies all schema connector status tokens are typed.
   fn connector_status_covers_status_notification_schema_enums() {
-    let mut statuses = enum_tokens_at_path(
+    let mut statuses = BTreeSet::new();
+    statuses.extend(enum_tokens_at_path(
       "schemas/1.6/StatusNotification.json",
       &["properties", "status", "enum"],
-    );
+    ));
     statuses.extend(definition_enum_tokens(
       "schemas/2.0.1/StatusNotificationRequest.json",
       "ConnectorStatusEnumType",
@@ -1764,10 +1766,11 @@ mod tests {
   #[test]
   /// Verifies all schema transaction trigger tokens are typed.
   fn transaction_trigger_reason_covers_schema_enums() {
-    let mut triggers = definition_enum_tokens(
+    let mut triggers = BTreeSet::new();
+    triggers.extend(definition_enum_tokens(
       "schemas/2.0.1/TransactionEventRequest.json",
       "TriggerReasonEnumType",
-    );
+    ));
     triggers.extend(definition_enum_tokens(
       "schemas/2.1/TransactionEventRequest.json",
       "TriggerReasonEnumType",
@@ -1783,10 +1786,11 @@ mod tests {
   #[test]
   /// Verifies meter value enum tokens from all embedded schemas are typed.
   fn meter_value_enums_cover_schema_tokens() {
-    let mut contexts = enum_tokens_at_path(
+    let mut contexts = BTreeSet::new();
+    contexts.extend(enum_tokens_at_path(
       "schemas/1.6/MeterValues.json",
       &meter_sampled_value_path("context"),
-    );
+    ));
     contexts.extend(definition_enum_tokens(
       "schemas/2.0.1/MeterValuesRequest.json",
       "ReadingContextEnumType",
@@ -1801,10 +1805,11 @@ mod tests {
       ReadingContext::as_str,
     );
 
-    let mut measurands = enum_tokens_at_path(
+    let mut measurands = BTreeSet::new();
+    measurands.extend(enum_tokens_at_path(
       "schemas/1.6/MeterValues.json",
       &meter_sampled_value_path("measurand"),
-    );
+    ));
     measurands.extend(definition_enum_tokens(
       "schemas/2.0.1/MeterValuesRequest.json",
       "MeasurandEnumType",
@@ -1815,10 +1820,11 @@ mod tests {
     ));
     assert_wire_enum_tokens(measurands, Measurand::parse, Measurand::as_str);
 
-    let mut phases = enum_tokens_at_path(
+    let mut phases = BTreeSet::new();
+    phases.extend(enum_tokens_at_path(
       "schemas/1.6/MeterValues.json",
       &meter_sampled_value_path("phase"),
-    );
+    ));
     phases.extend(definition_enum_tokens(
       "schemas/2.0.1/MeterValuesRequest.json",
       "PhaseEnumType",
@@ -1833,10 +1839,11 @@ mod tests {
       MeterValuePhase::as_str,
     );
 
-    let mut locations = enum_tokens_at_path(
+    let mut locations = BTreeSet::new();
+    locations.extend(enum_tokens_at_path(
       "schemas/1.6/MeterValues.json",
       &meter_sampled_value_path("location"),
-    );
+    ));
     locations.extend(definition_enum_tokens(
       "schemas/2.0.1/MeterValuesRequest.json",
       "LocationEnumType",
@@ -1869,12 +1876,13 @@ mod tests {
   }
 
   #[test]
-  /// Verifies common OCPP 2.x scalar tokens are typed from schemas.
-  fn v2_x_scalar_enums_cover_schema_tokens() {
-    let mut boot_reasons = definition_enum_tokens(
+  /// Verifies common OCPP scalar tokens are typed from schemas.
+  fn scalar_enums_cover_schema_tokens() {
+    let mut boot_reasons = BTreeSet::new();
+    boot_reasons.extend(definition_enum_tokens(
       "schemas/2.0.1/BootNotificationRequest.json",
       "BootReasonEnumType",
-    );
+    ));
     boot_reasons.extend(definition_enum_tokens(
       "schemas/2.1/BootNotificationRequest.json",
       "BootReasonEnumType",
@@ -1885,20 +1893,22 @@ mod tests {
       BootReason::as_str,
     );
 
-    let id_token_types = definition_enum_tokens(
+    let mut id_token_types = BTreeSet::new();
+    id_token_types.extend(definition_enum_tokens(
       "schemas/2.0.1/AuthorizeRequest.json",
       "IdTokenEnumType",
-    );
+    ));
     assert_wire_enum_tokens(
       id_token_types,
       IdTokenType::parse,
       IdTokenType::as_str,
     );
 
-    let mut attribute_types = definition_enum_tokens(
+    let mut attribute_types = BTreeSet::new();
+    attribute_types.extend(definition_enum_tokens(
       "schemas/2.0.1/GetVariablesRequest.json",
       "AttributeEnumType",
-    );
+    ));
     attribute_types.extend(definition_enum_tokens(
       "schemas/2.1/GetVariablesRequest.json",
       "AttributeEnumType",
@@ -1909,7 +1919,8 @@ mod tests {
       VariableAttributeType::as_str,
     );
 
-    let mut charging_rate_units = enum_tokens_at_path(
+    let mut charging_rate_units = BTreeSet::new();
+    charging_rate_units.extend(enum_tokens_at_path(
       "schemas/1.6/GetCompositeScheduleResponse.json",
       &[
         "properties",
@@ -1918,7 +1929,7 @@ mod tests {
         "chargingRateUnit",
         "enum",
       ],
-    );
+    ));
     charging_rate_units.extend(definition_enum_tokens(
       "schemas/2.0.1/GetCompositeScheduleResponse.json",
       "ChargingRateUnitEnumType",

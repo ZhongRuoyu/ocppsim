@@ -13,19 +13,13 @@ fn supported_v1_6_inbound_responses_validate_against_schemas() {
 }
 
 #[test]
-fn supported_v2_0_1_inbound_responses_validate_against_schemas() {
-  assert_supported_v2_x_inbound_responses_validate(
-    simulator_for_tests_v2_0_1(),
-    "schemas/2.0.1",
-  );
-}
-
-#[test]
-fn supported_v2_1_inbound_responses_validate_against_schemas() {
-  assert_supported_v2_x_inbound_responses_validate(
-    simulator_for_tests_v2_1(),
-    "schemas/2.1",
-  );
+fn supported_v2_x_inbound_responses_validate_against_schemas() {
+  for_each_v2_x_simulator(|protocol, simulator| {
+    assert_supported_v2_x_inbound_responses_validate(
+      simulator,
+      v2_x_schema_dir(protocol),
+    );
+  });
 }
 
 fn assert_supported_v2_x_inbound_responses_validate(
@@ -292,15 +286,13 @@ fn representative_v1_6_payloads_validate_against_schemas() {
 }
 
 #[test]
-fn representative_v2_0_1_payloads_validate_against_schemas() {
-  let simulator = simulator_for_tests_v2_0_1();
-  assert_representative_v2_x_payloads_validate(simulator, "schemas/2.0.1");
-}
-
-#[test]
-fn representative_v2_1_payloads_validate_against_schemas() {
-  let simulator = simulator_for_tests_v2_1();
-  assert_representative_v2_x_payloads_validate(simulator, "schemas/2.1");
+fn representative_v2_x_payloads_validate_against_schemas() {
+  for_each_v2_x_simulator(|protocol, simulator| {
+    assert_representative_v2_x_payloads_validate(
+      simulator,
+      v2_x_schema_dir(protocol),
+    );
+  });
 }
 
 fn assert_representative_v2_x_payloads_validate(
@@ -390,61 +382,49 @@ fn assert_representative_v2_x_payloads_validate(
 }
 
 #[test]
-fn get_composite_schedule_v2_0_1_validates_against_schema() {
-  let simulator = simulator_for_tests_v2_0_1();
-  let response = simulator
-    .get_composite_schedule_v2_x(&json!({
-      "evseId": 1,
-      "duration": 60
-    }))
-    .expect("composite schedule response");
+fn get_composite_schedule_v2_x_validates_against_schema() {
+  for_each_v2_x_simulator(|protocol, simulator| {
+    let response = simulator
+      .get_composite_schedule_v2_x(&json!({
+        "evseId": 1,
+        "duration": 60
+      }))
+      .expect("composite schedule response");
 
-  assert_schema_valid(
-    "schemas/2.0.1/GetCompositeScheduleResponse.json",
-    &response,
-  );
+    assert_schema_valid(
+      &schema_path(
+        v2_x_schema_dir(protocol),
+        "GetCompositeScheduleResponse.json",
+      ),
+      &response,
+    );
+  });
 }
 
 #[test]
-fn get_composite_schedule_v2_1_validates_against_schema() {
-  let simulator = simulator_for_tests_v2_1();
-  let response = simulator
-    .get_composite_schedule_v2_x(&json!({
-      "evseId": 1,
-      "duration": 60
-    }))
-    .expect("composite schedule response");
+fn transaction_event_update_and_end_v2_x_validate_against_schema() {
+  for_each_v2_x_simulator(|protocol, mut simulator| {
+    let schema =
+      schema_path(v2_x_schema_dir(protocol), "TransactionEventRequest.json");
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start should succeed");
+    simulator.queue.clear();
 
-  assert_schema_valid(
-    "schemas/2.1/GetCompositeScheduleResponse.json",
-    &response,
-  );
-}
+    simulator.set_meter(1, 1200).expect("set meter");
+    simulator
+      .send_meter(1, true)
+      .expect("meter update should enqueue");
+    let update_payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(update_payload["eventType"], json!("Updated"));
+    assert_schema_valid(&schema, &update_payload);
 
-#[test]
-fn transaction_event_update_and_end_v2_1_validate_against_schema() {
-  let mut simulator = simulator_for_tests_v2_1();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should succeed");
-  simulator.queue.clear();
-
-  simulator.set_meter(1, 1200).expect("set meter");
-  simulator
-    .send_meter(1, true)
-    .expect("meter update should enqueue");
-  let update_payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(update_payload["eventType"], json!("Updated"));
-  assert_schema_valid(
-    "schemas/2.1/TransactionEventRequest.json",
-    &update_payload,
-  );
-
-  simulator.queue.clear();
-  simulator
-    .stop_transaction(1, Some("Local"), false, true)
-    .expect("stop should enqueue");
-  let end_payload = queued_payload(&simulator, "TransactionEvent");
-  assert_eq!(end_payload["eventType"], json!("Ended"));
-  assert_schema_valid("schemas/2.1/TransactionEventRequest.json", &end_payload);
+    simulator.queue.clear();
+    simulator
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("stop should enqueue");
+    let end_payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(end_payload["eventType"], json!("Ended"));
+    assert_schema_valid(&schema, &end_payload);
+  });
 }

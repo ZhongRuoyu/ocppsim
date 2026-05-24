@@ -139,73 +139,76 @@ fn change_availability_v1_6_connector_zero_updates_all_connectors() {
 
 #[test]
 fn change_availability_v2_x_updates_target_evse() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  let payload = json!({
-    "operationalStatus": "Inoperative",
-    "evse": { "id": 2 }
-  });
-  let status = simulator
-    .change_availability_v2_x(&payload)
-    .expect("request should succeed");
+  for_each_v2_x_simulator(|_, mut simulator| {
+    let payload = json!({
+      "operationalStatus": "Inoperative",
+      "evse": { "id": 2 }
+    });
+    let status = simulator
+      .change_availability_v2_x(&payload)
+      .expect("request should succeed");
 
-  assert_eq!(status, ResponseStatus::Accepted);
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&2)
-      .map(|item| item.status.display()),
-    Some("Unavailable")
-  );
+    assert_eq!(status, ResponseStatus::Accepted);
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&2)
+        .map(|item| item.status.display()),
+      Some("Unavailable")
+    );
+  });
 }
 
 #[test]
 fn reserve_and_cancel_v2_x_auto_selects_available_evse() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  let reserve_status = simulator
-    .reserve_now_v2_x(&json!({
-      "id": 77,
-      "expiryDateTime": now_timestamp(),
-      "idToken": {
-        "idToken": "TOKEN",
-        "type": "Central"
-      }
-    }))
-    .expect("reserve should succeed");
+  for_each_v2_x_simulator(|_, mut simulator| {
+    let reserve_status = simulator
+      .reserve_now_v2_x(&json!({
+        "id": 77,
+        "expiryDateTime": now_timestamp(),
+        "idToken": {
+          "idToken": "TOKEN",
+          "type": "Central"
+        }
+      }))
+      .expect("reserve should succeed");
 
-  assert_eq!(reserve_status, ResponseStatus::Accepted);
-  assert_eq!(simulator.reservations.get(&77), Some(&1));
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&1)
-      .map(|item| item.status.display()),
-    Some("Reserved")
-  );
+    assert_eq!(reserve_status, ResponseStatus::Accepted);
+    assert_eq!(simulator.reservations.get(&77), Some(&1));
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|item| item.status.display()),
+      Some("Reserved")
+    );
 
-  let cancel_status = simulator
-    .cancel_reservation_v2_x(&json!({ "reservationId": 77 }))
-    .expect("cancel should succeed");
-  assert_eq!(cancel_status, ResponseStatus::Accepted);
-  assert!(!simulator.reservations.contains_key(&77));
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&1)
-      .map(|item| item.status.display()),
-    Some("Available")
-  );
+    let cancel_status = simulator
+      .cancel_reservation_v2_x(&json!({ "reservationId": 77 }))
+      .expect("cancel should succeed");
+    assert_eq!(cancel_status, ResponseStatus::Accepted);
+    assert!(!simulator.reservations.contains_key(&77));
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|item| item.status.display()),
+      Some("Available")
+    );
+  });
 }
 
 #[test]
 fn send_local_list_v2_x_updates_version() {
-  let mut simulator = simulator_for_tests_v2_0_1();
-  let payload = json!({ "versionNumber": 7, "updateType": "Full" });
-  let status = simulator
-    .send_local_list_v2_x(&payload)
-    .expect("send local list should parse");
+  for_each_v2_x_simulator(|_, mut simulator| {
+    let payload = json!({ "versionNumber": 7, "updateType": "Full" });
+    let status = simulator
+      .send_local_list_v2_x(&payload)
+      .expect("send local list should parse");
 
-  assert_eq!(status, ResponseStatus::Accepted);
-  assert_eq!(simulator.local_auth_list_version, 7);
+    assert_eq!(status, ResponseStatus::Accepted);
+    assert_eq!(simulator.local_auth_list_version, 7);
+  });
 }
 
 #[test]

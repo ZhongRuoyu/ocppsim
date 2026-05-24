@@ -51,12 +51,24 @@ fn simulator_for_tests() -> Simulator {
   simulator_for_tests_with_protocol(OcppVersion::V1_6)
 }
 
-fn simulator_for_tests_v2_0_1() -> Simulator {
-  simulator_for_tests_with_protocol(OcppVersion::V2_0_1)
+fn v2_x_protocols() -> [OcppVersion; 2] {
+  [OcppVersion::V2_0_1, OcppVersion::V2_1]
 }
 
-fn simulator_for_tests_v2_1() -> Simulator {
-  simulator_for_tests_with_protocol(OcppVersion::V2_1)
+fn for_each_v2_x_simulator(
+  mut assert_case: impl FnMut(OcppVersion, Simulator),
+) {
+  for protocol in v2_x_protocols() {
+    assert_case(protocol, simulator_for_tests_with_protocol(protocol));
+  }
+}
+
+fn v2_x_schema_dir(protocol: OcppVersion) -> &'static str {
+  match protocol {
+    OcppVersion::V2_0_1 => "schemas/2.0.1",
+    OcppVersion::V2_1 => "schemas/2.1",
+    OcppVersion::V1_6 => panic!("expected v2.x protocol"),
+  }
 }
 
 fn assert_schema_valid(relative_schema: &str, payload: &Value) {
