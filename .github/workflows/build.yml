@@ -104,7 +104,7 @@ jobs:
               --default-toolchain stable \
               --target "$TARGET"
       - name: Cache Cargo registry
-        # zizmor: ignore[cache-poisoning] We only save cache for pushes to the main branch.
+        # zizmor: ignore[cache-poisoning] We never use the cache for releases.
         if: inputs.cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -115,9 +115,8 @@ jobs:
           key: build-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-cargo-${{ matrix.target }}-
-          lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Cache build artifacts
-        # zizmor: ignore[cache-poisoning] We only save cache for pushes to the main branch.
+        # zizmor: ignore[cache-poisoning] We never use the cache for releases.
         id: cache-target
         if: inputs.cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -127,7 +126,6 @@ jobs:
           key: build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-target-${{ matrix.target }}-${{ env.PROFILE }}-
-          lookup-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       - name: Prepare container
         if: fromJson(steps.setup-build.outputs.container)
         id: container
