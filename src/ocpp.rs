@@ -1,5 +1,17 @@
 use serde_json::{Value, json};
 
+pub const BASIC_AUTH_PASSWORD_MIN_LENGTH: usize = 32;
+pub const BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 40;
+
+/// Returns whether a Basic Auth password fits the supported OCPP security key
+/// representation.
+pub fn is_valid_basic_auth_password(value: &str) -> bool {
+  let bytes = value.as_bytes();
+  (BASIC_AUTH_PASSWORD_MIN_LENGTH..=BASIC_AUTH_PASSWORD_MAX_LENGTH)
+    .contains(&bytes.len())
+    && bytes.iter().all(u8::is_ascii_hexdigit)
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OcppVersion {
@@ -32,25 +44,36 @@ pub const OCPP_V1_6_SUPPORTED_ACTIONS: &[&str] = &[
   "Authorize",
   "BootNotification",
   "CancelReservation",
+  "CertificateSigned",
   "ChangeAvailability",
   "ChangeConfiguration",
   "ClearCache",
   "ClearChargingProfile",
   "DataTransfer",
+  "DeleteCertificate",
   "DiagnosticsStatusNotification",
+  "ExtendedTriggerMessage",
   "FirmwareStatusNotification",
   "GetCompositeSchedule",
   "GetConfiguration",
   "GetDiagnostics",
+  "GetInstalledCertificateIds",
   "GetLocalListVersion",
+  "GetLog",
   "Heartbeat",
+  "InstallCertificate",
+  "LogStatusNotification",
   "MeterValues",
   "RemoteStartTransaction",
   "RemoteStopTransaction",
   "ReserveNow",
   "Reset",
+  "SecurityEventNotification",
   "SendLocalList",
   "SetChargingProfile",
+  "SignCertificate",
+  "SignedFirmwareStatusNotification",
+  "SignedUpdateFirmware",
   "StartTransaction",
   "StatusNotification",
   "StopTransaction",
@@ -59,43 +82,35 @@ pub const OCPP_V1_6_SUPPORTED_ACTIONS: &[&str] = &[
   "UpdateFirmware",
 ];
 
-pub const OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS: &[&str] = &[
-  "CertificateSigned",
-  "DeleteCertificate",
-  "ExtendedTriggerMessage",
-  "GetInstalledCertificateIds",
-  "GetLog",
-  "InstallCertificate",
-  "LogStatusNotification",
-  "SecurityEventNotification",
-  "SignCertificate",
-  "SignedFirmwareStatusNotification",
-  "SignedUpdateFirmware",
-];
-
 pub const OCPP_V2_X_COMMON_SUPPORTED_ACTIONS: &[&str] = &[
   "Authorize",
   "BootNotification",
   "CancelReservation",
+  "CertificateSigned",
   "ChangeAvailability",
   "ClearCache",
   "ClearChargingProfile",
   "DataTransfer",
+  "DeleteCertificate",
   "FirmwareStatusNotification",
   "GetCompositeSchedule",
+  "GetInstalledCertificateIds",
   "GetLocalListVersion",
   "GetLog",
   "GetVariables",
   "Heartbeat",
+  "InstallCertificate",
   "LogStatusNotification",
   "MeterValues",
   "RequestStartTransaction",
   "RequestStopTransaction",
   "ReserveNow",
   "Reset",
+  "SecurityEventNotification",
   "SendLocalList",
   "SetChargingProfile",
   "SetVariables",
+  "SignCertificate",
   "StatusNotification",
   "TransactionEvent",
   "TriggerMessage",
@@ -104,23 +119,19 @@ pub const OCPP_V2_X_COMMON_SUPPORTED_ACTIONS: &[&str] = &[
 ];
 
 pub const OCPP_V2_0_1_UNSUPPORTED_ACTIONS: &[&str] = &[
-  "CertificateSigned",
   "ClearDisplayMessage",
   "ClearVariableMonitoring",
   "ClearedChargingLimit",
   "CostUpdated",
   "CustomerInformation",
-  "DeleteCertificate",
   "Get15118EVCertificate",
   "GetBaseReport",
   "GetCertificateStatus",
   "GetChargingProfiles",
   "GetDisplayMessages",
-  "GetInstalledCertificateIds",
   "GetMonitoringReport",
   "GetReport",
   "GetTransactionStatus",
-  "InstallCertificate",
   "NotifyChargingLimit",
   "NotifyCustomerInformation",
   "NotifyDisplayMessages",
@@ -133,13 +144,11 @@ pub const OCPP_V2_0_1_UNSUPPORTED_ACTIONS: &[&str] = &[
   "PublishFirmwareStatusNotification",
   "ReportChargingProfiles",
   "ReservationStatusUpdate",
-  "SecurityEventNotification",
   "SetDisplayMessage",
   "SetMonitoringBase",
   "SetMonitoringLevel",
   "SetNetworkProfile",
   "SetVariableMonitoring",
-  "SignCertificate",
   "UnpublishFirmware",
 ];
 
@@ -261,13 +270,21 @@ macro_rules! wire_enum {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigurationKey {
   AllowOfflineTxForUnknownId,
+  AdditionalRootCertificateCheck,
   AuthorizationCacheEnabled,
+  AuthorizationKey,
   AuthorizeRemoteTxRequests,
+  BasicAuthPassword,
   BlinkRepeat,
+  CertificateSignedMaxChainSize,
+  CertificateStoreMaxLength,
   ClockAlignedDataInterval,
   ConnectionTimeOut,
   ConnectorPhaseRotation,
   ConnectorPhaseRotationMaxLength,
+  CpoName,
+  CertSigningRepeatTimes,
+  CertSigningWaitMinimum,
   GetConfigurationMaxKeys,
   HeartbeatInterval,
   LightIntensity,
@@ -298,11 +315,16 @@ pub enum ConfigurationKey {
   LocalAuthListMaxLength,
   SendLocalListMaxLength,
   ReserveConnectorZeroSupported,
+  SecurityProfile,
   ChargeProfileMaxStackLevel,
   ChargingScheduleAllowedChargingRateUnit,
   ChargingScheduleMaxPeriods,
   ConnectorSwitch3to1PhaseSupported,
   MaxChargingProfilesInstalled,
+  MaxCertificateChainSize,
+  OrganizationName,
+  SupportedFileTransferProtocols,
+  AllowSecurityProfileDowngrade,
 }
 
 impl ConfigurationKey {
@@ -311,7 +333,9 @@ impl ConfigurationKey {
   #[allow(dead_code)]
   pub const V1_6_STANDARD: &'static [Self] = &[
     Self::AllowOfflineTxForUnknownId,
+    Self::AdditionalRootCertificateCheck,
     Self::AuthorizationCacheEnabled,
+    Self::AuthorizationKey,
     Self::AuthorizeRemoteTxRequests,
     Self::BlinkRepeat,
     Self::ClockAlignedDataInterval,
@@ -348,6 +372,7 @@ impl ConfigurationKey {
     Self::LocalAuthListMaxLength,
     Self::SendLocalListMaxLength,
     Self::ReserveConnectorZeroSupported,
+    Self::SecurityProfile,
     Self::ChargeProfileMaxStackLevel,
     Self::ChargingScheduleAllowedChargingRateUnit,
     Self::ChargingScheduleMaxPeriods,
@@ -358,15 +383,23 @@ impl ConfigurationKey {
   pub const fn as_str(self) -> &'static str {
     match self {
       Self::AllowOfflineTxForUnknownId => "AllowOfflineTxForUnknownId",
+      Self::AdditionalRootCertificateCheck => "AdditionalRootCertificateCheck",
       Self::AuthorizationCacheEnabled => "AuthorizationCacheEnabled",
+      Self::AuthorizationKey => "AuthorizationKey",
       Self::AuthorizeRemoteTxRequests => "AuthorizeRemoteTxRequests",
+      Self::BasicAuthPassword => "BasicAuthPassword",
       Self::BlinkRepeat => "BlinkRepeat",
+      Self::CertificateSignedMaxChainSize => "CertificateSignedMaxChainSize",
+      Self::CertificateStoreMaxLength => "CertificateStoreMaxLength",
       Self::ClockAlignedDataInterval => "ClockAlignedDataInterval",
       Self::ConnectionTimeOut => "ConnectionTimeOut",
       Self::ConnectorPhaseRotation => "ConnectorPhaseRotation",
       Self::ConnectorPhaseRotationMaxLength => {
         "ConnectorPhaseRotationMaxLength"
       }
+      Self::CpoName => "CpoName",
+      Self::CertSigningRepeatTimes => "CertSigningRepeatTimes",
+      Self::CertSigningWaitMinimum => "CertSigningWaitMinimum",
       Self::GetConfigurationMaxKeys => "GetConfigurationMaxKeys",
       Self::HeartbeatInterval => "HeartbeatInterval",
       Self::LightIntensity => "LightIntensity",
@@ -409,6 +442,7 @@ impl ConfigurationKey {
       Self::LocalAuthListMaxLength => "LocalAuthListMaxLength",
       Self::SendLocalListMaxLength => "SendLocalListMaxLength",
       Self::ReserveConnectorZeroSupported => "ReserveConnectorZeroSupported",
+      Self::SecurityProfile => "SecurityProfile",
       Self::ChargeProfileMaxStackLevel => "ChargeProfileMaxStackLevel",
       Self::ChargingScheduleAllowedChargingRateUnit => {
         "ChargingScheduleAllowedChargingRateUnit"
@@ -418,23 +452,39 @@ impl ConfigurationKey {
         "ConnectorSwitch3to1PhaseSupported"
       }
       Self::MaxChargingProfilesInstalled => "MaxChargingProfilesInstalled",
+      Self::MaxCertificateChainSize => "MaxCertificateChainSize",
+      Self::OrganizationName => "OrganizationName",
+      Self::SupportedFileTransferProtocols => "SupportedFileTransferProtocols",
+      Self::AllowSecurityProfileDowngrade => "AllowSecurityProfileDowngrade",
     }
   }
 
   pub fn parse(value: &str) -> Option<Self> {
     match normalize_wire_identifier(value).as_str() {
       "allowofflinetxforunknownid" => Some(Self::AllowOfflineTxForUnknownId),
+      "additionalrootcertificatecheck" => {
+        Some(Self::AdditionalRootCertificateCheck)
+      }
       "authorizationcacheenabled" => Some(Self::AuthorizationCacheEnabled),
+      "authorizationkey" => Some(Self::AuthorizationKey),
       "authorizeremotetxrequests" | "authorizationremotetxrequests" => {
         Some(Self::AuthorizeRemoteTxRequests)
       }
+      "basicauthpassword" => Some(Self::BasicAuthPassword),
       "blinkrepeat" => Some(Self::BlinkRepeat),
+      "certificatesignedmaxchainsize" => {
+        Some(Self::CertificateSignedMaxChainSize)
+      }
+      "certificatestoremaxlength" => Some(Self::CertificateStoreMaxLength),
       "clockaligneddatainterval" => Some(Self::ClockAlignedDataInterval),
       "connectiontimeout" => Some(Self::ConnectionTimeOut),
       "connectorphaserotation" => Some(Self::ConnectorPhaseRotation),
       "connectorphaserotationmaxlength" => {
         Some(Self::ConnectorPhaseRotationMaxLength)
       }
+      "cponame" => Some(Self::CpoName),
+      "certsigningrepeattimes" => Some(Self::CertSigningRepeatTimes),
+      "certsigningwaitminimum" => Some(Self::CertSigningWaitMinimum),
       "getconfigurationmaxkeys" => Some(Self::GetConfigurationMaxKeys),
       "heartbeatinterval" => Some(Self::HeartbeatInterval),
       "lightintensity" => Some(Self::LightIntensity),
@@ -479,6 +529,7 @@ impl ConfigurationKey {
       "reserveconnectorzerosupported" => {
         Some(Self::ReserveConnectorZeroSupported)
       }
+      "securityprofile" => Some(Self::SecurityProfile),
       "chargeprofilemaxstacklevel" => Some(Self::ChargeProfileMaxStackLevel),
       "chargingscheduleallowedchargingrateunit" => {
         Some(Self::ChargingScheduleAllowedChargingRateUnit)
@@ -489,6 +540,14 @@ impl ConfigurationKey {
       }
       "maxchargingprofilesinstalled" => {
         Some(Self::MaxChargingProfilesInstalled)
+      }
+      "maxcertificatechainsize" => Some(Self::MaxCertificateChainSize),
+      "organizationname" => Some(Self::OrganizationName),
+      "supportedfiletransferprotocols" => {
+        Some(Self::SupportedFileTransferProtocols)
+      }
+      "allowsecurityprofiledowngrade" => {
+        Some(Self::AllowSecurityProfileDowngrade)
       }
       _ => None,
     }
@@ -1009,10 +1068,36 @@ wire_enum! {
     Heartbeat => "Heartbeat",
     LogStatusNotification => "LogStatusNotification",
     MeterValues => "MeterValues",
+    SecurityEventNotification => "SecurityEventNotification",
+    SignCertificate => "SignCertificate",
+    SignedFirmwareStatusNotification => "SignedFirmwareStatusNotification",
     StartTransaction => "StartTransaction",
     StatusNotification => "StatusNotification",
     StopTransaction => "StopTransaction",
     TransactionEvent => "TransactionEvent",
+  }
+}
+
+wire_enum! {
+  pub enum CertificateType {
+    CentralSystemRootCertificate => "CentralSystemRootCertificate",
+    CSMSRootCertificate => "CSMSRootCertificate",
+    ChargePointCertificate => "ChargePointCertificate",
+    ChargingStationCertificate => "ChargingStationCertificate",
+    ManufacturerRootCertificate => "ManufacturerRootCertificate",
+    MORootCertificate => "MORootCertificate",
+    V2GCertificate => "V2GCertificate",
+    V2GCertificateChain => "V2GCertificateChain",
+    V2GRootCertificate => "V2GRootCertificate",
+  }
+}
+
+impl CertificateType {
+  pub const fn is_central_system_root(self) -> bool {
+    matches!(
+      self,
+      Self::CentralSystemRootCertificate | Self::CSMSRootCertificate
+    )
   }
 }
 
@@ -1029,21 +1114,28 @@ fn normalize_wire_identifier(value: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncomingAction_V1_6 {
   CancelReservation,
+  CertificateSigned,
   ChangeAvailability,
   ChangeConfiguration,
   ClearCache,
   ClearChargingProfile,
   DataTransfer,
+  DeleteCertificate,
+  ExtendedTriggerMessage,
   GetCompositeSchedule,
   GetConfiguration,
   GetDiagnostics,
+  GetInstalledCertificateIds,
   GetLocalListVersion,
+  GetLog,
   RemoteStartTransaction,
   RemoteStopTransaction,
   ReserveNow,
   Reset,
+  InstallCertificate,
   SendLocalList,
   SetChargingProfile,
+  SignedUpdateFirmware,
   TriggerMessage,
   UnlockConnector,
   UpdateFirmware,
@@ -1054,21 +1146,28 @@ impl IncomingAction_V1_6 {
   pub fn parse(value: &str) -> Option<Self> {
     match value {
       "CancelReservation" => Some(Self::CancelReservation),
+      "CertificateSigned" => Some(Self::CertificateSigned),
       "ChangeAvailability" => Some(Self::ChangeAvailability),
       "ChangeConfiguration" => Some(Self::ChangeConfiguration),
       "ClearCache" => Some(Self::ClearCache),
       "ClearChargingProfile" => Some(Self::ClearChargingProfile),
       "DataTransfer" => Some(Self::DataTransfer),
+      "DeleteCertificate" => Some(Self::DeleteCertificate),
+      "ExtendedTriggerMessage" => Some(Self::ExtendedTriggerMessage),
       "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
       "GetConfiguration" => Some(Self::GetConfiguration),
       "GetDiagnostics" => Some(Self::GetDiagnostics),
+      "GetInstalledCertificateIds" => Some(Self::GetInstalledCertificateIds),
       "GetLocalListVersion" => Some(Self::GetLocalListVersion),
+      "GetLog" => Some(Self::GetLog),
+      "InstallCertificate" => Some(Self::InstallCertificate),
       "RemoteStartTransaction" => Some(Self::RemoteStartTransaction),
       "RemoteStopTransaction" => Some(Self::RemoteStopTransaction),
       "ReserveNow" => Some(Self::ReserveNow),
       "Reset" => Some(Self::Reset),
       "SendLocalList" => Some(Self::SendLocalList),
       "SetChargingProfile" => Some(Self::SetChargingProfile),
+      "SignedUpdateFirmware" => Some(Self::SignedUpdateFirmware),
       "TriggerMessage" => Some(Self::TriggerMessage),
       "UnlockConnector" => Some(Self::UnlockConnector),
       "UpdateFirmware" => Some(Self::UpdateFirmware),
@@ -1078,8 +1177,8 @@ impl IncomingAction_V1_6 {
 
   /// Returns true when an OCPP 1.6 action belongs to a known extension that
   /// is intentionally out of scope for the base-schema implementation.
-  pub fn is_known_unsupported(value: &str) -> bool {
-    OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS.contains(&value)
+  pub fn is_known_unsupported(_value: &str) -> bool {
+    false
   }
 }
 
@@ -1088,14 +1187,18 @@ impl IncomingAction_V1_6 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncomingAction_V2_X {
   CancelReservation,
+  CertificateSigned,
   ChangeAvailability,
   ClearCache,
   ClearChargingProfile,
   DataTransfer,
+  DeleteCertificate,
   GetCompositeSchedule,
+  GetInstalledCertificateIds,
   GetLocalListVersion,
   GetLog,
   GetVariables,
+  InstallCertificate,
   RequestStartTransaction,
   RequestStopTransaction,
   ReserveNow,
@@ -1113,14 +1216,18 @@ impl IncomingAction_V2_X {
   pub fn parse(value: &str) -> Option<Self> {
     match value {
       "CancelReservation" => Some(Self::CancelReservation),
+      "CertificateSigned" => Some(Self::CertificateSigned),
       "ChangeAvailability" => Some(Self::ChangeAvailability),
       "ClearCache" => Some(Self::ClearCache),
       "ClearChargingProfile" => Some(Self::ClearChargingProfile),
       "DataTransfer" => Some(Self::DataTransfer),
+      "DeleteCertificate" => Some(Self::DeleteCertificate),
       "GetCompositeSchedule" => Some(Self::GetCompositeSchedule),
+      "GetInstalledCertificateIds" => Some(Self::GetInstalledCertificateIds),
       "GetLocalListVersion" => Some(Self::GetLocalListVersion),
       "GetLog" => Some(Self::GetLog),
       "GetVariables" => Some(Self::GetVariables),
+      "InstallCertificate" => Some(Self::InstallCertificate),
       "RequestStartTransaction" => Some(Self::RequestStartTransaction),
       "RequestStopTransaction" => Some(Self::RequestStopTransaction),
       "ReserveNow" => Some(Self::ReserveNow),
@@ -1154,16 +1261,22 @@ impl IncomingAction_V2_X {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerMessage_V1_6 {
   BootNotification,
+  DiagnosticsStatusNotification,
+  FirmwareStatusNotification,
   Heartbeat,
   MeterValues,
   StatusNotification,
 }
 
 impl TriggerMessage_V1_6 {
-  /// Parses OCPP 1.6 `TriggerMessage` request variants.
+  /// Parses standard OCPP 1.6 `TriggerMessage` request variants.
   pub fn parse(value: &str) -> Option<Self> {
     match value {
       "BootNotification" => Some(Self::BootNotification),
+      "DiagnosticsStatusNotification" => {
+        Some(Self::DiagnosticsStatusNotification)
+      }
+      "FirmwareStatusNotification" => Some(Self::FirmwareStatusNotification),
       "Heartbeat" => Some(Self::Heartbeat),
       "MeterValues" => Some(Self::MeterValues),
       "StatusNotification" => Some(Self::StatusNotification),
@@ -1175,21 +1288,76 @@ impl TriggerMessage_V1_6 {
 // Preserve explicit protocol version formatting for type names.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtendedTriggerMessage_V1_6 {
+  BootNotification,
+  FirmwareStatusNotification,
+  Heartbeat,
+  LogStatusNotification,
+  MeterValues,
+  SignChargePointCertificate,
+  StatusNotification,
+}
+
+impl ExtendedTriggerMessage_V1_6 {
+  /// Parses OCPP 1.6 security `ExtendedTriggerMessage` request variants.
+  pub fn parse(value: &str) -> Option<Self> {
+    match value {
+      "BootNotification" => Some(Self::BootNotification),
+      "FirmwareStatusNotification" => Some(Self::FirmwareStatusNotification),
+      "Heartbeat" => Some(Self::Heartbeat),
+      "LogStatusNotification" => Some(Self::LogStatusNotification),
+      "MeterValues" => Some(Self::MeterValues),
+      "SignChargePointCertificate" => Some(Self::SignChargePointCertificate),
+      "StatusNotification" => Some(Self::StatusNotification),
+      _ => None,
+    }
+  }
+}
+
+// Preserve explicit protocol version formatting for type names.
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerMessage_V2_X {
   BootNotification,
+  FirmwareStatusNotification,
   Heartbeat,
+  LogStatusNotification,
   MeterValues,
+  PublishFirmwareStatusNotification,
+  SignCombinedCertificate,
+  SignChargingStationCertificate,
+  SignV2G20Certificate,
+  SignV2GCertificate,
   StatusNotification,
+  TransactionEvent,
+  CustomTrigger,
 }
 
 impl TriggerMessage_V2_X {
   /// Parses OCPP 2.x `TriggerMessage` request variants.
-  pub fn parse(value: &str) -> Option<Self> {
+  pub fn parse(value: &str, version: OcppVersion) -> Option<Self> {
     match value {
       "BootNotification" => Some(Self::BootNotification),
+      "FirmwareStatusNotification" => Some(Self::FirmwareStatusNotification),
       "Heartbeat" => Some(Self::Heartbeat),
+      "LogStatusNotification" => Some(Self::LogStatusNotification),
       "MeterValues" => Some(Self::MeterValues),
+      "PublishFirmwareStatusNotification" => {
+        Some(Self::PublishFirmwareStatusNotification)
+      }
+      "SignCombinedCertificate" => Some(Self::SignCombinedCertificate),
+      "SignChargingStationCertificate" => {
+        Some(Self::SignChargingStationCertificate)
+      }
+      "SignV2G20Certificate" if version == OcppVersion::V2_1 => {
+        Some(Self::SignV2G20Certificate)
+      }
+      "SignV2GCertificate" => Some(Self::SignV2GCertificate),
       "StatusNotification" => Some(Self::StatusNotification),
+      "TransactionEvent" => Some(Self::TransactionEvent),
+      "CustomTrigger" if version == OcppVersion::V2_1 => {
+        Some(Self::CustomTrigger)
+      }
       _ => None,
     }
   }
@@ -1304,6 +1472,7 @@ pub enum ResponseStatus {
   UploadFailure,
   Uploading,
   VersionMismatch,
+  WriteOnly,
 }
 
 macro_rules! response_status_map {
@@ -1417,6 +1586,7 @@ macro_rules! response_status_map {
       UploadFailure => "UploadFailure",
       Uploading => "Uploading",
       VersionMismatch => "VersionMismatch",
+      WriteOnly => "WriteOnly",
     }
   };
 }
@@ -1643,9 +1813,8 @@ mod tests {
   use crate::embedded_schemas::EmbeddedSchemaType;
 
   use super::{
-    BootReason, ChargingRateUnit, ConnectorStatus, IdTokenType,
-    IncomingAction_V1_6, Measurand, MeterUnit, MeterValueLocation,
-    MeterValuePhase, OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS,
+    BootReason, ChargingRateUnit, ConnectorStatus, IdTokenType, Measurand,
+    MeterUnit, MeterValueLocation, MeterValuePhase,
     OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_0_1_UNSUPPORTED_ACTIONS,
     OCPP_V2_1_UNSUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
     OcppFrame, OcppVersion, ReadingContext, ResponseStatus, SampledValueFormat,
@@ -1688,10 +1857,22 @@ mod tests {
   }
 
   #[test]
-  /// Verifies OCPP 1.6 security whitepaper actions are known out of scope.
-  fn v1_6_security_extension_actions_are_not_supported() {
-    for action in OCPP_V1_6_SECURITY_UNSUPPORTED_ACTIONS {
-      assert!(IncomingAction_V1_6::is_known_unsupported(action));
+  /// Verifies OCPP 1.6 security whitepaper actions are in the supported list.
+  fn v1_6_security_extension_actions_are_supported() {
+    for action in [
+      "CertificateSigned",
+      "DeleteCertificate",
+      "ExtendedTriggerMessage",
+      "GetInstalledCertificateIds",
+      "GetLog",
+      "InstallCertificate",
+      "LogStatusNotification",
+      "SecurityEventNotification",
+      "SignCertificate",
+      "SignedFirmwareStatusNotification",
+      "SignedUpdateFirmware",
+    ] {
+      assert!(OCPP_V1_6_SUPPORTED_ACTIONS.contains(&action));
     }
   }
 

@@ -88,12 +88,20 @@ Documentation on design, protocol support, usage, and more is available in the
 ## Protocol Scope
 
 OCPP 1.6 base JSON schemas are the primary complete target.
-The OCPP 1.6 Security Whitepaper extension is intentionally out of scope for
-now and is reported as unsupported when recognized.
+The OCPP 1.6 Security Whitepaper extension is implemented at simulator level,
+including security profiles, certificate-management flows, security event
+notifications, signed firmware status, and log status notifications.
+Security events are replayed after reconnect until acknowledged by the CSMS,
+and original OCPP 1.6 `UpdateFirmware` is rejected in favor of
+`SignedUpdateFirmware` for whitepaper conformance.
+Certificate and firmware security flows use synthetic in-memory material for
+interoperability testing; they do not perform full PKI validation, OCSP/CRL,
+real CSR generation, file transfer, or firmware binary verification.
 
 OCPP 2.0.1 and OCPP 2.1 support the feature subset that maps to already
-implemented OCPP 1.6 behavior, plus `GetVariables` and `SetVariables` for the
-configuration-equivalent device model surface.
+implemented OCPP 1.6 behavior, overlapping certificate/security flows, plus
+`GetVariables` and `SetVariables` for the configuration-equivalent device
+model surface.
 Other 2.x actions are explicitly treated as unsupported until they are
 implemented and tested.
 

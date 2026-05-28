@@ -13,6 +13,11 @@ The Tokio runtime owns one `Simulator` value for the active session.
 The simulator stores connector state, local transactions, meter values,
 reservations, scheduled availability changes, charging profiles,
 configuration entries, pending CALL context, and an outbound queue.
+Security-related simulator state is stored beside the common state: selected
+security profile, in-memory synthetic certificates, recent security events,
+and certificate/log/firmware limits.
+Security events also track notification delivery state so they can be replayed
+after reconnect until the CSMS acknowledges them.
 
 When connected, the loop sends the next queued CALL only when there is no
 pending request.
@@ -41,6 +46,9 @@ reservations, local-list updates, unlock requests, trigger messages, firmware
 updates, and smart-charging requests.
 Malformed supported payloads return `FormationViolation` instead of defaulting
 missing identifiers.
+OCPP 1.6 standard `TriggerMessage` and security `ExtendedTriggerMessage` use
+separate parsers so security-extension triggers are not accepted on the base
+action in non-strict mode.
 
 When strict mode is enabled through `--strict` or profile `strict = true`,
 inbound CALL payloads are also validated against the checked-in request schemas
@@ -49,11 +57,10 @@ Strict schema failures return `FormationViolation` and do not mutate simulator
 state.
 
 The 2.x dispatcher intentionally supports only the common subset that maps to
-the simulator's implemented behavior.
+the simulator's implemented behavior plus overlapping certificate and security
+flows.
 Known but unsupported 2.x actions return `NotSupported`; unknown action names
 return `NotImplemented`.
-Known OCPP 1.6 Security Whitepaper extension actions also return
-`NotSupported` because only the base OCPP 1.6 schemas are in scope.
 
 ## State And Workflows
 
@@ -86,7 +93,10 @@ Configuration is stored as a map of OCPP 1.6-style keys.
 OCPP 1.6 exposes that map through `GetConfiguration` and
 `ChangeConfiguration`.
 OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
-`GetVariables` and `SetVariables` for component `ChargingStation`.
+`GetVariables` and `SetVariables` for component `ChargingStation` or
+`SecurityCtrlr`.
+Security password values are write-only: they can be changed, but
+`GetConfiguration` and `GetVariables` do not return the secret value.
 
 Accepted `BootNotification` responses update the local `HeartbeatInterval`
 configuration value and start or restart periodic heartbeats with the interval
@@ -108,6 +118,41 @@ This keeps 1.6 connector addressing and 2.x EVSE addressing aligned for the
 current simulator scope.
 Supporting multiple physical connectors per EVSE would require a richer EVSE
 model and separate connector state beneath each EVSE.
+
+Security extension behavior is modeled at the simulator boundary.
+Transport profile validation checks URL schemes, Basic Auth password format,
+and profile 3 certificate/key configuration before connecting.
+When CA or client certificate paths are provided, the connection uses a custom
+rustls connector with WebPKI roots plus the configured PEM files.
+Configured CA and client certificate/key paths are treated as the OCPP-level
+certificate prerequisites for security-profile upgrades, because those files
+are the real transport trust and identity material used by rustls.
+Secure connection setup failures record a local
+`InvalidCentralSystemCertificate` security event when the selected profile uses
+TLS.
+Accepted password changes and higher OCPP 1.6 security profile changes request
+a disconnect/reconnect after the CALLRESULT is sent.
+Profile-upgrade reconnect failure restores the previous profile and attempts a
+fallback reconnect.
+Security events remain pending until their `SecurityEventNotification` receives
+a CALLRESULT.
+Disconnect and security reconnect paths reset queued but unacknowledged events
+so they are sent again after the next successful connection.
+Certificate-management actions maintain deterministic synthetic certificate
+hashes in memory so install, list, and delete flows are stable across tests
+without adding full certificate parsing to simulator state.
+`AdditionalRootCertificateCheck` is modeled as a Central System root plus one
+fallback root; the simulator does not verify the real signing relationship
+between those roots.
+Signed firmware and log actions enqueue the expected status-notification
+sequence, enforce configured URI schemes, and record clear invalid-value events,
+but they do not download or upload files, verify firmware binaries, perform
+OCSP/CRL checks, or generate real CSRs.
+The original OCPP 1.6 `UpdateFirmware` action returns CALLERROR
+`NotSupported`; OCPP 1.6 security firmware testing uses
+`SignedUpdateFirmware`.
+Inbound trace-frame logging runs through parsed-frame redaction before emitting
+logs, so known password writes are not printed in frame traces.
 
 ## Terminal UI
 
@@ -149,9 +194,10 @@ Additional regression tests cover malformed inbound remote-start and
 request-start requests, stricter supported-action payload parsing,
 subprotocol negotiation, scheduled availability, duplicate reservations,
 transaction-start eligibility, timeout rollback, final status notification
-sequencing, filtered charging-profile clearing, malformed WebSocket frames,
-and local mock CSMS WebSocket boot plus remote-start/meter/remote-stop
-lifecycles.
+sequencing, filtered charging-profile clearing, certificate install/list/delete,
+write-only security configuration, signed-firmware security events, malformed
+WebSocket frames, and local mock CSMS WebSocket boot plus
+remote-start/meter/remote-stop lifecycles.
 
 Version-specific builders and tests are kept even when the current payloads are
 identical.

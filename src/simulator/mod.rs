@@ -5,26 +5,29 @@ use anyhow::{Result, anyhow};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use http::HeaderValue;
-use http::header::SEC_WEBSOCKET_PROTOCOL;
+use http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{
+  MaybeTlsStream, WebSocketStream, connect_async, connect_async_tls_with_config,
+};
 use url::Url;
 
 use crate::ocpp::{
-  BootReason, ChargingRateUnit, ConfigurationKey, IdTokenType,
-  IncomingAction_V1_6, IncomingAction_V2_X, Measurand, MeterUnit,
-  OcppErrorCode, OcppFrame, OcppVersion, OutgoingAction, ReadingContext,
-  ResponseStatus, StatusNotificationErrorCode, StopReason,
-  TransactionTriggerReason, TriggerMessage_V1_6, TriggerMessage_V2_X,
-  VariableAttributeType, build_call, build_call_error, build_call_result,
-  parse_frame,
+  BootReason, CertificateType, ChargingRateUnit, ConfigurationKey,
+  ExtendedTriggerMessage_V1_6, IdTokenType, IncomingAction_V1_6,
+  IncomingAction_V2_X, Measurand, MeterUnit, OcppErrorCode, OcppFrame,
+  OcppVersion, OutgoingAction, ReadingContext, ResponseStatus,
+  StatusNotificationErrorCode, StopReason, TransactionTriggerReason,
+  TriggerMessage_V1_6, TriggerMessage_V2_X, VariableAttributeType, build_call,
+  build_call_error, build_call_result, parse_frame,
 };
 
+mod security;
 mod support;
 mod types;
 
@@ -36,8 +39,9 @@ pub(in crate::simulator) use support::{
 };
 pub(in crate::simulator) use types::{
   ConfigurationEntry, ConnectorState, ConnectorStatus, HeartbeatTask,
-  PendingCall, PendingContext, QueuedCall, Simulator, TransactionEventRequest,
-  TransactionState, TxEventType, normalize_identifier,
+  PendingCall, PendingContext, QueuedCall, SecurityProfileFallback,
+  SecurityState, Simulator, TransactionEventRequest, TransactionState,
+  TxEventType, normalize_identifier,
 };
 pub use types::{
   ConnectorSnapshot, SimulatorCommand, SimulatorConfig, SimulatorSnapshot,
@@ -63,89 +67,16 @@ pub async fn run_simulator(
   timeout_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
   'outer: loop {
-    if let Some(io) = connection.as_mut() {
-      if let Err(error) = simulator.try_send_next(&mut io.write).await {
-        simulator.log(UiLogLevel::Error, format!("Send failed: {error}"));
-        simulator.handle_disconnect("Connection lost while sending.");
-        connection = None;
-        continue;
-      }
-
-      let mut outcome = CommandOutcome::Continue;
-      let mut disconnected = false;
-
-      tokio::select! {
-        _ = timeout_tick.tick() => {
-          simulator.check_pending_timeout();
-        }
-        maybe_command = cmd_rx.recv() => {
-          match maybe_command {
-            Some(command) => {
-              match simulator
-                .handle_connected_command(command, &mut io.write)
-                .await
-              {
-                Ok(next) => {
-                  outcome = next;
-                }
-                Err(error) => {
-                  simulator.log(
-                    UiLogLevel::Error,
-                    format!("Command failed: {error}"),
-                  );
-                }
-              }
-            }
-            None => {
-              outcome = CommandOutcome::Exit;
-            }
-          }
-        }
-        message = io.read.next() => {
-          match message {
-            Some(Ok(frame)) => {
-              if let Err(error) =
-                simulator.handle_ws_message(frame, &mut io.write).await
-              {
-                simulator.log(
-                  UiLogLevel::Error,
-                  format!("Connection error: {error}"),
-                );
-                disconnected = true;
-              }
-            }
-            Some(Err(error)) => {
-              simulator.log(
-                UiLogLevel::Error,
-                format!("WebSocket read error: {error}"),
-              );
-              disconnected = true;
-            }
-            None => {
-              simulator.log(
-                UiLogLevel::Warn,
-                "CSMS closed the WebSocket connection.",
-              );
-              disconnected = true;
-            }
-          }
-        }
-      }
-
-      if disconnected {
-        simulator.handle_disconnect("Disconnected.");
-        connection = None;
-      }
-
-      match outcome {
-        CommandOutcome::Continue => {}
-        CommandOutcome::Disconnect => {
-          simulator.handle_disconnect("Disconnected.");
-          connection = None;
-        }
-        CommandOutcome::Exit => {
-          break 'outer;
-        }
+    if connection.is_some() {
+      if !handle_connected_loop_step(
+        &mut simulator,
+        &mut cmd_rx,
+        &mut timeout_tick,
+        &mut connection,
+      )
+      .await
+      {
+        break 'outer;
       }
     } else if !handle_offline_loop_step(
       &mut simulator,
@@ -159,6 +90,126 @@ pub async fn run_simulator(
   }
 
   simulator.stop_heartbeat();
+}
+
+async fn handle_connected_loop_step(
+  simulator: &mut Simulator,
+  cmd_rx: &mut UnboundedReceiver<SimulatorCommand>,
+  timeout_tick: &mut tokio::time::Interval,
+  connection: &mut Option<Connection>,
+) -> bool {
+  let Some(mut io) = connection.take() else {
+    return true;
+  };
+  if let Err(error) = simulator.try_send_next(&mut io.write).await {
+    simulator.log(UiLogLevel::Error, format!("Send failed: {error}"));
+    simulator.handle_disconnect("Connection lost while sending.");
+    return true;
+  }
+
+  let mut outcome = CommandOutcome::Continue;
+  let mut disconnected = false;
+
+  tokio::select! {
+    _ = timeout_tick.tick() => {
+      simulator.check_pending_timeout();
+    }
+    maybe_command = cmd_rx.recv() => {
+      handle_connected_command_result(
+        simulator,
+        maybe_command,
+        &mut io.write,
+        &mut outcome,
+      ).await;
+    }
+    message = io.read.next() => {
+      disconnected = handle_connected_ws_message(
+        simulator,
+        message,
+        &mut io.write,
+        &mut outcome,
+      ).await;
+    }
+  }
+
+  if disconnected {
+    simulator.handle_disconnect("Disconnected.");
+  }
+
+  match outcome {
+    CommandOutcome::Continue => {
+      if !disconnected {
+        *connection = Some(io);
+      }
+      true
+    }
+    CommandOutcome::Disconnect => {
+      simulator.handle_disconnect("Disconnected.");
+      true
+    }
+    CommandOutcome::Reconnect => {
+      if !disconnected {
+        *connection = reconnect_after_security_change(simulator, &mut io).await;
+      }
+      true
+    }
+    CommandOutcome::Exit => false,
+  }
+}
+
+async fn handle_connected_command_result(
+  simulator: &mut Simulator,
+  maybe_command: Option<SimulatorCommand>,
+  write: &mut WsWrite,
+  outcome: &mut CommandOutcome,
+) {
+  match maybe_command {
+    Some(command) => {
+      match simulator.handle_connected_command(command, write).await {
+        Ok(next) => {
+          *outcome = next;
+        }
+        Err(error) => {
+          simulator.log(UiLogLevel::Error, format!("Command failed: {error}"));
+        }
+      }
+    }
+    None => {
+      *outcome = CommandOutcome::Exit;
+    }
+  }
+}
+
+async fn handle_connected_ws_message(
+  simulator: &mut Simulator,
+  message: Option<
+    std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
+  >,
+  write: &mut WsWrite,
+  outcome: &mut CommandOutcome,
+) -> bool {
+  match message {
+    Some(Ok(frame)) => {
+      if let Err(error) = simulator.handle_ws_message(frame, write).await {
+        simulator.log(UiLogLevel::Error, format!("Connection error: {error}"));
+        true
+      } else if simulator.security.pending_reconnect.is_some() {
+        *outcome = CommandOutcome::Reconnect;
+        false
+      } else {
+        false
+      }
+    }
+    Some(Err(error)) => {
+      simulator
+        .log(UiLogLevel::Error, format!("WebSocket read error: {error}"));
+      true
+    }
+    None => {
+      simulator.log(UiLogLevel::Warn, "CSMS closed the WebSocket connection.");
+      true
+    }
+  }
 }
 
 fn initialize_simulator_runtime(simulator: &mut Simulator) {
@@ -225,7 +276,56 @@ enum OfflineOutcome {
 enum CommandOutcome {
   Continue,
   Disconnect,
+  Reconnect,
   Exit,
+}
+
+async fn reconnect_after_security_change(
+  simulator: &mut Simulator,
+  connection: &mut Connection,
+) -> Option<Connection> {
+  let plan = simulator.security.pending_reconnect.take()?;
+  simulator.close_connection(&mut connection.write).await;
+  simulator.handle_disconnect("Reconnecting after security parameter change.");
+
+  match simulator.connect().await {
+    Ok(new_connection) => Some(new_connection),
+    Err(error) => {
+      simulator.log(
+        UiLogLevel::Error,
+        format!("Reconnect after security parameter change failed: {error}"),
+      );
+      simulator.record_secure_connection_failure(&error);
+      if let SecurityProfileFallback::Restore(fallback) =
+        plan.fallback_security_profile
+      {
+        simulator.security.security_profile = fallback;
+        simulator.config.security_profile = fallback;
+        if let Some(entry) = simulator
+          .configuration
+          .get_mut(&ConfigurationKey::SecurityProfile)
+        {
+          entry.value = fallback.unwrap_or(0).to_string();
+        }
+        simulator.log(
+          UiLogLevel::Warn,
+          "Falling back to the previous security profile.",
+        );
+        match simulator.connect().await {
+          Ok(new_connection) => Some(new_connection),
+          Err(error) => {
+            simulator.log(
+              UiLogLevel::Error,
+              format!("Fallback reconnect failed: {error}"),
+            );
+            None
+          }
+        }
+      } else {
+        None
+      }
+    }
+  }
 }
 
 impl Simulator {
@@ -249,6 +349,7 @@ impl Simulator {
         },
       );
     }
+    let security = SecurityState::new(&config);
 
     Self {
       config,
@@ -258,6 +359,7 @@ impl Simulator {
       configuration,
       reservations: BTreeMap::new(),
       charging_profiles: BTreeMap::new(),
+      security,
       local_auth_list_version: 0,
       queue: VecDeque::new(),
       pending: None,
@@ -427,11 +529,15 @@ impl Simulator {
   /// Opens the WebSocket connection and performs initial boot/status enqueue.
   async fn connect(&mut self) -> Result<Connection> {
     let url = self.connection_url()?;
+    self.validate_connection_security(&url)?;
     let mut request = url.as_str().into_client_request()?;
     request.headers_mut().insert(
       SEC_WEBSOCKET_PROTOCOL,
       HeaderValue::from_str(self.config.protocol.subprotocol())?,
     );
+    if let Some(header) = self.basic_auth_header()? {
+      request.headers_mut().insert(AUTHORIZATION, header);
+    }
 
     self.log(
       UiLogLevel::Info,
@@ -441,7 +547,25 @@ impl Simulator {
         self.config.protocol.subprotocol()
       ),
     );
-    let (stream, response) = connect_async(request).await?;
+    let connector = match self.tls_connector() {
+      Ok(connector) => connector,
+      Err(error) => {
+        self.record_secure_connection_failure(&error);
+        return Err(error);
+      }
+    };
+    let connection_result = if connector.is_some() {
+      connect_async_tls_with_config(request, None, false, connector).await
+    } else {
+      connect_async(request).await
+    };
+    let (stream, response) = match connection_result {
+      Ok(connection) => connection,
+      Err(error) => {
+        self.record_secure_connection_failure(&error);
+        return Err(error.into());
+      }
+    };
     let expected_subprotocol = self.config.protocol.subprotocol();
     let negotiated = response
       .headers()
@@ -463,6 +587,7 @@ impl Simulator {
     for connector in connectors {
       self.enqueue_status_notification(connector)?;
     }
+    self.enqueue_pending_security_event_notifications();
     self.emit_snapshot();
 
     let (write, read) = stream.split();
@@ -489,6 +614,7 @@ impl Simulator {
   /// Marks simulator as disconnected, clears pending queue, and logs reason.
   fn handle_disconnect(&mut self, message: &str) {
     self.connected = false;
+    self.reset_inflight_security_event_notifications();
     self.pending = None;
     self.queue.clear();
     self.log(UiLogLevel::Warn, message);
@@ -582,10 +708,16 @@ impl Simulator {
       | PendingContext::DiagnosticsStatusNotification
       | PendingContext::FirmwareStatusNotification
       | PendingContext::LogStatusNotification
+      | PendingContext::SignCertificate
+      | PendingContext::SignedFirmwareStatusNotification
       | PendingContext::Authorize { .. }
       | PendingContext::RemoteStartAuthorizeV1_6 { .. }
       | PendingContext::StatusNotification { .. }
       | PendingContext::MeterValues { .. } => Ok(()),
+      PendingContext::SecurityEventNotification { event_id } => {
+        self.retry_security_event_notification(*event_id);
+        Ok(())
+      }
     };
     if let Err(error) = result {
       self.log(

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
-use crate::ocpp::OcppVersion;
+use crate::ocpp::{OcppVersion, is_valid_basic_auth_password};
 
 /// Built-in defaults used when profile/global config entries are omitted.
 #[derive(Debug, Clone)]
@@ -33,6 +33,11 @@ pub struct ResolvedProfileConfig {
   pub strict: bool,
   pub request_timeout_seconds: u64,
   pub heartbeat_seconds: Option<u64>,
+  pub security_profile: Option<u8>,
+  pub basic_auth_password: Option<String>,
+  pub ca_cert_path: Option<PathBuf>,
+  pub client_cert_path: Option<PathBuf>,
+  pub client_key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +55,16 @@ struct ConfigFile {
   request_timeout_seconds: Option<u64>,
   #[serde(rename = "heartbeat-seconds")]
   heartbeat_seconds: Option<u64>,
+  #[serde(rename = "security-profile")]
+  security_profile: Option<u8>,
+  #[serde(rename = "basic-auth-password")]
+  basic_auth_password: Option<String>,
+  #[serde(rename = "ca-cert")]
+  ca_cert_path: Option<PathBuf>,
+  #[serde(rename = "client-cert")]
+  client_cert_path: Option<PathBuf>,
+  #[serde(rename = "client-key")]
+  client_key_path: Option<PathBuf>,
   #[serde(default, rename = "charge-points")]
   charge_points: HashMap<String, ProfileConfig>,
 }
@@ -75,6 +90,16 @@ struct ProfileConfig {
   request_timeout_seconds: Option<u64>,
   #[serde(rename = "heartbeat-seconds")]
   heartbeat_seconds: Option<u64>,
+  #[serde(rename = "security-profile")]
+  security_profile: Option<u8>,
+  #[serde(rename = "basic-auth-password")]
+  basic_auth_password: Option<String>,
+  #[serde(rename = "ca-cert")]
+  ca_cert_path: Option<PathBuf>,
+  #[serde(rename = "client-cert")]
+  client_cert_path: Option<PathBuf>,
+  #[serde(rename = "client-key")]
+  client_key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +113,11 @@ struct GlobalConfig {
   strict: Option<bool>,
   request_timeout_seconds: Option<u64>,
   heartbeat_seconds: Option<u64>,
+  security_profile: Option<u8>,
+  basic_auth_password: Option<String>,
+  ca_cert_path: Option<PathBuf>,
+  client_cert_path: Option<PathBuf>,
+  client_key_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -147,6 +177,31 @@ pub fn resolve_profile(
     defaults.protocol
   };
 
+  let security_profile = profile.security_profile.or(global.security_profile);
+  if let Some(profile_number) = security_profile
+    && !(1..=3).contains(&profile_number)
+  {
+    bail!(
+      "Profile `{}` has invalid `security-profile={}` in {}.",
+      profile_name,
+      profile_number,
+      config_path.display()
+    );
+  }
+
+  let basic_auth_password =
+    profile.basic_auth_password.or(global.basic_auth_password);
+  if let Some(password) = basic_auth_password.as_deref()
+    && !is_valid_basic_auth_password(password)
+  {
+    bail!(
+      "Profile `{}` has invalid `basic-auth-password` in {}. \
+      Expected 32 to 40 ASCII hexadecimal characters.",
+      profile_name,
+      config_path.display()
+    );
+  }
+
   Ok(ResolvedProfileConfig {
     ws_url,
     cp_id,
@@ -178,6 +233,11 @@ pub fn resolve_profile(
     heartbeat_seconds: normalize_heartbeat_seconds(
       profile.heartbeat_seconds.or(global.heartbeat_seconds),
     ),
+    security_profile,
+    basic_auth_password,
+    ca_cert_path: profile.ca_cert_path.or(global.ca_cert_path),
+    client_cert_path: profile.client_cert_path.or(global.client_cert_path),
+    client_key_path: profile.client_key_path.or(global.client_key_path),
   })
 }
 
@@ -218,6 +278,11 @@ fn load_profile(path: &Path, profile_name: &str) -> Result<ProfileSelection> {
     strict: config.strict,
     request_timeout_seconds: config.request_timeout_seconds,
     heartbeat_seconds: config.heartbeat_seconds,
+    security_profile: config.security_profile,
+    basic_auth_password: config.basic_auth_password,
+    ca_cert_path: config.ca_cert_path,
+    client_cert_path: config.client_cert_path,
+    client_key_path: config.client_key_path,
   };
 
   config
@@ -323,6 +388,37 @@ vendor = "ocppsim"
     assert_eq!(
       error.to_string(),
       format!("Profile `test` was not found in {}.", path.display())
+    );
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies invalid Basic Auth passwords in profiles are rejected.
+  fn resolve_profile_rejects_invalid_basic_auth_password() {
+    let path = write_temp_config(
+      r#"
+[charge-points.demo]
+ws-url = "wss://example.com/ocpp"
+id = "CP-DEMO"
+security-profile = 2
+basic-auth-password = "not-a-hex-password"
+"#,
+    );
+    let defaults = super::ProfileDefaults {
+      connectors: 1,
+      protocol: super::OcppVersion::V1_6,
+      vendor: "ocppsim".to_string(),
+      model: "ocppsim".to_string(),
+      firmware: "test".to_string(),
+      request_timeout_seconds: 30,
+    };
+
+    let error = super::resolve_profile(&path, "demo", &defaults)
+      .expect_err("invalid password should not resolve");
+    assert!(
+      error.to_string().contains("basic-auth-password"),
+      "unexpected error: {error}"
     );
 
     let _ = fs::remove_file(path);

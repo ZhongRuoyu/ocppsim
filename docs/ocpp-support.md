@@ -21,16 +21,94 @@ Supported behavior includes:
 - simplified smart-charging profile set, filtered clear, and composite
   schedule,
 - trigger message for implemented message types,
-- simulated diagnostics and firmware update success flows.
+- simulated diagnostics success flows,
+- OCPP 1.6 Security Whitepaper certificate installation, deletion, listing,
+  certificate signing, signed firmware status, log status, security event, and
+  extended trigger-message flows.
 
-The OCPP 1.6 Security Whitepaper extension is out of scope for now.
-Recognized extension actions are logged and return `NotSupported` instead of
-being treated as unknown actions.
-The simulator does not implement OCPP security profiles, client certificates,
-certificate-management actions, or security event workflows.
+Security support is intentionally simulator-level.
+The transport layer supports security profiles 1 and 2 with HTTP Basic
+authentication and profile 3 with configured client certificate/key paths.
+OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
+characters, are write-only on readback, and trigger reconnect when changed on
+an active connection.
+Certificate-management and signed-firmware actions keep an in-memory synthetic
+certificate store and obvious invalid-value detection, but they do not perform
+full PKI validation, OCSP/CRL checks, real CSR generation, firmware binary
+verification, or file transfer.
+Known password fields are redacted from inbound trace-frame logs.
+The original OCPP 1.6 `UpdateFirmware` request is rejected with CALLERROR
+`NotSupported`; whitepaper firmware tests should use `SignedUpdateFirmware`.
+
+## OCPP 1.6 Security Whitepaper Coverage
+
+The simulator implements the OCPP message surface and state transitions needed
+for CSMS interoperability testing, while keeping cryptographic material
+synthetic.
+
+- A01 password update: implemented.
+  `AuthorizationKey` is write-only, validated, stored in memory, records a
+  security event, and reconnects when changed while connected.
+- A02/A03 certificate update: simulated.
+  `ExtendedTriggerMessage(SignChargePointCertificate)` can enqueue
+  `SignCertificate`, `CertificateSigned` installs a synthetic Charge Point
+  certificate, and OCPP 2.1 request ids are correlated.
+  Real key generation, CSR creation, and certificate-chain validation are not
+  implemented.
+- A05 security profile upgrade: implemented at simulator level.
+  OCPP 1.6 rejects equal or lower values, checks password, Central System root,
+  and configured mTLS prerequisites for higher profiles, reconnects after
+  accepted upgrades, and falls back to the previous profile when reconnect
+  fails.
+- M05 install CA certificate: partially implemented.
+  `InstallCertificate` enforces the 5500-character request limit, rejects full
+  stores, and keeps deterministic synthetic hashes for list/delete flows.
+  `AdditionalRootCertificateCheck` keeps a Central System root plus one
+  fallback root, but does not cryptographically verify that the new root was
+  signed by the old root.
+- N01 log upload: simulated.
+  `GetLog` validates supported URI schemes, returns a synthetic filename, and
+  enqueues log status notifications.
+  No file is uploaded.
+- L01 signed firmware: simulated.
+  `SignedUpdateFirmware` validates supported URI schemes, emits status
+  notifications, records simulated invalid certificate/signature events, and
+  original `UpdateFirmware` returns CALLERROR `NotSupported`.
+  No firmware is downloaded or cryptographically verified.
+
+Security events are recorded in local simulator state and queued for OCPP
+`SecurityEventNotification` delivery until the CSMS acknowledges them with a
+CALLRESULT.
+Events recorded while disconnected, or queued immediately before a security
+reconnect, are replayed after the next successful connection.
+Events may also appear in a later simulated security-log export.
+
+Synthetic certificate hashes are stable simulator identifiers for tests.
+They are not cryptographic certificate fingerprints.
 
 Incoming response status tokens are recognized from the checked-in 1.6,
 2.0.1, and 2.1 schemas.
+
+### Trigger Message Scope
+
+OCPP 1.6 standard `TriggerMessage` accepts only the standard schema values:
+`BootNotification`, `DiagnosticsStatusNotification`,
+`FirmwareStatusNotification`, `Heartbeat`, `MeterValues`, and
+`StatusNotification`.
+OCPP 1.6 security `ExtendedTriggerMessage` accepts the whitepaper values:
+`BootNotification`, `FirmwareStatusNotification`, `Heartbeat`,
+`LogStatusNotification`, `MeterValues`, `SignChargePointCertificate`, and
+`StatusNotification`.
+
+OCPP 2.0.1 `TriggerMessage` accepts `BootNotification`,
+`FirmwareStatusNotification`, `Heartbeat`, `LogStatusNotification`,
+`MeterValues`, `SignChargingStationCertificate`, `SignV2GCertificate`,
+`StatusNotification`, and `TransactionEvent`.
+`SignCombinedCertificate` and `PublishFirmwareStatusNotification` are
+schema-valid but return `NotImplemented`.
+
+OCPP 2.1 adds `SignV2G20Certificate` to the accepted trigger list and parses
+`CustomTrigger`, which currently returns `NotImplemented`.
 
 ## OCPP 2.x Support Matrix
 
@@ -41,57 +119,61 @@ version, firmware location, and simplified smart-charging schedule data needed
 for its implemented behavior, while ignoring optional fields that do not
 affect that behavior unless strict mode is enabled.
 
-| Action                       | OCPP 2.0.1 | OCPP 2.1  |
-| ---------------------------- | ---------- | --------- |
-| `Authorize`                  | Supported  | Supported |
-| `BootNotification`           | Supported  | Supported |
-| `CancelReservation`          | Supported  | Supported |
-| `ChangeAvailability`         | Supported  | Supported |
-| `ClearCache`                 | Supported  | Supported |
-| `ClearChargingProfile`       | Supported  | Supported |
-| `DataTransfer`               | Supported  | Supported |
-| `FirmwareStatusNotification` | Supported  | Supported |
-| `GetCompositeSchedule`       | Supported  | Supported |
-| `GetLocalListVersion`        | Supported  | Supported |
-| `GetLog`                     | Supported  | Supported |
-| `GetVariables`               | Supported  | Supported |
-| `Heartbeat`                  | Supported  | Supported |
-| `LogStatusNotification`      | Supported  | Supported |
-| `MeterValues`                | Supported  | Supported |
-| `RequestStartTransaction`    | Supported  | Supported |
-| `RequestStopTransaction`     | Supported  | Supported |
-| `ReserveNow`                 | Supported  | Supported |
-| `Reset`                      | Supported  | Supported |
-| `SendLocalList`              | Supported  | Supported |
-| `SetChargingProfile`         | Supported  | Supported |
-| `SetVariables`               | Supported  | Supported |
-| `StatusNotification`         | Supported  | Supported |
-| `TransactionEvent`           | Supported  | Supported |
-| `TriggerMessage`             | Supported  | Supported |
-| `UnlockConnector`            | Supported  | Supported |
-| `UpdateFirmware`             | Supported  | Supported |
+| Action                       | OCPP 2.0.1 | OCPP 2.1   |
+| ---------------------------- | ---------- | ---------- |
+| `Authorize`                  | Supported  | Supported  |
+| `BootNotification`           | Supported  | Supported  |
+| `CancelReservation`          | Supported  | Supported  |
+| `CertificateSigned`          | Supported  | Supported  |
+| `ChangeAvailability`         | Supported  | Supported  |
+| `ClearCache`                 | Supported  | Supported  |
+| `ClearChargingProfile`       | Supported  | Supported  |
+| `DataTransfer`               | Supported  | Supported  |
+| `DeleteCertificate`          | Supported  | Supported  |
+| `FirmwareStatusNotification` | Supported  | Supported  |
+| `GetCompositeSchedule`       | Supported  | Supported  |
+| `GetInstalledCertificateIds` | Supported  | Supported  |
+| `GetLocalListVersion`        | Supported  | Supported  |
+| `GetLog`                     | Supported  | Supported  |
+| `GetVariables`               | Supported  | Supported  |
+| `Heartbeat`                  | Supported  | Supported  |
+| `InstallCertificate`         | Supported  | Supported  |
+| `LogStatusNotification`      | Supported  | Supported  |
+| `MeterValues`                | Supported  | Supported  |
+| `RequestStartTransaction`    | Supported  | Supported  |
+| `RequestStopTransaction`     | Supported  | Supported  |
+| `ReserveNow`                 | Supported  | Supported  |
+| `Reset`                      | Supported  | Supported  |
+| `SecurityEventNotification`  | Supported  | Supported  |
+| `SendLocalList`              | Supported  | Supported  |
+| `SetChargingProfile`         | Supported  | Supported  |
+| `SetVariables`               | Supported  | Supported  |
+| `SignCertificate`            | Supported  | Supported  |
+| `StatusNotification`         | Supported  | Supported  |
+| `TransactionEvent`           | Supported  | Supported  |
+| `TriggerMessage`             | Supported* | Supported* |
+| `UnlockConnector`            | Supported  | Supported  |
+| `UpdateFirmware`             | Supported  | Supported  |
 
 All other schema actions are explicitly unsupported until implemented.
+The `TriggerMessage` action is field-level support; see the trigger scope above
+for version-specific values.
 
 ## Unsupported OCPP 2.0.1 Actions
 
-- `CertificateSigned`
 - `ClearDisplayMessage`
 - `ClearVariableMonitoring`
 - `ClearedChargingLimit`
 - `CostUpdated`
 - `CustomerInformation`
-- `DeleteCertificate`
 - `Get15118EVCertificate`
 - `GetBaseReport`
 - `GetCertificateStatus`
 - `GetChargingProfiles`
 - `GetDisplayMessages`
-- `GetInstalledCertificateIds`
 - `GetMonitoringReport`
 - `GetReport`
 - `GetTransactionStatus`
-- `InstallCertificate`
 - `NotifyChargingLimit`
 - `NotifyCustomerInformation`
 - `NotifyDisplayMessages`
@@ -104,13 +186,11 @@ All other schema actions are explicitly unsupported until implemented.
 - `PublishFirmwareStatusNotification`
 - `ReportChargingProfiles`
 - `ReservationStatusUpdate`
-- `SecurityEventNotification`
 - `SetDisplayMessage`
 - `SetMonitoringBase`
 - `SetMonitoringLevel`
 - `SetNetworkProfile`
 - `SetVariableMonitoring`
-- `SignCertificate`
 - `UnpublishFirmware`
 
 ## Unsupported OCPP 2.1 Actions
@@ -118,7 +198,6 @@ All other schema actions are explicitly unsupported until implemented.
 - `AFRRSignal`
 - `AdjustPeriodicEventStream`
 - `BatterySwap`
-- `CertificateSigned`
 - `ChangeTransactionTariff`
 - `ClearDERControl`
 - `ClearDisplayMessage`
@@ -128,7 +207,6 @@ All other schema actions are explicitly unsupported until implemented.
 - `ClosePeriodicEventStream`
 - `CostUpdated`
 - `CustomerInformation`
-- `DeleteCertificate`
 - `Get15118EVCertificate`
 - `GetBaseReport`
 - `GetCertificateChainStatus`
@@ -136,13 +214,11 @@ All other schema actions are explicitly unsupported until implemented.
 - `GetChargingProfiles`
 - `GetDERControl`
 - `GetDisplayMessages`
-- `GetInstalledCertificateIds`
 - `GetMonitoringReport`
 - `GetPeriodicEventStream`
 - `GetReport`
 - `GetTariffs`
 - `GetTransactionStatus`
-- `InstallCertificate`
 - `NotifyAllowedEnergyTransfer`
 - `NotifyChargingLimit`
 - `NotifyCustomerInformation`
@@ -166,7 +242,6 @@ All other schema actions are explicitly unsupported until implemented.
 - `ReportDERControl`
 - `RequestBatterySwap`
 - `ReservationStatusUpdate`
-- `SecurityEventNotification`
 - `SetDERControl`
 - `SetDefaultTariff`
 - `SetDisplayMessage`
@@ -174,7 +249,6 @@ All other schema actions are explicitly unsupported until implemented.
 - `SetMonitoringLevel`
 - `SetNetworkProfile`
 - `SetVariableMonitoring`
-- `SignCertificate`
 - `UnpublishFirmware`
 - `UpdateDynamicSchedule`
 - `UsePriorityCharging`
@@ -184,7 +258,7 @@ All other schema actions are explicitly unsupported until implemented.
 
 OCPP 1.6 configuration keys are stored in one backing map.
 For OCPP 2.0.1 and OCPP 2.1, `GetVariables` and `SetVariables` expose that map
-as component `ChargingStation` variables.
+as component `ChargingStation` or `SecurityCtrlr` variables.
 
 Supported variable attribute types are `Actual` and `Target`.
 `MinSet` and `MaxSet` return `NotSupportedAttributeType`.
@@ -192,15 +266,26 @@ Unknown components return `UnknownComponent`, and unknown variables return
 `UnknownVariable`.
 Read-only variables reject writes.
 
-| Key                          | Writable | Notes                                         |
-| ---------------------------- | -------- | --------------------------------------------- |
-| `AllowOfflineTxForUnknownId` | Yes      | Stored as configuration only.                 |
-| `AuthorizeRemoteTxRequests`  | Yes      | Controls OCPP 1.6 remote-start authorization. |
-| `HeartbeatInterval`          | Yes      | Boot/config changes can restart heartbeats.   |
-| `MeterValueSampleInterval`   | Yes      | Stored as configuration only.                 |
-| `NumberOfConnectors`         | No       | Derived from startup configuration.           |
-| `SupportedFeatureProfiles`   | No       | Advertises implemented feature families.      |
-| `WebSocketPingInterval`      | Yes      | Stored as configuration only.                 |
+| Key                              | Writable | Notes                                                |
+| -------------------------------- | -------- | ---------------------------------------------------- |
+| `AdditionalRootCertificateCheck` | 2.x only | Read-only for OCPP 1.6 whitepaper behavior.          |
+| `AllowOfflineTxForUnknownId`     | Yes      | Stored as configuration only.                        |
+| `AllowSecurityProfileDowngrade`  | Yes      | OCPP 1.6 still rejects profile downgrades.           |
+| `AuthorizeRemoteTxRequests`      | Yes      | Controls OCPP 1.6 remote-start authorization.        |
+| `AuthorizationKey`               | Yes      | Write-only 1.6 Basic Auth password.                  |
+| `BasicAuthPassword`              | Yes      | Write-only 2.x Basic Auth password.                  |
+| `CertificateSignedMaxChainSize`  | 2.x only | Read-only for OCPP 1.6; maximum 10000 characters.    |
+| `CertificateStoreMaxLength`      | No       | Maximum in-memory certificate entries.               |
+| `CpoName`                        | Yes      | Stored security organization name.                   |
+| `HeartbeatInterval`              | Yes      | Boot/config changes can restart heartbeats.          |
+| `MaxCertificateChainSize`        | Yes      | Alias for certificate chain size limit, max 10000.   |
+| `MeterValueSampleInterval`       | Yes      | Stored as configuration only.                        |
+| `NumberOfConnectors`             | No       | Derived from startup configuration.                  |
+| `OrganizationName`               | Yes      | Alias for stored security organization name.         |
+| `SecurityProfile`                | Yes      | Controls transport profile validation and reconnect. |
+| `SupportedFeatureProfiles`       | No       | Advertises implemented feature families.             |
+| `SupportedFileTransferProtocols` | Yes      | Controls accepted firmware/log URI schemes.          |
+| `WebSocketPingInterval`          | Yes      | Stored as configuration only.                        |
 
 ## Behavioral Semantics
 

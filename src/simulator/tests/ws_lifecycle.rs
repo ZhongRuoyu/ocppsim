@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{accept_async, accept_hdr_async, connect_async};
 
-use crate::ocpp::{OcppFrame, build_call_result, parse_frame};
+use crate::ocpp::{OcppFrame, build_call, build_call_result, parse_frame};
 
 use super::*;
 
@@ -93,6 +93,70 @@ async fn capture_inbound_call_response_with_events(
   (frame, simulator, events)
 }
 
+async fn capture_ws_text_response_with_events(
+  protocol: OcppVersion,
+  text: String,
+) -> (OcppFrame, Simulator, Vec<UiEvent>) {
+  let listener = TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind listener");
+  let address = listener.local_addr().expect("local address");
+  let server = tokio::spawn(async move {
+    let (stream, _) = listener.accept().await.expect("accept client");
+    let websocket = accept_async(stream).await.expect("accept websocket");
+    let (_server_write, mut server_read) = websocket.split();
+    let message = server_read
+      .next()
+      .await
+      .expect("response frame")
+      .expect("response frame ok");
+    parse_frame(message.to_text().expect("text frame")).expect("parse response")
+  });
+
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
+    .await
+    .expect("connect client");
+  let (mut write, _read) = client_stream.split();
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(protocol);
+  simulator.config.trace_frames = true;
+  simulator
+    .handle_ws_text(text, &mut write)
+    .await
+    .expect("handle text");
+  drop(write);
+
+  let frame = server.await.expect("server task");
+  let mut events = Vec::new();
+  while let Ok(event) = ui_rx.try_recv() {
+    events.push(event);
+  }
+  (frame, simulator, events)
+}
+
+fn assert_trace_redacted(events: &[UiEvent], secret: &str) {
+  let log_messages = events
+    .iter()
+    .filter_map(|event| {
+      if let UiEvent::Log { message, .. } = event {
+        Some(message.as_str())
+      } else {
+        None
+      }
+    })
+    .collect::<Vec<_>>();
+  assert!(
+    log_messages.iter().all(|message| !message.contains(secret)),
+    "secret appeared in logs: {log_messages:?}"
+  );
+  assert!(
+    log_messages
+      .iter()
+      .any(|message| message.contains("<redacted>")),
+    "redacted marker missing from logs: {log_messages:?}"
+  );
+}
+
 #[test]
 fn validates_negotiated_subprotocol() {
   assert_eq!(
@@ -104,6 +168,51 @@ fn validates_negotiated_subprotocol() {
   assert!(
     validate_negotiated_subprotocol("ocpp1.6", Some("ocpp2.0.1")).is_err()
   );
+}
+
+#[tokio::test]
+async fn trace_frames_redacts_change_configuration_authorization_key() {
+  let password = "0123456789abcdef0123456789abcdef";
+  let frame = build_call(
+    "secret-message",
+    "ChangeConfiguration",
+    &json!({
+      "key": "AuthorizationKey",
+      "value": password
+    }),
+  );
+
+  let (_response, simulator, events) =
+    capture_ws_text_response_with_events(OcppVersion::V1_6, frame).await;
+
+  assert_eq!(
+    simulator.security.basic_auth_password.as_deref(),
+    Some(password)
+  );
+  assert_trace_redacted(&events, password);
+}
+
+#[tokio::test]
+async fn trace_frames_redacts_set_variables_basic_auth_password() {
+  let password = "0123456789abcdef0123456789abcdef";
+  let frame = build_call(
+    "secret-message",
+    "SetVariables",
+    &json!({
+      "setVariableData": [
+        set_variable_data("BasicAuthPassword", password)
+      ]
+    }),
+  );
+
+  let (_response, simulator, events) =
+    capture_ws_text_response_with_events(OcppVersion::V2_0_1, frame).await;
+
+  assert_eq!(
+    simulator.security.basic_auth_password.as_deref(),
+    Some(password)
+  );
+  assert_trace_redacted(&events, password);
 }
 
 #[tokio::test]
@@ -417,8 +526,7 @@ async fn v2_x_unlock_rejects_unsupported_connector_id() {
 #[tokio::test]
 async fn unsupported_actions_return_protocol_call_errors() {
   let cases = [
-    (OcppVersion::V1_6, "CertificateSigned", "NotSupported"),
-    (OcppVersion::V2_0_1, "CertificateSigned", "NotSupported"),
+    (OcppVersion::V2_0_1, "GetBaseReport", "NotSupported"),
     (OcppVersion::V2_1, "BatterySwap", "NotSupported"),
     (OcppVersion::V1_6, "TotallyUnknown", "NotImplemented"),
     (OcppVersion::V2_0_1, "TotallyUnknown", "NotImplemented"),
@@ -432,6 +540,29 @@ async fn unsupported_actions_return_protocol_call_errors() {
     };
     assert_eq!(code, expected_code);
   }
+}
+
+#[tokio::test]
+async fn v1_6_update_firmware_returns_not_supported_for_whitepaper() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "UpdateFirmware",
+    json!({
+      "location": "https://csms.example/firmware.bin",
+      "retrieveDate": now_timestamp()
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallError {
+    code, description, ..
+  } = frame
+  else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "NotSupported");
+  assert!(description.contains("SignedUpdateFirmware"));
+  assert!(simulator.queue.is_empty());
 }
 
 #[tokio::test]
@@ -452,6 +583,26 @@ async fn strict_mode_rejects_schema_invalid_v1_6_requests() {
   };
   assert_eq!(code, "FormationViolation");
   assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
+async fn strict_mode_rejects_oversized_install_certificate_v1_6() {
+  let (frame, simulator) = capture_inbound_call_response_with_strict(
+    OcppVersion::V1_6,
+    true,
+    "InstallCertificate",
+    json!({
+      "certificateType": "CentralSystemRootCertificate",
+      "certificate": "A".repeat(5_501)
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallError { code, .. } = frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+  assert!(simulator.security.certificates.is_empty());
 }
 
 #[tokio::test]
@@ -478,7 +629,7 @@ async fn strict_mode_warns_when_request_schema_is_missing() {
   let (frame, simulator, events) = capture_inbound_call_response_with_events(
     OcppVersion::V1_6,
     true,
-    "CertificateSigned",
+    "TotallyUnknown",
     json!({}),
   )
   .await;
@@ -486,7 +637,7 @@ async fn strict_mode_warns_when_request_schema_is_missing() {
   let OcppFrame::CallError { code, .. } = frame else {
     panic!("expected CALLERROR frame");
   };
-  assert_eq!(code, "NotSupported");
+  assert_eq!(code, "NotImplemented");
   assert!(simulator.queue.is_empty());
   assert!(events.iter().any(|event| {
     matches!(
@@ -495,7 +646,7 @@ async fn strict_mode_warns_when_request_schema_is_missing() {
         level: UiLogLevel::Warn,
         message,
       } if message.contains("Strict schema coverage is missing")
-        && message.contains("CertificateSigned")
+        && message.contains("TotallyUnknown")
     )
   }));
 }
@@ -534,6 +685,58 @@ async fn trigger_message_v1_6_enqueues_requested_simulator_calls() {
 }
 
 #[tokio::test]
+async fn trigger_message_v1_6_standard_and_extended_are_separate() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "TriggerMessage",
+    json!({ "requestedMessage": "DiagnosticsStatusNotification" }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  assert!(
+    simulator
+      .queue
+      .iter()
+      .any(|call| { call.action == "DiagnosticsStatusNotification" })
+  );
+
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "TriggerMessage",
+    json!({ "requestedMessage": "LogStatusNotification" }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(
+    payload["status"],
+    json!(ResponseStatus::NotImplemented.as_str())
+  );
+  assert!(simulator.queue.is_empty());
+
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "ExtendedTriggerMessage",
+    json!({ "requestedMessage": "LogStatusNotification" }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  assert!(
+    simulator
+      .queue
+      .iter()
+      .any(|call| { call.action == "LogStatusNotification" })
+  );
+}
+
+#[tokio::test]
 async fn trigger_message_v2_x_enqueues_requested_simulator_calls() {
   for protocol in v2_x_protocols() {
     let (frame, simulator) = capture_inbound_call_response(
@@ -551,6 +754,59 @@ async fn trigger_message_v2_x_enqueues_requested_simulator_calls() {
     assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
     let status_payload = queued_payload(&simulator, "StatusNotification");
     assert_eq!(status_payload["evseId"], json!(2));
+  }
+}
+
+#[tokio::test]
+async fn trigger_message_v2_x_uses_version_specific_values() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V2_0_1,
+    "TriggerMessage",
+    json!({ "requestedMessage": "SignV2G20Certificate" }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(
+    payload["status"],
+    json!(ResponseStatus::NotImplemented.as_str())
+  );
+  assert!(simulator.queue.is_empty());
+
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V2_1,
+    "TriggerMessage",
+    json!({ "requestedMessage": "SignV2G20Certificate" }),
+  )
+  .await;
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  let sign_payload = queued_payload(&simulator, "SignCertificate");
+  assert_eq!(sign_payload["certificateType"], "V2G20Certificate");
+}
+
+#[test]
+fn trigger_message_v2_x_can_trigger_active_transaction_event() {
+  for protocol in v2_x_protocols() {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start transaction");
+    simulator.queue.clear();
+
+    let status = simulator
+      .trigger_message_v2_x(
+        crate::ocpp::TriggerMessage_V2_X::TransactionEvent,
+        Some(1),
+      )
+      .expect("trigger transaction event");
+    assert_eq!(status, ResponseStatus::Accepted);
+    let payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(payload["triggerReason"], "Trigger");
+    assert_eq!(payload["eventType"], "Updated");
   }
 }
 

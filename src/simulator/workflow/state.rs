@@ -1,7 +1,11 @@
+use super::super::types::{SecurityProfileFallback, SecurityReconnectPlan};
 use super::super::{
-  ConfigurationEntry, ConfigurationKey, ConnectorState, ConnectorStatus,
-  OcppVersion, ResponseStatus, Result, Simulator, anyhow,
+  CertificateType, ConfigurationEntry, ConfigurationKey, ConnectorState,
+  ConnectorStatus, OcppVersion, ResponseStatus, Result, Simulator, anyhow,
 };
+use crate::ocpp::is_valid_basic_auth_password;
+
+const MAX_CERTIFICATE_CHAIN_SIZE: usize = 10_000;
 
 impl Simulator {
   /// Updates a configuration value and applies key-specific side effects.
@@ -17,24 +21,236 @@ impl Simulator {
       return ResponseStatus::Rejected;
     }
 
-    if key == ConfigurationKey::HeartbeatInterval {
-      let Some(seconds) = value.parse::<u64>().ok().filter(|item| *item > 0)
-      else {
-        return ResponseStatus::Rejected;
-      };
-      if let Some(entry) = self.configuration.get_mut(&key) {
-        entry.value = value.to_string();
-      }
-      if self.heartbeat.is_some() {
-        self.start_heartbeat(seconds);
-      }
-      return ResponseStatus::Accepted;
+    if let Some(status) = self.set_heartbeat_configuration(key, value) {
+      return status;
+    }
+    if let Some(status) = self.set_security_configuration(key, value) {
+      return status;
     }
 
+    self.update_configuration_value(key, value);
+    ResponseStatus::Accepted
+  }
+
+  fn set_heartbeat_configuration(
+    &mut self,
+    key: ConfigurationKey,
+    value: &str,
+  ) -> Option<ResponseStatus> {
+    if key != ConfigurationKey::HeartbeatInterval {
+      return None;
+    }
+    let Some(seconds) = value.parse::<u64>().ok().filter(|item| *item > 0)
+    else {
+      return Some(ResponseStatus::Rejected);
+    };
+    self.update_configuration_value(key, value);
+    if self.heartbeat.is_some() {
+      self.start_heartbeat(seconds);
+    }
+    Some(ResponseStatus::Accepted)
+  }
+
+  fn set_security_configuration(
+    &mut self,
+    key: ConfigurationKey,
+    value: &str,
+  ) -> Option<ResponseStatus> {
+    let status = match key {
+      ConfigurationKey::AuthorizationKey
+      | ConfigurationKey::BasicAuthPassword => {
+        self.set_basic_auth_password(value)
+      }
+      ConfigurationKey::SecurityProfile => self.set_security_profile(value),
+      ConfigurationKey::AdditionalRootCertificateCheck => {
+        self.set_additional_root_certificate_check(value)
+      }
+      ConfigurationKey::CertificateSignedMaxChainSize
+      | ConfigurationKey::MaxCertificateChainSize => {
+        self.set_certificate_chain_size(value)
+      }
+      ConfigurationKey::CpoName | ConfigurationKey::OrganizationName => {
+        self.set_security_organization_name(value)
+      }
+      ConfigurationKey::SupportedFileTransferProtocols => {
+        self.set_supported_file_transfer_protocols(value)
+      }
+      ConfigurationKey::CertificateStoreMaxLength => ResponseStatus::Rejected,
+      _ => return None,
+    };
+    Some(status)
+  }
+
+  fn set_basic_auth_password(&mut self, value: &str) -> ResponseStatus {
+    if !is_valid_basic_auth_password(value) {
+      return ResponseStatus::Rejected;
+    }
+    self.security.basic_auth_password = Some(value.to_string());
+    for key in [
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationKey::BasicAuthPassword,
+    ] {
+      if let Some(entry) = self.configuration.get_mut(&key) {
+        entry.value.clear();
+      }
+    }
+    self.record_security_event(
+      "ReconfigurationOfSecurityParameters",
+      Some("Basic authentication password changed".to_string()),
+    );
+    self.request_security_reconnect(SecurityProfileFallback::None);
+    ResponseStatus::Accepted
+  }
+
+  fn set_security_profile(&mut self, value: &str) -> ResponseStatus {
+    let Some(profile) = value.parse::<u8>().ok().filter(|item| *item <= 3)
+    else {
+      return ResponseStatus::Rejected;
+    };
+    let current = self.security.security_profile.unwrap_or(0);
+    let allow_downgrade = self
+      .configuration
+      .get(&ConfigurationKey::AllowSecurityProfileDowngrade)
+      .is_some_and(|entry| entry.value.eq_ignore_ascii_case("true"));
+    if profile == current {
+      return ResponseStatus::Rejected;
+    }
+    if profile < current
+      && (self.config.protocol == OcppVersion::V1_6
+        || !(allow_downgrade && current == 3 && profile == 2))
+    {
+      return ResponseStatus::Rejected;
+    }
+    if profile > current && !self.security_profile_prerequisites_met(profile) {
+      return ResponseStatus::Rejected;
+    }
+    let previous_profile = self.security.security_profile;
+    self.security.security_profile = (profile != 0).then_some(profile);
+    self.config.security_profile = self.security.security_profile;
+    self.update_configuration_value(ConfigurationKey::SecurityProfile, value);
+    self.record_security_event(
+      "ReconfigurationOfSecurityParameters",
+      Some(format!("SecurityProfile changed to {profile}")),
+    );
+    self.request_security_reconnect(SecurityProfileFallback::Restore(
+      previous_profile,
+    ));
+    ResponseStatus::Accepted
+  }
+
+  fn security_profile_prerequisites_met(&self, profile: u8) -> bool {
+    if matches!(profile, 1 | 2)
+      && !self
+        .security
+        .basic_auth_password
+        .as_deref()
+        .is_some_and(is_valid_basic_auth_password)
+    {
+      return false;
+    }
+    if matches!(profile, 2 | 3) && !self.has_central_system_root_certificate() {
+      return false;
+    }
+    if profile == 3 && !self.has_charge_point_certificate() {
+      return false;
+    }
+    true
+  }
+
+  fn has_central_system_root_certificate(&self) -> bool {
+    self.config.ca_cert_path.is_some()
+      || self.security.certificates.iter().any(|item| {
+        CertificateType::parse(&item.certificate_type)
+          .is_some_and(CertificateType::is_central_system_root)
+      })
+  }
+
+  fn has_charge_point_certificate(&self) -> bool {
+    self.config.client_cert_path.is_some()
+      && self.config.client_key_path.is_some()
+  }
+
+  fn set_additional_root_certificate_check(
+    &mut self,
+    value: &str,
+  ) -> ResponseStatus {
+    let Some(enabled) = parse_bool(value) else {
+      return ResponseStatus::Rejected;
+    };
+    self.security.additional_root_certificate_check = enabled;
+    self.update_configuration_value(
+      ConfigurationKey::AdditionalRootCertificateCheck,
+      value,
+    );
+    ResponseStatus::Accepted
+  }
+
+  fn set_certificate_chain_size(&mut self, value: &str) -> ResponseStatus {
+    let Some(size) = value
+      .parse::<usize>()
+      .ok()
+      .filter(|item| (1..=MAX_CERTIFICATE_CHAIN_SIZE).contains(item))
+    else {
+      return ResponseStatus::Rejected;
+    };
+    self.security.certificate_signed_max_chain_size = size;
+    self.update_configuration_value(
+      ConfigurationKey::CertificateSignedMaxChainSize,
+      value,
+    );
+    self.update_configuration_value(
+      ConfigurationKey::MaxCertificateChainSize,
+      value,
+    );
+    ResponseStatus::Accepted
+  }
+
+  fn request_security_reconnect(
+    &mut self,
+    fallback_security_profile: SecurityProfileFallback,
+  ) {
+    if self.connected {
+      self.security.pending_reconnect = Some(SecurityReconnectPlan {
+        fallback_security_profile,
+      });
+    }
+  }
+
+  fn set_security_organization_name(&mut self, value: &str) -> ResponseStatus {
+    if value.is_empty() {
+      return ResponseStatus::Rejected;
+    }
+    self.security.cpo_name = value.to_string();
+    self.update_configuration_value(ConfigurationKey::CpoName, value);
+    self.update_configuration_value(ConfigurationKey::OrganizationName, value);
+    ResponseStatus::Accepted
+  }
+
+  fn set_supported_file_transfer_protocols(
+    &mut self,
+    value: &str,
+  ) -> ResponseStatus {
+    let protocols = value
+      .split(',')
+      .map(str::trim)
+      .filter(|item| !item.is_empty())
+      .map(str::to_ascii_uppercase)
+      .collect::<Vec<_>>();
+    if protocols.is_empty() {
+      return ResponseStatus::Rejected;
+    }
+    self.security.supported_file_transfer_protocols = protocols;
+    self.update_configuration_value(
+      ConfigurationKey::SupportedFileTransferProtocols,
+      value,
+    );
+    ResponseStatus::Accepted
+  }
+
+  fn update_configuration_value(&mut self, key: ConfigurationKey, value: &str) {
     if let Some(entry) = self.configuration.get_mut(&key) {
       entry.value = value.to_string();
     }
-    ResponseStatus::Accepted
   }
 
   /// Finds a configuration entry by case-insensitive variable name.
@@ -43,6 +259,15 @@ impl Simulator {
     variable: &str,
   ) -> Option<(ConfigurationKey, &ConfigurationEntry)> {
     let key = ConfigurationKey::parse(variable)?;
+    if matches!(
+      key,
+      ConfigurationKey::AuthorizationKey | ConfigurationKey::BasicAuthPassword
+    ) {
+      return self
+        .configuration
+        .get_key_value(&key)
+        .map(|(key, value)| (*key, value));
+    }
     self
       .configuration
       .get_key_value(&key)
@@ -396,5 +621,15 @@ impl Simulator {
     self.enqueue_status_notification(connector)?;
     self.emit_snapshot();
     Ok(())
+  }
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+  if value.eq_ignore_ascii_case("true") {
+    Some(true)
+  } else if value.eq_ignore_ascii_case("false") {
+    Some(false)
+  } else {
+    None
   }
 }

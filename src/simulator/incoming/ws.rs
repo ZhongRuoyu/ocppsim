@@ -1,7 +1,10 @@
 use super::super::{
   Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
-  UiLogLevel, Value, WsWrite, anyhow, build_call_error, json, parse_frame,
+  UiLogLevel, Value, WsWrite, anyhow, build_call, build_call_error,
+  build_call_result, json, normalize_identifier, parse_frame,
 };
+
+const REDACTED_SECRET: &str = "<redacted>";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IncomingRequestSchemaValidation {
@@ -41,13 +44,19 @@ impl Simulator {
     text: String,
     write: &mut WsWrite,
   ) -> Result<()> {
-    if self.config.trace_frames {
-      self.log(UiLogLevel::Rx, text.clone());
-    }
-
     match parse_frame(&text) {
-      Ok(frame) => self.handle_parsed_ws_frame(frame, write).await?,
-      Err(error) => self.handle_malformed_ws_frame(write, error).await?,
+      Ok(frame) => {
+        if self.config.trace_frames {
+          self.log(UiLogLevel::Rx, sanitized_inbound_frame(&frame));
+        }
+        self.handle_parsed_ws_frame(frame, write).await?;
+      }
+      Err(error) => {
+        if self.config.trace_frames {
+          self.log(UiLogLevel::Rx, "Malformed OCPP frame omitted from trace.");
+        }
+        self.handle_malformed_ws_frame(write, error).await?;
+      }
     }
 
     Ok(())
@@ -237,4 +246,122 @@ impl Simulator {
 
     Err(anyhow!(errors.join("; ")))
   }
+}
+
+fn sanitized_inbound_frame(frame: &OcppFrame) -> String {
+  match frame {
+    OcppFrame::Call {
+      message_id,
+      action,
+      payload,
+    } => build_call(message_id, action, &redact_call_payload(action, payload)),
+    OcppFrame::CallResult {
+      message_id,
+      payload,
+    } => build_call_result(message_id, &redact_secret_fields(payload)),
+    OcppFrame::CallError {
+      message_id,
+      code,
+      description,
+      details,
+    }
+    | OcppFrame::CallResultError {
+      message_id,
+      code,
+      description,
+      details,
+    } => build_call_error(
+      message_id,
+      code,
+      description,
+      &redact_secret_fields(details),
+    ),
+    OcppFrame::Send {
+      message_id,
+      action,
+      payload,
+    } => json!([6, message_id, action, redact_call_payload(action, payload)])
+      .to_string(),
+    OcppFrame::Unsupported {
+      message_type,
+      message_id,
+    } => json!([message_type, message_id]).to_string(),
+  }
+}
+
+fn redact_call_payload(action: &str, payload: &Value) -> Value {
+  let mut redacted = redact_secret_fields(payload);
+  match action {
+    "ChangeConfiguration" => redact_change_configuration(&mut redacted),
+    "SetVariables" => redact_set_variables(&mut redacted),
+    _ => {}
+  }
+  redacted
+}
+
+fn redact_change_configuration(payload: &mut Value) {
+  let Some(key) = payload.get("key").and_then(Value::as_str) else {
+    return;
+  };
+  if is_secret_variable(key)
+    && let Some(object) = payload.as_object_mut()
+  {
+    object.insert(
+      "value".to_string(),
+      Value::String(REDACTED_SECRET.to_string()),
+    );
+  }
+}
+
+fn redact_set_variables(payload: &mut Value) {
+  let Some(entries) = payload
+    .get_mut("setVariableData")
+    .and_then(Value::as_array_mut)
+  else {
+    return;
+  };
+  for entry in entries {
+    let variable_name = entry
+      .get("variable")
+      .and_then(Value::as_object)
+      .and_then(|variable| variable.get("name"))
+      .and_then(Value::as_str);
+    if variable_name.is_some_and(is_secret_variable)
+      && let Some(object) = entry.as_object_mut()
+    {
+      object.insert(
+        "attributeValue".to_string(),
+        Value::String(REDACTED_SECRET.to_string()),
+      );
+    }
+  }
+}
+
+fn redact_secret_fields(value: &Value) -> Value {
+  match value {
+    Value::Object(object) => Value::Object(
+      object
+        .iter()
+        .map(|(key, value)| {
+          let redacted_value = if is_secret_variable(key) {
+            Value::String(REDACTED_SECRET.to_string())
+          } else {
+            redact_secret_fields(value)
+          };
+          (key.clone(), redacted_value)
+        })
+        .collect(),
+    ),
+    Value::Array(items) => {
+      Value::Array(items.iter().map(redact_secret_fields).collect())
+    }
+    _ => value.clone(),
+  }
+}
+
+fn is_secret_variable(value: &str) -> bool {
+  matches!(
+    normalize_identifier(value).as_str(),
+    "authorizationkey" | "basicauthpassword"
+  )
 }

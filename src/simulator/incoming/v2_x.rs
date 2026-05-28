@@ -58,6 +58,12 @@ impl Simulator {
       UiLogLevel::Info,
       format!("Received GetLog request for {location}"),
     );
+    if !self.supports_file_transfer_location(location) {
+      return Ok(to_value(&GetLog_V2_X_Response {
+        status: ResponseStatus::Rejected.as_str(),
+        filename: None,
+      }));
+    }
     self.enqueue_log_status_notification(
       ResponseStatus::Uploading.as_str(),
       Some(request_id),
@@ -69,7 +75,7 @@ impl Simulator {
     let filename = format!("log-{}.txt", self.config.cp_id);
     Ok(to_value(&GetLog_V2_X_Response {
       status: ResponseStatus::Accepted.as_str(),
-      filename: &filename,
+      filename: Some(&filename),
     }))
   }
 
@@ -159,27 +165,14 @@ impl Simulator {
       .and_then(|item| item.get("location"))
       .and_then(Value::as_str)
       .ok_or_else(|| anyhow!("firmware.location is required."))?;
+    let firmware = payload
+      .get("firmware")
+      .ok_or_else(|| anyhow!("firmware is required."))?;
     self.log(
       UiLogLevel::Info,
       format!("Received UpdateFirmware request from {location}"),
     );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Downloading.as_str(),
-      Some(request.request_id),
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Downloaded.as_str(),
-      Some(request.request_id),
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Installing.as_str(),
-      Some(request.request_id),
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Installed.as_str(),
-      Some(request.request_id),
-    );
-    Ok(ResponseStatus::Accepted)
+    self.secure_update_firmware_v2_x(request.request_id, firmware)
   }
 
   /// Handles `ReserveNow.req` by translating to shared reservation logic.
@@ -307,7 +300,15 @@ impl Simulator {
         ..base
       });
     }
-    if let Some((_, configuration)) = self.configuration_entry(variable) {
+    if let Some((key, configuration)) = self.configuration_entry(variable) {
+      if key == super::super::ConfigurationKey::BasicAuthPassword
+        || key == super::super::ConfigurationKey::AuthorizationKey
+      {
+        return Ok(VariableResult_V2_X {
+          attribute_status: ResponseStatus::WriteOnly.as_str(),
+          ..base
+        });
+      }
       return Ok(VariableResult_V2_X {
         attribute_status: ResponseStatus::Accepted.as_str(),
         attribute_value: Some(configuration.value.clone()),
@@ -387,7 +388,10 @@ fn variable_attribute_type(entry: &Value) -> Option<VariableAttributeType> {
 }
 
 fn is_supported_variable_component(component: &str) -> bool {
-  normalize_identifier(component) == "chargingstation"
+  matches!(
+    normalize_identifier(component).as_str(),
+    "chargingstation" | "securityctrl" | "securityctrlr"
+  )
 }
 
 fn is_supported_variable_attribute(

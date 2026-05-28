@@ -12,6 +12,14 @@ use super::{ConfigurationEntry, SimulatorConfig};
 pub(in crate::simulator) fn default_configuration_entries(
   config: &SimulatorConfig,
 ) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
+  let mut entries = core_configuration_entries(config);
+  entries.extend(security_configuration_entries(config));
+  entries
+}
+
+fn core_configuration_entries(
+  config: &SimulatorConfig,
+) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
   let heartbeat_interval = config.heartbeat_seconds.unwrap_or(30).to_string();
   BTreeMap::from([
     (
@@ -53,7 +61,7 @@ pub(in crate::simulator) fn default_configuration_entries(
       ConfigurationKey::SupportedFeatureProfiles,
       ConfigurationEntry {
         value: "Core,FirmwareManagement,LocalAuthListManagement,\
-SmartCharging,RemoteTrigger,Reservation"
+SmartCharging,RemoteTrigger,Reservation,Security"
           .to_string(),
         read_only: true,
       },
@@ -62,6 +70,104 @@ SmartCharging,RemoteTrigger,Reservation"
       ConfigurationKey::WebSocketPingInterval,
       ConfigurationEntry {
         value: "0".to_string(),
+        read_only: false,
+      },
+    ),
+  ])
+}
+
+fn security_configuration_entries(
+  config: &SimulatorConfig,
+) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
+  BTreeMap::from([
+    (
+      ConfigurationKey::AdditionalRootCertificateCheck,
+      ConfigurationEntry {
+        value: "false".to_string(),
+        read_only: config.protocol == OcppVersion::V1_6,
+      },
+    ),
+    (
+      ConfigurationKey::AllowSecurityProfileDowngrade,
+      ConfigurationEntry {
+        value: "false".to_string(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationEntry {
+        value: String::new(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::BasicAuthPassword,
+      ConfigurationEntry {
+        value: String::new(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::CertificateSignedMaxChainSize,
+      ConfigurationEntry {
+        value: "10000".to_string(),
+        read_only: config.protocol == OcppVersion::V1_6,
+      },
+    ),
+    (
+      ConfigurationKey::CertificateStoreMaxLength,
+      ConfigurationEntry {
+        value: "10".to_string(),
+        read_only: true,
+      },
+    ),
+    (
+      ConfigurationKey::CertSigningRepeatTimes,
+      ConfigurationEntry {
+        value: "3".to_string(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::CertSigningWaitMinimum,
+      ConfigurationEntry {
+        value: "60".to_string(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::CpoName,
+      ConfigurationEntry {
+        value: config.vendor.clone(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::MaxCertificateChainSize,
+      ConfigurationEntry {
+        value: "10000".to_string(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::OrganizationName,
+      ConfigurationEntry {
+        value: config.vendor.clone(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::SecurityProfile,
+      ConfigurationEntry {
+        value: config.security_profile.unwrap_or(0).to_string(),
+        read_only: false,
+      },
+    ),
+    (
+      ConfigurationKey::SupportedFileTransferProtocols,
+      ConfigurationEntry {
+        value: "HTTP,HTTPS".to_string(),
         read_only: false,
       },
     ),

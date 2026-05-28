@@ -155,7 +155,7 @@ impl Simulator {
     );
   }
 
-  /// Enqueues an OCPP 2.x `LogStatusNotification` request.
+  /// Enqueues a protocol-version-specific `LogStatusNotification` request.
   pub(in crate::simulator) fn enqueue_log_status_notification(
     &mut self,
     status: &str,
@@ -166,6 +166,20 @@ impl Simulator {
       OutgoingAction::LogStatusNotification.as_str(),
       payload,
       PendingContext::LogStatusNotification,
+    );
+  }
+
+  /// Enqueues an OCPP 1.6 security `SignedFirmwareStatusNotification`.
+  pub(in crate::simulator) fn enqueue_signed_firmware_status_notification(
+    &mut self,
+    status: &str,
+    request_id: Option<i64>,
+  ) {
+    let payload = to_value(&FirmwareStatus_V2_X_Payload { status, request_id });
+    self.enqueue_call(
+      OutgoingAction::SignedFirmwareStatusNotification.as_str(),
+      payload,
+      PendingContext::SignedFirmwareStatusNotification,
     );
   }
 

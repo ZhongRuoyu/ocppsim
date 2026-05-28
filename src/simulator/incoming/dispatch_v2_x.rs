@@ -63,6 +63,24 @@ impl Simulator {
           )
           .await?;
       }
+      IncomingAction_V2_X::CertificateSigned => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.certificate_signed_v2_x(payload)
+      ),
+      IncomingAction_V2_X::DeleteCertificate => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.delete_certificate_from_payload(payload)
+      ),
+      IncomingAction_V2_X::GetInstalledCertificateIds => dispatch_response!(
+        self,
+        write,
+        message_id,
+        self.get_installed_certificate_ids_v2_x(payload)
+      ),
       IncomingAction_V2_X::GetLocalListVersion => {
         self
           .send_call_result(
@@ -82,6 +100,12 @@ impl Simulator {
         write,
         message_id,
         self.get_variables_v2_x(payload)
+      ),
+      IncomingAction_V2_X::InstallCertificate => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.install_certificate_from_payload(payload)
       ),
       IncomingAction_V2_X::RequestStartTransaction => {
         self
@@ -177,9 +201,13 @@ impl Simulator {
       IncomingAction_V2_X::ChangeAvailability
       | IncomingAction_V2_X::ClearCache
       | IncomingAction_V2_X::DataTransfer
+      | IncomingAction_V2_X::CertificateSigned
+      | IncomingAction_V2_X::DeleteCertificate
+      | IncomingAction_V2_X::GetInstalledCertificateIds
       | IncomingAction_V2_X::GetLocalListVersion
       | IncomingAction_V2_X::GetLog
       | IncomingAction_V2_X::GetVariables
+      | IncomingAction_V2_X::InstallCertificate
       | IncomingAction_V2_X::RequestStartTransaction
       | IncomingAction_V2_X::RequestStopTransaction => unreachable!(),
     }
@@ -279,18 +307,16 @@ impl Simulator {
           .await;
       }
     };
-    let Some(message) = TriggerMessage_V2_X::parse(&request.requested_message)
-    else {
+    let Some(message) = TriggerMessage_V2_X::parse(
+      &request.requested_message,
+      self.config.protocol,
+    ) else {
       return self
         .send_status_response(write, message_id, ResponseStatus::NotImplemented)
         .await;
     };
     match self.trigger_message_v2_x(message, request.connector) {
-      Ok(()) => {
-        self
-          .send_status_response(write, message_id, ResponseStatus::Accepted)
-          .await
-      }
+      Ok(status) => self.send_status_response(write, message_id, status).await,
       Err(error) => {
         self
           .send_formation_violation(write, message_id, &error.to_string())

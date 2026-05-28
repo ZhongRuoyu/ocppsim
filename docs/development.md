@@ -42,6 +42,19 @@ Inbound handlers should validate required fields before mutating simulator
 state, so malformed supported requests can return `FormationViolation` without
 partial state changes.
 
+When adding or expanding an OCPP action, update the whole vertical slice:
+
+- Add or update the checked-in schema under `schemas/` when needed.
+- Add the action to the appropriate manifest in `src/ocpp.rs`.
+- Add typed response or outbound payload structs in `src/simulator/payloads.rs`.
+- Add side-effect-free request parsing in `src/simulator/incoming/request.rs`
+  or a version-specific request module.
+- Add explicit dispatch in the version-specific inbound handler.
+- Add representative schema validation tests for emitted payloads.
+- Add strict-mode tests for malformed inbound payloads when a request schema
+  exists.
+- Update `docs/ocpp-support.md` with the implemented behavior and limits.
+
 Keep version-specific entry points where future protocol drift is plausible.
 It is fine for OCPP 2.0.1 and OCPP 2.1 builders to call a shared `v2_x` body
 when their current wire shape is identical.

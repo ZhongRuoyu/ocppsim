@@ -25,6 +25,16 @@ impl Simulator {
       PendingContext::LogStatusNotification => {
         self.log_acknowledged("LogStatusNotification");
       }
+      PendingContext::SecurityEventNotification { event_id } => {
+        self.mark_security_event_notification_sent(*event_id);
+        self.log_acknowledged("SecurityEventNotification");
+      }
+      PendingContext::SignCertificate => {
+        self.log_sign_certificate_call_result(payload);
+      }
+      PendingContext::SignedFirmwareStatusNotification => {
+        self.log_acknowledged("SignedFirmwareStatusNotification");
+      }
       PendingContext::Authorize { id_token } => {
         self.log_authorize_call_result(id_token, payload);
       }
@@ -109,6 +119,14 @@ impl Simulator {
       .and_then(Value::as_str)
       .unwrap_or(ResponseStatus::Unknown.as_str());
     self.log(UiLogLevel::Info, format!("DataTransfer status={status}"));
+  }
+
+  fn log_sign_certificate_call_result(&mut self, payload: &Value) {
+    let status = payload
+      .get("status")
+      .and_then(Value::as_str)
+      .unwrap_or(ResponseStatus::Unknown.as_str());
+    self.log(UiLogLevel::Info, format!("SignCertificate status={status}"));
   }
 
   fn log_acknowledged(&mut self, action: &str) {

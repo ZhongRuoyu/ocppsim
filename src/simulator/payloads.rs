@@ -148,6 +148,26 @@ pub(super) struct LogStatusPayload<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct SecurityEventNotificationRequest<'a> {
+  #[serde(rename = "type")]
+  pub event_type: &'a str,
+  pub timestamp: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tech_info: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SignCertificateRequest<'a> {
+  pub csr: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub certificate_type: Option<&'a str>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub request_id: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct StatusNotificationV1_6Request<'a> {
   pub connector_id: u16,
   pub error_code: &'a str,
@@ -219,7 +239,8 @@ pub(super) struct TransactionEvent_V2_X_Request<'a> {
 pub(super) struct ConfigurationKeyEntry<'a> {
   pub key: &'a str,
   pub readonly: bool,
-  pub value: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub value: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -258,9 +279,48 @@ pub(super) struct DataTransferResponse<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct StatusResponse<'a> {
+  pub status: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct GetLog_V2_X_Response<'a> {
   pub status: &'a str,
-  pub filename: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub filename: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CertificateHashDataPayload<'a> {
+  pub hash_algorithm: &'a str,
+  pub issuer_name_hash: &'a str,
+  pub issuer_key_hash: &'a str,
+  pub serial_number: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CertificateHashDataChainPayload<'a> {
+  pub certificate_type: &'a str,
+  pub certificate_hash_data: CertificateHashDataPayload<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GetInstalledCertificateIdsV1_6Response<'a> {
+  pub status: &'a str,
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub certificate_hash_data: Vec<CertificateHashDataPayload<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GetInstalledCertificateIds_V2_X_Response<'a> {
+  pub status: &'a str,
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub certificate_hash_data_chain: Vec<CertificateHashDataChainPayload<'a>>,
 }
 
 #[derive(Serialize)]

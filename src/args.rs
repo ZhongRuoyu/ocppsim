@@ -9,7 +9,7 @@ use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
 use crate::config::{ProfileDefaults, profile_names, resolve_profile};
-use crate::ocpp::OcppVersion;
+use crate::ocpp::{OcppVersion, is_valid_basic_auth_password};
 
 const DEFAULT_CONNECTORS: u16 = 1;
 const DEFAULT_PROTOCOL: OcppVersion = OcppVersion::V1_6;
@@ -34,6 +34,11 @@ const CLI_AFTER_HELP: &str = r#"Config file format:
   strict = false
   request-timeout-seconds = 30
   heartbeat-seconds = 0
+  security-profile = 2
+  basic-auth-password = "0123456789abcdef0123456789abcdef"
+  ca-cert = "./csms-root.pem"
+  client-cert = "./charge-point.pem"
+  client-key = "./charge-point-key.pem"
 
   [charge-points.example]
   ws-url = "wss://csms.example.com/ocpp"
@@ -174,6 +179,29 @@ pub struct CliArgs {
   /// heartbeats)
   #[arg(long)]
   pub heartbeat_seconds: Option<u64>,
+
+  /// OCPP security profile:
+  /// 1 = Basic Auth over ws,
+  /// 2 = Basic Auth over wss,
+  /// 3 = wss with client certificate
+  #[arg(long)]
+  pub security_profile: Option<u8>,
+
+  /// HTTP Basic password for security profiles 1 and 2
+  #[arg(long)]
+  pub basic_auth_password: Option<String>,
+
+  /// PEM CA certificate used to trust the CSMS TLS certificate
+  #[arg(long, value_name = "PATH")]
+  pub ca_cert: Option<PathBuf>,
+
+  /// PEM client certificate for security profile 3
+  #[arg(long, value_name = "PATH")]
+  pub client_cert: Option<PathBuf>,
+
+  /// PEM private key for security profile 3
+  #[arg(long, value_name = "PATH")]
+  pub client_key: Option<PathBuf>,
 }
 
 /// Handles dynamic completion requests emitted by generated shell scripts.
@@ -216,6 +244,11 @@ pub struct ResolvedCliArgs {
   pub strict: bool,
   pub request_timeout_seconds: u64,
   pub heartbeat_seconds: Option<u64>,
+  pub security_profile: Option<u8>,
+  pub basic_auth_password: Option<String>,
+  pub ca_cert_path: Option<PathBuf>,
+  pub client_cert_path: Option<PathBuf>,
+  pub client_key_path: Option<PathBuf>,
 }
 
 impl CliArgs {
@@ -265,12 +298,25 @@ impl CliArgs {
         strict: profile.strict,
         request_timeout_seconds: profile.request_timeout_seconds,
         heartbeat_seconds: profile.heartbeat_seconds,
+        security_profile: profile.security_profile,
+        basic_auth_password: profile.basic_auth_password,
+        ca_cert_path: profile.ca_cert_path.map(|path| expand_tilde_path(&path)),
+        client_cert_path: profile
+          .client_cert_path
+          .map(|path| expand_tilde_path(&path)),
+        client_key_path: profile
+          .client_key_path
+          .map(|path| expand_tilde_path(&path)),
       }
     } else {
       resolve_with_direct_args(&self)?
     };
 
     apply_cli_overrides(&mut resolved, &self)?;
+    validate_basic_auth_password(
+      resolved.basic_auth_password.as_deref(),
+      "basic auth password",
+    )?;
     Ok(resolved)
   }
 }
@@ -333,6 +379,11 @@ fn resolve_with_direct_args(cli: &CliArgs) -> Result<ResolvedCliArgs> {
     strict: false,
     request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
     heartbeat_seconds: None,
+    security_profile: None,
+    basic_auth_password: None,
+    ca_cert_path: None,
+    client_cert_path: None,
+    client_key_path: None,
   })
 }
 
@@ -380,7 +431,43 @@ fn apply_cli_overrides(
   if let Some(seconds) = cli.heartbeat_seconds {
     resolved.heartbeat_seconds = normalize_heartbeat_seconds(Some(seconds));
   }
+  if let Some(profile) = cli.security_profile {
+    validate_security_profile(profile)?;
+    resolved.security_profile = Some(profile);
+  }
+  if let Some(password) = &cli.basic_auth_password {
+    validate_basic_auth_password(Some(password), "--basic-auth-password")?;
+    resolved.basic_auth_password = Some(password.clone());
+  }
+  if let Some(path) = &cli.ca_cert {
+    resolved.ca_cert_path = Some(expand_tilde_path(path));
+  }
+  if let Some(path) = &cli.client_cert {
+    resolved.client_cert_path = Some(expand_tilde_path(path));
+  }
+  if let Some(path) = &cli.client_key {
+    resolved.client_key_path = Some(expand_tilde_path(path));
+  }
   Ok(())
+}
+
+fn validate_security_profile(profile: u8) -> Result<()> {
+  if (1..=3).contains(&profile) {
+    Ok(())
+  } else {
+    bail!("security profile must be 1, 2, or 3.")
+  }
+}
+
+fn validate_basic_auth_password(
+  password: Option<&str>,
+  source: &str,
+) -> Result<()> {
+  if password.is_none_or(is_valid_basic_auth_password) {
+    Ok(())
+  } else {
+    bail!("{source} must be 32 to 40 ASCII hexadecimal characters.")
+  }
 }
 
 /// Converts heartbeat seconds into an optional interval.
@@ -482,6 +569,11 @@ mod tests {
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     }
   }
 
@@ -512,6 +604,11 @@ mod tests {
       strict: false,
       request_timeout_seconds: Some(20),
       heartbeat_seconds: Some(5),
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("resolution should fail");
     assert_eq!(
@@ -539,6 +636,11 @@ mod tests {
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("resolution should fail");
     assert_eq!(
@@ -566,6 +668,11 @@ mod tests {
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("resolution should fail");
     assert_eq!(
@@ -609,6 +716,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -649,6 +761,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     assert!(args.resolve().is_err());
 
@@ -738,6 +855,11 @@ id = "CP-BETA"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -772,6 +894,11 @@ log-path = "./profile.log"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -817,6 +944,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -879,6 +1011,11 @@ heartbeat-seconds = 0
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -939,6 +1076,11 @@ heartbeat-seconds = 12
       strict: true,
       request_timeout_seconds: Some(99),
       heartbeat_seconds: Some(0),
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -984,6 +1126,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1011,10 +1158,47 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: Some(0),
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
     assert_eq!(resolved.heartbeat_seconds, None);
+  }
+
+  #[test]
+  /// Verifies invalid CLI Basic Auth passwords fail before runtime.
+  fn cli_basic_auth_password_rejects_invalid_format() {
+    let args = CliArgs {
+      profile: None,
+      config_path: None,
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("CP-TEST".to_string()),
+      no_append_cp_id: false,
+      connectors: None,
+      protocol: None,
+      vendor: None,
+      model: None,
+      firmware: None,
+      log_path: None,
+      trace_frames: false,
+      strict: false,
+      request_timeout_seconds: None,
+      heartbeat_seconds: None,
+      security_profile: Some(1),
+      basic_auth_password: Some("not-a-hex-password".to_string()),
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
+    };
+    let error = args.resolve().expect_err("should reject password");
+    assert!(
+      error.to_string().contains("ASCII hexadecimal"),
+      "unexpected error: {error}"
+    );
   }
 
   #[test]
@@ -1036,6 +1220,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1068,6 +1257,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1103,6 +1297,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1141,6 +1340,11 @@ protocol = "3.0"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1180,6 +1384,11 @@ id = "CP-DEMO"
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1218,6 +1427,11 @@ connectors = 0
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1247,6 +1461,11 @@ connectors = 0
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1283,6 +1502,11 @@ append-cp-id = false
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1319,6 +1543,11 @@ append-cp-id = true
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1346,6 +1575,11 @@ append-cp-id = true
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1390,6 +1624,11 @@ connectors = 3
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1426,6 +1665,11 @@ connectors = 3
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1455,6 +1699,11 @@ connectors = 3
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
     };
     let error = args.resolve().expect_err("should fail");
     assert!(

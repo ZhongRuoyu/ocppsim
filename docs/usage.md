@@ -22,6 +22,10 @@ Some other useful flags include:
 - `--strict`
 - `--request-timeout-seconds <seconds>`
 - `--heartbeat-seconds <seconds>`
+- `--security-profile <1|2|3>`
+- `--basic-auth-password <password>`
+- `--ca-cert <path>`
+- `--client-cert <path>` and `--client-key <path>`
 
 Run `ocppsim --help` for a full list of CLI options.
 
@@ -56,6 +60,11 @@ trace-frames = false
 strict = false
 request-timeout-seconds = 30
 heartbeat-seconds = 0
+security-profile = 2
+basic-auth-password = "0123456789abcdef0123456789abcdef"
+ca-cert = "./csms-root.pem"
+client-cert = "./charge-point.pem"
+client-key = "./charge-point-key.pem"
 
 [charge-points.example]
 ws-url = "wss://csms.example.com/ocpp"
@@ -140,6 +149,31 @@ The simulator requests exactly one OCPP-J WebSocket subprotocol:
 `ocpp1.6`, `ocpp2.0.1`, or `ocpp2.1`.
 The connection fails if the CSMS does not negotiate the requested token.
 
+Security profile settings validate the transport before connecting.
+Profile 1 requires `ws://` plus HTTP Basic authentication.
+Profile 2 requires `wss://` plus HTTP Basic authentication.
+Profile 3 requires `wss://` plus `--client-cert` and `--client-key`.
+Basic Auth passwords must be 32 to 40 ASCII hexadecimal characters.
+Profile 1 sends Basic Auth over an unencrypted WebSocket; the password is only
+Base64 encoded on the wire.
+Use profile 1 only on trusted lab networks, tunnels, or VPNs.
+Prefer storing them in a protected profile file over passing them on the
+command line, because shell history and process listings can expose CLI
+arguments.
+When certificate paths are configured, the simulator builds a rustls connector
+using the WebPKI root store, the optional `--ca-cert`, and the optional client
+certificate and key.
+For OCPP-level security-profile upgrades, a configured CA path counts as the
+Central System root prerequisite and configured client certificate/key paths
+count as the profile 3 Charge Point certificate material.
+Security-profile passwords are not included in frame logs or configuration
+readback.
+When a connected CSMS changes `AuthorizationKey`, `BasicAuthPassword`, or an
+accepted higher `SecurityProfile`, the simulator closes the current connection
+and reconnects using the new security settings.
+If a profile-upgrade reconnect fails, the simulator restores the previous
+profile and attempts one fallback reconnect.
+
 An accepted `BootNotification` response starts or restarts periodic
 heartbeats using the CSMS-provided `interval` value.
 Use `heartbeat stop` after boot when you want to suppress periodic heartbeats
@@ -148,6 +182,9 @@ for a manual test.
 Use `--trace-frames` when debugging interoperability.
 It logs complete JSON CALL, CALLRESULT, and CALLERROR frames in addition to the
 normal summary lines.
+Known credential fields are redacted before inbound frames are logged,
+including OCPP 1.6 `AuthorizationKey` changes and OCPP 2.x
+`BasicAuthPassword` variable writes.
 
 Use `--strict` or profile `strict = true` when you want inbound CSMS requests
 validated against the checked-in JSON schemas before simulator dispatch.
@@ -156,9 +193,21 @@ payloads.
 Without strict mode, the simulator validates only the fields needed by its
 implemented behavior and ignores optional fields outside that behavior.
 
-The simulator supports plain OCPP-J WebSocket subprotocol negotiation.
-It does not implement OCPP security profiles, client-certificate
-authentication, certificate-management actions, or security event workflows.
+Certificate management, signing, signed firmware, log retrieval, and security
+event workflows are simulator-level implementations.
+They validate protocol structure, maintain an in-memory synthetic certificate
+store, emit expected status notifications, and record obvious security events.
+Recorded security events are queued for `SecurityEventNotification` delivery
+until acknowledged, including events recorded while offline or immediately
+before a security reconnect.
+They do not perform full PKI validation, OCSP/CRL checks, real CSR generation,
+firmware binary verification, or file transfer.
+Use the string `invalid` in simulated certificates or signatures when you want
+to drive the invalid-certificate or invalid-signature paths.
+For OCPP 1.6 Security Whitepaper firmware flows, use
+`SignedUpdateFirmware`.
+The original OCPP 1.6 `UpdateFirmware` request returns CALLERROR
+`NotSupported`.
 
 ## Troubleshooting
 
@@ -174,8 +223,10 @@ host.
 
 If a `wss://` endpoint fails during the TLS handshake, test the same endpoint
 with a WebSocket client that can show certificate diagnostics.
-The simulator uses the bundled WebPKI root store and does not provide flags to
-bypass certificate validation.
+The simulator uses the bundled WebPKI root store by default.
+Use `--ca-cert` when the CSMS uses a private CA, and use `--client-cert` plus
+`--client-key` for profile 3 client-certificate authentication.
+There is no flag to bypass certificate validation.
 
 If requests time out, increase `--request-timeout-seconds` for slow CSMS test
 systems and enable `--trace-frames` to confirm whether a CALLRESULT or

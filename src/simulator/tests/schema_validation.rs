@@ -64,7 +64,10 @@ fn v1_6_static_inbound_response_cases() -> Vec<SchemaCase> {
     accepted_status_case("SendLocalListResponse.json"),
     accepted_status_case("SetChargingProfileResponse.json"),
     accepted_status_case("TriggerMessageResponse.json"),
-    ("UpdateFirmwareResponse.json", json!({})),
+    accepted_status_case("CertificateSignedResponse.json"),
+    accepted_status_case("DeleteCertificateResponse.json"),
+    accepted_status_case("InstallCertificateResponse.json"),
+    accepted_status_case("SignedUpdateFirmwareResponse.json"),
   ]
 }
 
@@ -83,6 +86,30 @@ fn v1_6_dynamic_inbound_response_cases(
   let unlock_status = simulator
     .unlock_connector_v1_6(&json!({ "connectorId": 1 }))
     .expect("unlock response");
+  let get_log_response = simulator
+    .get_log_v1_6(&json!({
+      "requestId": 1,
+      "logType": "SecurityLog",
+      "log": {
+        "remoteLocation": "https://csms.example/logs"
+      }
+    }))
+    .expect("get log response");
+  simulator.queue.clear();
+  assert_eq!(
+    simulator
+      .install_certificate_from_payload(&json!({
+        "certificateType": "CentralSystemRootCertificate",
+        "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+      }))
+      .expect("install certificate"),
+    ResponseStatus::Accepted
+  );
+  let certificate_ids_response = simulator
+    .get_installed_certificate_ids_v1_6(&json!({
+      "certificateType": "CentralSystemRootCertificate"
+    }))
+    .expect("certificate ids response");
 
   vec![
     (
@@ -103,6 +130,11 @@ fn v1_6_dynamic_inbound_response_cases(
     ),
     ("GetConfigurationResponse.json", configuration_response),
     ("GetDiagnosticsResponse.json", diagnostics_response),
+    (
+      "GetInstalledCertificateIdsResponse.json",
+      certificate_ids_response,
+    ),
+    ("GetLogResponse.json", get_log_response),
     (
       "GetLocalListVersionResponse.json",
       json!({
@@ -127,6 +159,9 @@ fn v2_x_static_inbound_response_cases() -> Vec<SchemaCase> {
     accepted_status_case("SetChargingProfileResponse.json"),
     accepted_status_case("TriggerMessageResponse.json"),
     accepted_status_case("UpdateFirmwareResponse.json"),
+    accepted_status_case("CertificateSignedResponse.json"),
+    accepted_status_case("DeleteCertificateResponse.json"),
+    accepted_status_case("InstallCertificateResponse.json"),
   ]
 }
 
@@ -161,6 +196,20 @@ fn v2_x_dynamic_inbound_response_cases(
       "connectorId": 1
     }))
     .expect("unlock response");
+  assert_eq!(
+    simulator
+      .install_certificate_from_payload(&json!({
+        "certificateType": "CSMSRootCertificate",
+        "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+      }))
+      .expect("install certificate"),
+    ResponseStatus::Accepted
+  );
+  let certificate_ids_response = simulator
+    .get_installed_certificate_ids_v2_x(&json!({
+      "certificateType": "CSMSRootCertificate"
+    }))
+    .expect("certificate ids response");
 
   vec![
     (
@@ -186,6 +235,10 @@ fn v2_x_dynamic_inbound_response_cases(
       }),
     ),
     ("GetLogResponse.json", get_log_response),
+    (
+      "GetInstalledCertificateIdsResponse.json",
+      certificate_ids_response,
+    ),
     ("GetVariablesResponse.json", get_variables_response),
     ("SetVariablesResponse.json", set_variables_response),
     status_case("UnlockConnectorResponse.json", unlock_status),
@@ -271,17 +324,42 @@ fn representative_v1_6_payloads_validate_against_schemas() {
     &queued_payload(&simulator, "DiagnosticsStatusNotification"),
   );
 
+  assert_representative_v1_6_security_payloads_validate(&mut simulator);
+}
+
+fn assert_representative_v1_6_security_payloads_validate(
+  simulator: &mut Simulator,
+) {
+  simulator.queue.clear();
+  simulator.connected = true;
+  simulator.record_security_event("SettingSystemTime", None);
+  assert_schema_valid(
+    "schemas/1.6/SecurityEventNotification.json",
+    &queued_payload(simulator, "SecurityEventNotification"),
+  );
+
+  simulator.queue.clear();
+  simulator.enqueue_sign_certificate(None);
+  assert_schema_valid(
+    "schemas/1.6/SignCertificate.json",
+    &queued_payload(simulator, "SignCertificate"),
+  );
+
   simulator.queue.clear();
   simulator
-    .update_firmware_v1_6(&json!({
-      "location":
-        "https://csms.example/firmware.bin",
-      "retrieveDate": now_timestamp()
+    .signed_update_firmware_v1_6(&json!({
+      "requestId": 7,
+      "firmware": {
+        "location": "https://csms.example/firmware.bin",
+        "retrieveDateTime": now_timestamp(),
+        "signingCertificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----",
+        "signature": "signature"
+      }
     }))
-    .expect("firmware update");
+    .expect("signed firmware update");
   assert_schema_valid(
-    "schemas/1.6/FirmwareStatusNotification.json",
-    &queued_payload(&simulator, "FirmwareStatusNotification"),
+    "schemas/1.6/SignedFirmwareStatusNotification.json",
+    &queued_payload(simulator, "SignedFirmwareStatusNotification"),
   );
 }
 
@@ -378,6 +456,21 @@ fn assert_representative_v2_x_payloads_validate(
   assert_schema_valid(
     &schema_path(schema_dir, "FirmwareStatusNotificationRequest.json"),
     &queued_payload(&simulator, "FirmwareStatusNotification"),
+  );
+
+  simulator.queue.clear();
+  simulator.connected = true;
+  simulator.record_security_event("SettingSystemTime", None);
+  assert_schema_valid(
+    &schema_path(schema_dir, "SecurityEventNotificationRequest.json"),
+    &queued_payload(&simulator, "SecurityEventNotification"),
+  );
+
+  simulator.queue.clear();
+  simulator.enqueue_sign_certificate(Some("ChargingStationCertificate"));
+  assert_schema_valid(
+    &schema_path(schema_dir, "SignCertificateRequest.json"),
+    &queued_payload(&simulator, "SignCertificate"),
   );
 }
 

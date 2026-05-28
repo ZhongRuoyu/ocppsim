@@ -39,7 +39,7 @@ impl Simulator {
           configuration_key.push(ConfigurationKeyEntry {
             key: config_key.as_str(),
             readonly: entry.read_only,
-            value: &entry.value,
+            value: configuration_value(config_key, &entry.value),
           });
         } else {
           unknown_key.push(key);
@@ -55,7 +55,7 @@ impl Simulator {
       configuration_key.push(ConfigurationKeyEntry {
         key: key.as_str(),
         readonly: entry.read_only,
-        value: &entry.value,
+        value: configuration_value(*key, &entry.value),
       });
     }
     GetConfigurationV1_6Response {
@@ -130,45 +130,6 @@ impl Simulator {
     Ok(to_value(&GetDiagnosticsV1_6Response {
       file_name: &filename,
     }))
-  }
-
-  /// Handles `UpdateFirmware.req` with simulated status notifications.
-  pub(in crate::simulator) fn update_firmware_v1_6(
-    &mut self,
-    payload: &Value,
-  ) -> Result<()> {
-    let location = payload
-      .get("location")
-      .and_then(Value::as_str)
-      .ok_or_else(|| anyhow!("location is required."))?;
-    if payload
-      .get("retrieveDate")
-      .and_then(Value::as_str)
-      .is_none()
-    {
-      return Err(anyhow!("retrieveDate is required."));
-    }
-    self.log(
-      UiLogLevel::Info,
-      format!("Received UpdateFirmware request from {location}"),
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Downloading.as_str(),
-      None,
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Downloaded.as_str(),
-      None,
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Installing.as_str(),
-      None,
-    );
-    self.enqueue_firmware_status_notification(
-      ResponseStatus::Installed.as_str(),
-      None,
-    );
-    Ok(())
   }
 
   /// Handles `ReserveNow.req` and updates local reservation state.
@@ -293,5 +254,16 @@ impl Simulator {
         }],
       }),
     }))
+  }
+}
+
+fn configuration_value(key: ConfigurationKey, value: &str) -> Option<&str> {
+  if matches!(
+    key,
+    ConfigurationKey::AuthorizationKey | ConfigurationKey::BasicAuthPassword
+  ) {
+    None
+  } else {
+    Some(value)
   }
 }

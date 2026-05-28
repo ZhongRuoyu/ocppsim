@@ -95,10 +95,15 @@ impl Simulator {
       | PendingContext::DiagnosticsStatusNotification
       | PendingContext::FirmwareStatusNotification
       | PendingContext::LogStatusNotification
+      | PendingContext::SignCertificate
+      | PendingContext::SignedFirmwareStatusNotification
       | PendingContext::Authorize { .. }
       | PendingContext::RemoteStartAuthorizeV1_6 { .. }
       | PendingContext::StatusNotification { .. }
       | PendingContext::MeterValues { .. } => {}
+      PendingContext::SecurityEventNotification { event_id } => {
+        self.retry_security_event_notification(event_id);
+      }
     }
     Ok(())
   }

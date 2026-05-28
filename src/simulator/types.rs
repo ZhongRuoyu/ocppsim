@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -25,6 +26,11 @@ pub struct SimulatorConfig {
   pub strict: bool,
   pub request_timeout: Duration,
   pub heartbeat_seconds: Option<u64>,
+  pub security_profile: Option<u8>,
+  pub basic_auth_password: Option<String>,
+  pub ca_cert_path: Option<PathBuf>,
+  pub client_cert_path: Option<PathBuf>,
+  pub client_key_path: Option<PathBuf>,
 }
 
 impl SimulatorConfig {
@@ -43,6 +49,11 @@ impl SimulatorConfig {
       strict: args.strict,
       request_timeout: Duration::from_secs(args.request_timeout_seconds.max(5)),
       heartbeat_seconds: args.heartbeat_seconds,
+      security_profile: args.security_profile,
+      basic_auth_password: args.basic_auth_password.clone(),
+      ca_cert_path: args.ca_cert_path.clone(),
+      client_cert_path: args.client_cert_path.clone(),
+      client_key_path: args.client_key_path.clone(),
     }
   }
 }
@@ -272,6 +283,11 @@ pub(in crate::simulator) enum PendingContext {
   DiagnosticsStatusNotification,
   FirmwareStatusNotification,
   LogStatusNotification,
+  SecurityEventNotification {
+    event_id: u64,
+  },
+  SignCertificate,
+  SignedFirmwareStatusNotification,
   Authorize {
     id_token: String,
   },
@@ -298,6 +314,87 @@ pub(in crate::simulator) enum PendingContext {
     local_tx_id: u64,
     event_type: TxEventType,
   },
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct SecurityState {
+  pub(in crate::simulator) security_profile: Option<u8>,
+  pub(in crate::simulator) basic_auth_password: Option<String>,
+  pub(in crate::simulator) additional_root_certificate_check: bool,
+  pub(in crate::simulator) certificate_store_max_length: usize,
+  pub(in crate::simulator) certificate_signed_max_chain_size: usize,
+  pub(in crate::simulator) cpo_name: String,
+  pub(in crate::simulator) supported_file_transfer_protocols: Vec<String>,
+  pub(in crate::simulator) certificates: Vec<InstalledCertificate>,
+  pub(in crate::simulator) events: Vec<SecurityEvent>,
+  pub(in crate::simulator) next_event_id: u64,
+  pub(in crate::simulator) next_signing_request_id: i64,
+  pub(in crate::simulator) pending_signing_request_ids: Vec<i64>,
+  pub(in crate::simulator) pending_reconnect: Option<SecurityReconnectPlan>,
+}
+
+impl SecurityState {
+  pub(in crate::simulator) fn new(config: &SimulatorConfig) -> Self {
+    Self {
+      security_profile: config.security_profile,
+      basic_auth_password: config.basic_auth_password.clone(),
+      additional_root_certificate_check: false,
+      certificate_store_max_length: 10,
+      certificate_signed_max_chain_size: 10_000,
+      cpo_name: config.vendor.clone(),
+      supported_file_transfer_protocols: vec![
+        "HTTP".to_string(),
+        "HTTPS".to_string(),
+      ],
+      certificates: Vec::new(),
+      events: Vec::new(),
+      next_event_id: 1,
+      next_signing_request_id: 1,
+      pending_signing_request_ids: Vec::new(),
+      pending_reconnect: None,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::simulator) struct SecurityReconnectPlan {
+  pub(in crate::simulator) fallback_security_profile: SecurityProfileFallback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum SecurityProfileFallback {
+  None,
+  Restore(Option<u8>),
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct InstalledCertificate {
+  pub(in crate::simulator) certificate_type: String,
+  pub(in crate::simulator) hash: CertificateHashData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::simulator) struct CertificateHashData {
+  pub(in crate::simulator) hash_algorithm: String,
+  pub(in crate::simulator) issuer_name_hash: String,
+  pub(in crate::simulator) issuer_key_hash: String,
+  pub(in crate::simulator) serial_number: String,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct SecurityEvent {
+  pub(in crate::simulator) id: u64,
+  pub(in crate::simulator) event_type: String,
+  pub(in crate::simulator) timestamp: String,
+  pub(in crate::simulator) tech_info: Option<String>,
+  pub(in crate::simulator) notification_state: SecurityEventNotificationState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum SecurityEventNotificationState {
+  Pending,
+  Queued,
+  Sent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,6 +457,7 @@ pub(in crate::simulator) struct Simulator {
     BTreeMap<ConfigurationKey, ConfigurationEntry>,
   pub(in crate::simulator) reservations: BTreeMap<i64, u16>,
   pub(in crate::simulator) charging_profiles: BTreeMap<u16, Value>,
+  pub(in crate::simulator) security: SecurityState,
   pub(in crate::simulator) local_auth_list_version: i64,
   pub(in crate::simulator) queue: VecDeque<QueuedCall>,
   pub(in crate::simulator) pending: Option<PendingCall>,

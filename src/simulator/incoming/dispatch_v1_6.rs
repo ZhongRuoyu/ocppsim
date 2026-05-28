@@ -1,7 +1,8 @@
 use super::super::payloads::{ListVersionV1_6Response, to_value};
 use super::super::{
-  IncomingAction_V1_6, OcppErrorCode, ResponseStatus, Result, Simulator,
-  TriggerMessage_V1_6, UiLogLevel, Value, WsWrite, json,
+  ExtendedTriggerMessage_V1_6, IncomingAction_V1_6, OcppErrorCode,
+  ResponseStatus, Result, Simulator, TriggerMessage_V1_6, UiLogLevel, Value,
+  WsWrite, json,
 };
 use super::request::{
   RemoteStartTransactionRequestV1_6, RemoteStopTransactionRequestV1_6,
@@ -77,9 +78,42 @@ impl Simulator {
         message_id,
         self.get_diagnostics_v1_6(payload)
       ),
+      IncomingAction_V1_6::GetLog => {
+        dispatch_response!(self, write, message_id, self.get_log_v1_6(payload));
+      }
+      IncomingAction_V1_6::CertificateSigned => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.certificate_signed_v1_6(payload)
+      ),
+      IncomingAction_V1_6::DeleteCertificate => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.delete_certificate_from_payload(payload)
+      ),
+      IncomingAction_V1_6::GetInstalledCertificateIds => dispatch_response!(
+        self,
+        write,
+        message_id,
+        self.get_installed_certificate_ids_v1_6(payload)
+      ),
+      IncomingAction_V1_6::InstallCertificate => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.install_certificate_from_payload(payload)
+      ),
       IncomingAction_V1_6::UpdateFirmware => {
         self
-          .handle_update_firmware_call_v1_6(write, message_id, payload)
+          .send_call_error(
+            write,
+            message_id,
+            OcppErrorCode::NotSupported.as_str(),
+            "Use SignedUpdateFirmware for OCPP 1.6 security whitepaper firmware updates.",
+            json!({}),
+          )
           .await?;
       }
       IncomingAction_V1_6::RemoteStartTransaction => {
@@ -167,6 +201,28 @@ impl Simulator {
           .handle_trigger_message_call_v1_6(write, message_id, payload)
           .await?;
       }
+      IncomingAction_V1_6::ExtendedTriggerMessage => {
+        self
+          .handle_extended_trigger_message_call_v1_6(write, message_id, payload)
+          .await?;
+      }
+      IncomingAction_V1_6::SignedUpdateFirmware => {
+        let status = match self.signed_update_firmware_v1_6(payload) {
+          Ok(status) => status,
+          Err(error) => {
+            return self
+              .send_formation_violation(write, message_id, &error.to_string())
+              .await;
+          }
+        };
+        self
+          .send_call_result(
+            write,
+            message_id,
+            Self::signed_update_firmware_response(status),
+          )
+          .await?;
+      }
       IncomingAction_V1_6::Reset => {
         self.handle_reset_only_call(write, message_id).await?;
       }
@@ -176,27 +232,16 @@ impl Simulator {
       | IncomingAction_V1_6::ChangeAvailability
       | IncomingAction_V1_6::DataTransfer
       | IncomingAction_V1_6::GetDiagnostics
+      | IncomingAction_V1_6::GetLog
+      | IncomingAction_V1_6::CertificateSigned
+      | IncomingAction_V1_6::DeleteCertificate
+      | IncomingAction_V1_6::GetInstalledCertificateIds
+      | IncomingAction_V1_6::InstallCertificate
       | IncomingAction_V1_6::UpdateFirmware
       | IncomingAction_V1_6::RemoteStartTransaction
       | IncomingAction_V1_6::RemoteStopTransaction => unreachable!(),
     }
     Ok(())
-  }
-
-  async fn handle_update_firmware_call_v1_6(
-    &mut self,
-    write: &mut WsWrite,
-    message_id: &str,
-    payload: &Value,
-  ) -> Result<()> {
-    match self.update_firmware_v1_6(payload) {
-      Ok(()) => self.send_call_result(write, message_id, json!({})).await,
-      Err(error) => {
-        self
-          .send_formation_violation(write, message_id, &error.to_string())
-          .await
-      }
-    }
   }
 
   async fn handle_remote_start_transaction_call_v1_6(
@@ -278,12 +323,39 @@ impl Simulator {
         .send_status_response(write, message_id, ResponseStatus::NotImplemented)
         .await;
     };
-    match self.trigger_message_v1_6(message, request.connector) {
-      Ok(()) => {
+    match self.trigger_message_v1_6_standard(message, request.connector) {
+      Ok(status) => self.send_status_response(write, message_id, status).await,
+      Err(error) => {
         self
-          .send_status_response(write, message_id, ResponseStatus::Accepted)
+          .send_formation_violation(write, message_id, &error.to_string())
           .await
       }
+    }
+  }
+
+  async fn handle_extended_trigger_message_call_v1_6(
+    &mut self,
+    write: &mut WsWrite,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    let request = match TriggerMessageRequestV1_6::parse(payload) {
+      Ok(value) => value,
+      Err(error) => {
+        return self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await;
+      }
+    };
+    let Some(message) =
+      ExtendedTriggerMessage_V1_6::parse(&request.requested_message)
+    else {
+      return self
+        .send_status_response(write, message_id, ResponseStatus::NotImplemented)
+        .await;
+    };
+    match self.extended_trigger_message_v1_6(message, request.connector) {
+      Ok(status) => self.send_status_response(write, message_id, status).await,
       Err(error) => {
         self
           .send_formation_violation(write, message_id, &error.to_string())

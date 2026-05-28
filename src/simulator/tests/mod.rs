@@ -5,13 +5,15 @@ use tokio::sync::mpsc;
 
 use super::{
   ConfigurationKey, ConnectorStatus, OcppVersion, PendingCall, PendingContext,
-  ResponseStatus, Simulator, SimulatorConfig, TxEventType, UiEvent, UiLogLevel,
-  now_timestamp, validate_negotiated_subprotocol,
+  ResponseStatus, SecurityProfileFallback, Simulator, SimulatorConfig,
+  TxEventType, UiEvent, UiLogLevel, now_timestamp,
+  validate_negotiated_subprotocol,
 };
 
 mod charging_profiles;
 mod configuration;
 mod schema_validation;
+mod security;
 mod state;
 mod transactions;
 mod ws_lifecycle;
@@ -28,6 +30,11 @@ fn simulator_test_config(protocol: OcppVersion) -> SimulatorConfig {
     append_cp_id: false,
     trace_frames: false,
     strict: false,
+    security_profile: None,
+    basic_auth_password: None,
+    ca_cert_path: None,
+    client_cert_path: None,
+    client_key_path: None,
     request_timeout: Duration::from_secs(30),
     heartbeat_seconds: Some(10),
   }
