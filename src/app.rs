@@ -453,7 +453,7 @@ impl TerminalApp {
     }
   }
 
-  /// Handles Alt-modified shortcuts for log navigation.
+  /// Handles Alt-modified shortcuts for log navigation and word movement.
   fn handle_alt_key(&mut self, key: KeyEvent) -> InputAction {
     self.clear_completion();
     match key.code {
@@ -462,6 +462,12 @@ impl TerminalApp {
       }
       KeyCode::Down => {
         self.scroll_logs_half_page_down();
+      }
+      KeyCode::Left | KeyCode::Char('b') => {
+        self.move_cursor_word_left();
+      }
+      KeyCode::Right | KeyCode::Char('f') => {
+        self.move_cursor_word_right();
       }
       _ => {}
     }
@@ -559,6 +565,63 @@ impl TerminalApp {
 
     self.input.drain(start..self.cursor);
     self.cursor = start;
+  }
+
+  /// Moves the cursor one word to the left.
+  fn move_cursor_word_left(&mut self) {
+    let mut pos = self.cursor;
+    while pos > 0 {
+      let previous = previous_char_boundary(&self.input, pos);
+      let ch = self.input[previous..pos]
+        .chars()
+        .next()
+        .expect("char boundary should contain one character");
+      if !ch.is_whitespace() {
+        break;
+      }
+      pos = previous;
+    }
+    while pos > 0 {
+      let previous = previous_char_boundary(&self.input, pos);
+      let ch = self.input[previous..pos]
+        .chars()
+        .next()
+        .expect("char boundary should contain one character");
+      if ch.is_whitespace() {
+        break;
+      }
+      pos = previous;
+    }
+    self.cursor = pos;
+  }
+
+  /// Moves the cursor one word to the right.
+  fn move_cursor_word_right(&mut self) {
+    let len = self.input.len();
+    let mut pos = self.cursor;
+    while pos < len {
+      let next = next_char_boundary(&self.input, pos);
+      let ch = self.input[pos..next]
+        .chars()
+        .next()
+        .expect("char boundary should contain one character");
+      if !ch.is_whitespace() {
+        break;
+      }
+      pos = next;
+    }
+    while pos < len {
+      let next = next_char_boundary(&self.input, pos);
+      let ch = self.input[pos..next]
+        .chars()
+        .next()
+        .expect("char boundary should contain one character");
+      if ch.is_whitespace() {
+        break;
+      }
+      pos = next;
+    }
+    self.cursor = pos;
   }
 
   /// Returns the displayed width before the byte-index cursor.
@@ -866,6 +929,68 @@ mod tests {
     press_with_modifiers(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
     assert_eq!(app.input, "");
     assert_eq!(app.cursor, 0);
+  }
+
+  #[test]
+  /// Verifies Alt+Left navigates one word to the left.
+  fn alt_left_moves_cursor_one_word_left() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    for ch in "start 1 local".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+    assert_eq!(app.cursor, app.input.len());
+
+    press_with_modifiers(&mut app, KeyCode::Left, KeyModifiers::ALT);
+    assert_eq!(app.cursor, "start 1 ".len());
+
+    press_with_modifiers(&mut app, KeyCode::Left, KeyModifiers::ALT);
+    assert_eq!(app.cursor, "start ".len());
+
+    press_with_modifiers(&mut app, KeyCode::Left, KeyModifiers::ALT);
+    assert_eq!(app.cursor, 0);
+
+    // Should not go below zero.
+    press_with_modifiers(&mut app, KeyCode::Left, KeyModifiers::ALT);
+    assert_eq!(app.cursor, 0);
+  }
+
+  #[test]
+  /// Verifies Alt+Right navigates one word to the right.
+  fn alt_right_moves_cursor_one_word_right() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    for ch in "start 1 local".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+    press(&mut app, KeyCode::Home);
+    assert_eq!(app.cursor, 0);
+
+    press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
+    assert_eq!(app.cursor, "start".len());
+
+    press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
+    assert_eq!(app.cursor, "start 1".len());
+
+    press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
+    assert_eq!(app.cursor, app.input.len());
+
+    // Should not go beyond the end.
+    press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
+    assert_eq!(app.cursor, app.input.len());
+  }
+
+  #[test]
+  /// Verifies Alt+Left/Right handles non-ASCII words correctly.
+  fn alt_arrow_word_navigation_handles_non_ascii() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    for ch in "café résumé".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+
+    press_with_modifiers(&mut app, KeyCode::Left, KeyModifiers::ALT);
+    assert_eq!(app.cursor, "café ".len());
+
+    press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
+    assert_eq!(app.cursor, app.input.len());
   }
 
   /// Returns a unique temp path for file-logging tests.
