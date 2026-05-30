@@ -266,7 +266,8 @@ pub(super) struct ListVersion_V2_X_Response {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct GetDiagnosticsV1_6Response<'a> {
-  pub file_name: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub file_name: Option<&'a str>,
 }
 
 #[derive(Serialize)]

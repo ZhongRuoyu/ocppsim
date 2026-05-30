@@ -120,6 +120,9 @@ impl Simulator {
       UiLogLevel::Info,
       format!("Received GetDiagnostics request for {location}"),
     );
+    if !self.supports_file_transfer_location(location) {
+      return Ok(to_value(&GetDiagnosticsV1_6Response { file_name: None }));
+    }
     self.enqueue_diagnostics_status_notification(
       ResponseStatus::Uploading.as_str(),
     );
@@ -128,7 +131,7 @@ impl Simulator {
     );
     let filename = format!("diagnostics-{}.log", self.config.cp_id);
     Ok(to_value(&GetDiagnosticsV1_6Response {
-      file_name: &filename,
+      file_name: Some(&filename),
     }))
   }
 

@@ -21,7 +21,7 @@ Supported behavior includes:
 - simplified smart-charging profile set, filtered clear, and composite
   schedule,
 - trigger message for implemented message types,
-- simulated diagnostics success flows,
+- simulated diagnostics success flows for configured URI schemes,
 - OCPP 1.6 Security Whitepaper certificate installation, deletion, listing,
   certificate signing, signed firmware status, log status, security event, and
   extended trigger-message flows.
@@ -284,8 +284,14 @@ Read-only variables reject writes.
 | `OrganizationName`               | Yes      | Alias for stored security organization name.         |
 | `SecurityProfile`                | Yes      | Controls transport profile validation and reconnect. |
 | `SupportedFeatureProfiles`       | No       | Advertises implemented feature families.             |
-| `SupportedFileTransferProtocols` | Yes      | Controls accepted firmware/log URI schemes.          |
+| `SupportedFileTransferProtocols` | Yes      | Controls file-transfer URI schemes.                  |
 | `WebSocketPingInterval`          | Yes      | Stored as configuration only.                        |
+
+`SupportedFileTransferProtocols` is enforced for OCPP 1.6 diagnostics,
+OCPP 1.6 `GetLog`, OCPP 1.6 `SignedUpdateFirmware`, OCPP 2.x `GetLog`, and
+OCPP 2.x `UpdateFirmware`.
+The original OCPP 1.6 `UpdateFirmware` request is rejected for whitepaper
+conformance before any URI scheme is considered.
 
 ## Behavioral Semantics
 

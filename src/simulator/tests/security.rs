@@ -582,6 +582,19 @@ fn get_log_rejects_unsupported_file_transfer_schemes() {
 }
 
 #[test]
+fn get_diagnostics_rejects_unsupported_file_transfer_schemes() {
+  let mut simulator = simulator_for_tests();
+  let response = simulator
+    .get_diagnostics_v1_6(&json!({
+      "location": "ftp://csms.example/diagnostics.log"
+    }))
+    .expect("get diagnostics");
+
+  assert!(response.get("fileName").is_none());
+  assert!(simulator.queue.is_empty());
+}
+
+#[test]
 fn signed_firmware_rejects_unsupported_file_transfer_schemes() {
   let mut simulator = simulator_for_tests();
   let status = simulator
