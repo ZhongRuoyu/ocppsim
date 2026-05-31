@@ -216,7 +216,7 @@ jobs:
           name: ${{ steps.package.outputs.artifact }}
           path: ${{ steps.package.outputs.artifact }}
       - name: Prune build artifacts for caching
-        if: inputs.cache && !steps.cache-target.outputs.cache-hit
+        if: inputs.cache && steps.cache-target.outputs.cache-hit != 'true'
         run: |
           ${CARGO:-cargo} clean --locked --workspace \
             --profile "$PROFILE" \
