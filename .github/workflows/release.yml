@@ -15,6 +15,7 @@ defaults:
 
 jobs:
   build:
+    name: Build
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
