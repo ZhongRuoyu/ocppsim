@@ -50,22 +50,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "$STABLE" = "true" ]]; then
-            version="$(
-              cargo metadata --format-version=1 --no-deps |
-                jq --raw-output \
-                  --arg package ocppsim \
-                  '.packages[] | select(.name == $package) | .version'
-            )"
-          else
-            version="$GITHUB_SHA"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-        env:
-          STABLE: ${{ inputs.stable }}
       - name: Set up build environment
         id: setup-build
         run: |
@@ -96,6 +80,12 @@ jobs:
             echo "skip_setup_rust=${skip_setup_rust:-false}"
             echo "rust_ci_image=${rust_ci_image:-false}"
           } >> "$GITHUB_OUTPUT"
+      - name: Determine Rust stable channel metadata
+        id: rust-stable-metadata
+        run: |
+          rust_stable_manifest="$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml)"
+          rust_stable_date="$(sed -En 's/^date = "(.+)"$/\1/p' <<< "$rust_stable_manifest")"
+          echo "rust_stable_date=$rust_stable_date" >> "$GITHUB_OUTPUT"
       - name: Set up Rust
         if: ${{ !fromJson(steps.setup-build.outputs.skip_setup_rust) }}
         run: |
@@ -123,9 +113,25 @@ jobs:
         with:
           path: |
             target
-          key: build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.lock') }}
+          key: build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ steps.rust-stable-metadata.outputs.rust_stable_date }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            build-target-${{ matrix.target }}-${{ env.PROFILE }}-
+            build-target-${{ matrix.target }}-${{ env.PROFILE }}-${{ steps.rust-stable-metadata.outputs.rust_stable_date }}-
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$STABLE" = "true" ]]; then
+            version="$(
+              cargo metadata --format-version=1 --no-deps |
+                jq --raw-output \
+                  --arg package ocppsim \
+                  '.packages[] | select(.name == $package) | .version'
+            )"
+          else
+            version="$GITHUB_SHA"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          STABLE: ${{ inputs.stable }}
       - name: Prepare container
         if: fromJson(steps.setup-build.outputs.container)
         id: container
