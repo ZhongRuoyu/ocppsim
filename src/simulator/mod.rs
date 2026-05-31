@@ -47,7 +47,6 @@ pub use types::{
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
-const QUEUE_DEPTH_WARN_THRESHOLD: usize = 1_000;
 
 /// Runs the simulator event loop and bridges UI commands, WS I/O, and state.
 pub async fn run_simulator(

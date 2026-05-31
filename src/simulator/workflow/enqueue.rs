@@ -10,11 +10,13 @@ use super::super::payloads::{
 };
 use super::super::{
   BootReason, ConnectorState, ConnectorStatus, IdTokenType, Measurand,
-  MeterUnit, OcppVersion, OutgoingAction, PendingContext,
-  QUEUE_DEPTH_WARN_THRESHOLD, QueuedCall, ReadingContext, Result, Simulator,
-  StatusNotificationErrorCode, TransactionEventRequest, TransactionState,
-  TxEventType, UiLogLevel, Value, anyhow, now_timestamp,
+  MeterUnit, OcppVersion, OutgoingAction, PendingContext, QueuedCall,
+  ReadingContext, Result, Simulator, StatusNotificationErrorCode,
+  TransactionEventRequest, TransactionState, TxEventType, UiLogLevel, Value,
+  anyhow, now_timestamp,
 };
+
+const QUEUE_DEPTH_WARN_THRESHOLD: usize = 1_000;
 
 impl Simulator {
   /// Enqueues a CALL with its payload and post-response context.
