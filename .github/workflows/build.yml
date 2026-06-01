@@ -9,6 +9,9 @@ on:
         type: string
       cache:
         type: boolean
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
 
 permissions: {}
 
@@ -42,6 +45,8 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     permissions:
       contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       PROFILE: ${{ inputs.profile }}
       TARGET: ${{ matrix.target }}

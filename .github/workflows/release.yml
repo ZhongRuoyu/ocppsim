@@ -30,29 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: release
-      deployment: false
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.build.outputs.version }}
     permissions:
       artifact-metadata: write # for generating build provenance
       attestations: write # for generating build provenance
       contents: write # for creating tag and release
       id-token: write # for generating build provenance
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Determine version
-        id: version
-        run: |
-          version="$(
-            cargo metadata --format-version=1 --no-deps |
-              jq --raw-output \
-                --arg package ocppsim \
-                '.packages[] | select(.name == $package) | .version'
-          )"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -75,7 +59,7 @@ jobs:
             -f "sha=$GITHUB_SHA"
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
       - name: Create release
         run: |
           gh release create "v$VERSION" \
@@ -85,15 +69,16 @@ jobs:
             artifacts/**/*.tar.gz
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
 
   publish-crate:
     name: Publish crate
-    needs: release
+    needs: [build, release]
     runs-on: ubuntu-latest
     environment:
-      name: release
-      deployment: false
+      name: crates.io
+      url: https://crates.io/crates/ocppsim/${{ needs.build.outputs.version }}
     permissions:
       contents: read
       id-token: write # for authenticating to crates.io
@@ -114,7 +99,7 @@ jobs:
 
   bump-homebrew-formula:
     name: Bump Homebrew formula
-    needs: release
+    needs: [build, release]
     runs-on: macos-latest
     environment:
       name: release
@@ -149,4 +134,4 @@ jobs:
             zhongruoyu/tap/ocppsim
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ steps.token.outputs.token }}
-          VERSION: ${{ needs.release.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
