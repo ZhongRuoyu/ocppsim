@@ -113,6 +113,7 @@ struct LogEntry {
   timestamp: String,
   level: UiLogLevel,
   message: String,
+  formatted: String,
 }
 
 #[derive(Debug)]
@@ -166,6 +167,9 @@ pub struct TerminalApp {
   protocol: OcppVersion,
   ws_url: String,
   logs: VecDeque<LogEntry>,
+  wrapped_log_line_counts: VecDeque<usize>,
+  total_wrapped_log_lines: usize,
+  wrapped_line_count_width: usize,
   input: String,
   cursor: usize,
   log_scroll: usize,
@@ -185,6 +189,9 @@ impl TerminalApp {
       protocol,
       ws_url: String::new(),
       logs: VecDeque::new(),
+      wrapped_log_line_counts: VecDeque::new(),
+      total_wrapped_log_lines: 0,
+      wrapped_line_count_width: 1,
       input: String::new(),
       cursor: 0,
       log_scroll: 0,
@@ -231,6 +238,8 @@ impl TerminalApp {
   /// Clears visible logs and resets scrolling to follow mode.
   pub fn clear_logs(&mut self) {
     self.logs.clear();
+    self.wrapped_log_line_counts.clear();
+    self.total_wrapped_log_lines = 0;
     self.log_scroll = 0;
     self.follow_logs = true;
   }
@@ -686,22 +695,23 @@ impl TerminalApp {
   }
 
   /// Returns the maximum vertical scroll offset for wrapped log content.
-  fn max_log_scroll(&self) -> usize {
-    let width = u16::try_from(self.log_view_width).unwrap_or(u16::MAX);
-    let wrapped_lines = Paragraph::new(self.render_log_lines())
-      .wrap(Wrap { trim: false })
-      .line_count(width);
-    wrapped_lines.saturating_sub(self.log_view_height)
+  fn max_log_scroll(&mut self) -> usize {
+    self.refresh_wrapped_log_line_counts();
+    self
+      .total_wrapped_log_lines
+      .saturating_sub(self.log_view_height)
   }
 
   /// Renders all log entries into styled terminal lines.
-  fn render_log_lines(&self) -> Vec<Line<'static>> {
+  fn render_log_lines(&self) -> Vec<Line<'_>> {
     self
       .logs
       .iter()
       .map(|entry| {
-        let text = Self::format_log_entry(entry);
-        Line::styled(text, Style::default().fg(entry.level.color()))
+        Line::styled(
+          entry.formatted.as_str(),
+          Style::default().fg(entry.level.color()),
+        )
       })
       .collect()
   }
@@ -727,12 +737,12 @@ impl TerminalApp {
 
     for line in message.lines() {
       let timestamp = log_timestamp_now();
-      let entry = LogEntry {
+      self.push_log_entry(LogEntry {
         timestamp: timestamp.clone(),
         level,
         message: line.to_string(),
-      };
-      self.logs.push_back(entry);
+        formatted: String::new(),
+      });
 
       if let Some(sink) = self.log_sink.as_mut()
         && let Err(error) = sink.append_line(&timestamp, level, line)
@@ -751,15 +761,61 @@ impl TerminalApp {
       self.push_log(UiLogLevel::Error, error);
     }
 
-    let mut removed = 0;
+    let mut removed_wrapped_lines: usize = 0;
     while self.logs.len() > MAX_LOG_LINES {
       let _ = self.logs.pop_front();
-      removed += 1;
+      if let Some(wrapped_lines) = self.wrapped_log_line_counts.pop_front() {
+        removed_wrapped_lines =
+          removed_wrapped_lines.saturating_add(wrapped_lines);
+      }
+    }
+    self.total_wrapped_log_lines = self
+      .total_wrapped_log_lines
+      .saturating_sub(removed_wrapped_lines);
+
+    if removed_wrapped_lines > 0 && !self.follow_logs {
+      self.log_scroll = self.log_scroll.saturating_sub(removed_wrapped_lines);
+    }
+  }
+
+  /// Appends one in-memory log entry and updates wrapped-line accounting.
+  fn push_log_entry(&mut self, mut entry: LogEntry) {
+    entry.formatted = Self::format_log_entry(&entry);
+    let width = self.wrapped_line_count_width.max(1);
+    let wrapped_lines = Self::wrapped_log_line_count(&entry, width);
+    self.total_wrapped_log_lines =
+      self.total_wrapped_log_lines.saturating_add(wrapped_lines);
+    self.wrapped_log_line_counts.push_back(wrapped_lines);
+    self.logs.push_back(entry);
+  }
+
+  /// Rebuilds wrapped-line counts when view width or cache shape changes.
+  fn refresh_wrapped_log_line_counts(&mut self) {
+    let width = self.log_view_width.max(1);
+    if width == self.wrapped_line_count_width
+      && self.wrapped_log_line_counts.len() == self.logs.len()
+    {
+      return;
     }
 
-    if removed > 0 && !self.follow_logs {
-      self.log_scroll = self.log_scroll.saturating_sub(removed);
+    self.wrapped_line_count_width = width;
+    self.wrapped_log_line_counts.clear();
+    self.total_wrapped_log_lines = 0;
+    for entry in &self.logs {
+      let wrapped_lines = Self::wrapped_log_line_count(entry, width);
+      self.total_wrapped_log_lines =
+        self.total_wrapped_log_lines.saturating_add(wrapped_lines);
+      self.wrapped_log_line_counts.push_back(wrapped_lines);
     }
+  }
+
+  /// Returns wrapped terminal rows occupied by one entry at `width`.
+  fn wrapped_log_line_count(entry: &LogEntry, width: usize) -> usize {
+    let width = u16::try_from(width.max(1)).unwrap_or(u16::MAX);
+    Paragraph::new(Line::raw(entry.formatted.as_str()))
+      .wrap(Wrap { trim: false })
+      .line_count(width)
+      .max(1)
   }
 
   /// Applies a simulator snapshot by logging summary and connector details.
@@ -867,12 +923,32 @@ mod tests {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
     app.log_view_height = 1;
     app.log_view_width = 10;
-    app.logs.push_back(LogEntry {
+    app.push_log_entry(LogEntry {
       timestamp: "t".to_string(),
       level: UiLogLevel::Tx,
       message: "123456789012".to_string(),
+      formatted: String::new(),
     });
     assert_eq!(app.max_log_scroll(), 2);
+  }
+
+  #[test]
+  /// Verifies wrapped-line cache refreshes when the view width changes.
+  fn max_log_scroll_recomputes_after_width_change() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.log_view_height = 1;
+    app.log_view_width = 30;
+    app.push_log_entry(LogEntry {
+      timestamp: "t".to_string(),
+      level: UiLogLevel::Tx,
+      message: "word word word word word word".to_string(),
+      formatted: String::new(),
+    });
+
+    let wide_scroll = app.max_log_scroll();
+    app.log_view_width = 10;
+    let narrow_scroll = app.max_log_scroll();
+    assert!(narrow_scroll > wide_scroll);
   }
 
   #[test]
