@@ -687,11 +687,10 @@ impl TerminalApp {
 
   /// Returns the maximum vertical scroll offset for wrapped log content.
   fn max_log_scroll(&self) -> usize {
-    let wrapped_lines: usize = self
-      .logs
-      .iter()
-      .map(|entry| self.wrapped_log_line_count(entry))
-      .sum();
+    let width = u16::try_from(self.log_view_width).unwrap_or(u16::MAX);
+    let wrapped_lines = Paragraph::new(self.render_log_lines())
+      .wrap(Wrap { trim: false })
+      .line_count(width);
     wrapped_lines.saturating_sub(self.log_view_height)
   }
 
@@ -705,14 +704,6 @@ impl TerminalApp {
         Line::styled(text, Style::default().fg(entry.level.color()))
       })
       .collect()
-  }
-
-  /// Returns how many wrapped terminal rows one log entry occupies.
-  fn wrapped_log_line_count(&self, entry: &LogEntry) -> usize {
-    let width = self.log_view_width.max(1);
-    let line_width = Line::raw(Self::format_log_entry(entry)).width();
-    let wraps = (line_width + width.saturating_sub(1)) / width;
-    wraps.max(1)
   }
 
   /// Formats one log entry using the configured timestamp and level pattern.
@@ -841,7 +832,8 @@ mod tests {
 
   use crate::ocpp::OcppVersion;
 
-  use super::{InputAction, TerminalApp};
+  use super::{InputAction, LogEntry, TerminalApp};
+  use crate::simulator::UiLogLevel;
 
   static TEMP_LOG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -870,17 +862,17 @@ mod tests {
   }
 
   #[test]
-  /// Verifies log scroll bounds account for wrapped line height.
-  fn max_log_scroll_accounts_for_wrapping() {
+  /// Verifies log scroll bounds follow paragraph word-wrapping behavior.
+  fn max_log_scroll_accounts_for_word_wrapping() {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
-    app.log_view_height = 3;
-    app.log_view_width = 20;
-    app.push_info("X".repeat(80));
-
-    let entry = app.logs.front().expect("log entry");
-    let wrapped = app.wrapped_log_line_count(entry);
-    assert!(wrapped > 1);
-    assert_eq!(app.max_log_scroll(), wrapped - app.log_view_height);
+    app.log_view_height = 1;
+    app.log_view_width = 10;
+    app.logs.push_back(LogEntry {
+      timestamp: "t".to_string(),
+      level: UiLogLevel::Tx,
+      message: "123456789012".to_string(),
+    });
+    assert_eq!(app.max_log_scroll(), 2);
   }
 
   #[test]
