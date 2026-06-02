@@ -117,7 +117,7 @@ jobs:
           permission-pull-requests: write
       - name: Configure Git user
         run: |
-          BOT_LOGIN="$APP_SLUG[bot]"
+          BOT_LOGIN="${APP_SLUG}[bot]"
           BOT_ID="$(gh api "/users/$BOT_LOGIN" --jq '.id')"
           {
             echo "HOMEBREW_GIT_NAME=$BOT_LOGIN"
