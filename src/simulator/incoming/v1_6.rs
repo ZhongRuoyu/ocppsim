@@ -129,7 +129,8 @@ impl Simulator {
     self.enqueue_diagnostics_status_notification(
       ResponseStatus::Uploaded.as_str(),
     );
-    let filename = format!("diagnostics-{}.log", self.config.cp_id);
+    let cp_id = self.config.cp_id.as_deref().unwrap_or("unknown");
+    let filename = format!("diagnostics-{cp_id}.log");
     Ok(to_value(&GetDiagnosticsV1_6Response {
       file_name: Some(&filename),
     }))

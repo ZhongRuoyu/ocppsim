@@ -72,7 +72,8 @@ impl Simulator {
       ResponseStatus::Uploaded.as_str(),
       Some(request_id),
     );
-    let filename = format!("log-{}.txt", self.config.cp_id);
+    let cp_id = self.config.cp_id.as_deref().unwrap_or("unknown");
+    let filename = format!("log-{cp_id}.txt");
     Ok(to_value(&GetLog_V2_X_Response {
       status: ResponseStatus::Accepted.as_str(),
       filename: Some(&filename),

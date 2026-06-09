@@ -283,7 +283,7 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
   });
 
   let mut simulator = simulator_for_tests();
-  simulator.config.ws_url = format!("ws://{address}");
+  simulator.config.ws_url = Some(format!("ws://{address}"));
   let mut connection = simulator.connect().await.expect("connect");
   simulator
     .try_send_next(&mut connection.write)

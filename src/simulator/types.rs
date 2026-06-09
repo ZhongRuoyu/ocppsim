@@ -14,8 +14,9 @@ use crate::ocpp::{
 
 #[derive(Debug, Clone)]
 pub struct SimulatorConfig {
-  pub ws_url: String,
-  pub cp_id: String,
+  pub profile: Option<String>,
+  pub ws_url: Option<String>,
+  pub cp_id: Option<String>,
   pub protocol: OcppVersion,
   pub connectors: u16,
   pub vendor: String,
@@ -37,6 +38,7 @@ impl SimulatorConfig {
   /// Converts resolved CLI arguments into simulator runtime configuration.
   pub fn from_resolved(args: &ResolvedCliArgs) -> Self {
     Self {
+      profile: args.profile.clone(),
       ws_url: args.ws_url.clone(),
       cp_id: args.cp_id.clone(),
       protocol: args.protocol,
@@ -55,6 +57,59 @@ impl SimulatorConfig {
       client_cert_path: args.client_cert_path.clone(),
       client_key_path: args.client_key_path.clone(),
     }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulatorConnectionConfig {
+  pub profile: Option<String>,
+  pub ws_url: String,
+  pub cp_id: String,
+  pub append_cp_id: bool,
+  pub connectors: u16,
+  pub protocol: OcppVersion,
+  pub vendor: String,
+  pub model: String,
+  pub firmware: String,
+  pub trace_frames: bool,
+  pub strict: bool,
+  pub request_timeout: Duration,
+  pub heartbeat_seconds: Option<u64>,
+  pub security_profile: Option<u8>,
+  pub basic_auth_password: Option<String>,
+  pub ca_cert_path: Option<PathBuf>,
+  pub client_cert_path: Option<PathBuf>,
+  pub client_key_path: Option<PathBuf>,
+}
+
+impl SimulatorConnectionConfig {
+  /// Converts resolved arguments into a connection target.
+  ///
+  /// Returns `None` for offline-only arguments without a WebSocket URL or
+  /// charge point id.
+  pub fn from_resolved(args: &ResolvedCliArgs) -> Option<Self> {
+    let ws_url = args.ws_url.clone()?;
+    let cp_id = args.cp_id.clone()?;
+    Some(Self {
+      profile: args.profile.clone(),
+      ws_url,
+      cp_id,
+      append_cp_id: args.append_cp_id,
+      connectors: args.connectors,
+      protocol: args.protocol,
+      vendor: args.vendor.clone(),
+      model: args.model.clone(),
+      firmware: args.firmware.clone(),
+      trace_frames: args.trace_frames,
+      strict: args.strict,
+      request_timeout: Duration::from_secs(args.request_timeout_seconds.max(5)),
+      heartbeat_seconds: args.heartbeat_seconds,
+      security_profile: args.security_profile,
+      basic_auth_password: args.basic_auth_password.clone(),
+      ca_cert_path: args.ca_cert_path.clone(),
+      client_cert_path: args.client_cert_path.clone(),
+      client_key_path: args.client_key_path.clone(),
+    })
   }
 }
 
@@ -88,8 +143,9 @@ pub enum UiEvent {
 
 #[derive(Debug, Clone)]
 pub struct SimulatorSnapshot {
-  pub cp_id: String,
-  pub protocol: String,
+  pub profile: Option<String>,
+  pub cp_id: Option<String>,
+  pub protocol: OcppVersion,
   pub connection_url: String,
   pub connected: bool,
   pub heartbeat_seconds: Option<u64>,
@@ -108,7 +164,9 @@ pub struct ConnectorSnapshot {
 
 #[derive(Debug, Clone)]
 pub enum SimulatorCommand {
-  Connect,
+  Connect {
+    config: Option<Box<SimulatorConnectionConfig>>,
+  },
   Disconnect,
   Status,
   Boot,

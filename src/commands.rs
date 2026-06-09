@@ -5,7 +5,7 @@ use crate::ocpp::{
 };
 
 const USAGE_STATUS: &str = "Usage: status";
-const USAGE_CONNECT: &str = "Usage: connect";
+const USAGE_CONNECT: &str = "Usage: connect [<profile> | <ws-url> <cp-id>]";
 const USAGE_DISCONNECT: &str = "Usage: disconnect";
 const USAGE_BOOT: &str = "Usage: boot";
 const USAGE_AUTHORIZE: &str = "Usage: authorize <idToken>";
@@ -28,7 +28,9 @@ const USAGE_EXIT: &str = "Usage: exit";
 #[derive(Debug, Clone)]
 pub enum UserCommand {
   Status,
-  Connect,
+  Connect {
+    target: ConnectTarget,
+  },
   Disconnect,
   Boot,
   Authorize {
@@ -69,6 +71,13 @@ pub enum UserCommand {
   Exit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectTarget {
+  Current,
+  Profile { name: String },
+  Direct { ws_url: String, cp_id: String },
+}
+
 /// Parses one user-entered command line into a typed command variant.
 ///
 /// Returns a descriptive usage error when argument counts or types do not
@@ -85,6 +94,7 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
   }
 
   match command.as_str() {
+    "connect" => parse_connect_command(&parts),
     "authorize" => parse_authorize_command(&parts),
     "data-transfer" => parse_data_transfer_command(&parts),
     "start" => parse_start_command(&parts),
@@ -108,9 +118,6 @@ fn parse_simple_command(
     "status" => {
       parse_zero_arg_command(parts, USAGE_STATUS, UserCommand::Status)
     }
-    "connect" => {
-      parse_zero_arg_command(parts, USAGE_CONNECT, UserCommand::Connect)
-    }
     "disconnect" => {
       parse_zero_arg_command(parts, USAGE_DISCONNECT, UserCommand::Disconnect)
     }
@@ -128,6 +135,26 @@ fn parse_simple_command(
     _ => return None,
   };
   Some(result)
+}
+
+fn parse_connect_command(parts: &[&str]) -> Result<UserCommand, String> {
+  match parts.len() {
+    1 => Ok(UserCommand::Connect {
+      target: ConnectTarget::Current,
+    }),
+    2 => Ok(UserCommand::Connect {
+      target: ConnectTarget::Profile {
+        name: parts[1].to_string(),
+      },
+    }),
+    3 => Ok(UserCommand::Connect {
+      target: ConnectTarget::Direct {
+        ws_url: parts[1].to_string(),
+        cp_id: parts[2].to_string(),
+      },
+    }),
+    _ => Err(USAGE_CONNECT.to_string()),
+  }
 }
 
 fn parse_zero_arg_command(
@@ -230,7 +257,7 @@ pub fn help_text() -> &'static str {
   "Interactive commands:
   status
     Show current simulator snapshot (connection, queue, connectors).
-  connect
+  connect [<profile> | <ws-url> <cp-id>]
     Open WebSocket to CSMS and send boot/status notifications.
   disconnect
     Close the active WebSocket connection.
@@ -356,7 +383,7 @@ fn ensure_range(
 
 #[cfg(test)]
 mod tests {
-  use super::{UserCommand, help_text, parse_command};
+  use super::{ConnectTarget, UserCommand, help_text, parse_command};
 
   #[test]
   /// Verifies fixed-arity commands reject surplus tokens.
@@ -366,9 +393,34 @@ mod tests {
   }
 
   #[test]
-  /// Verifies fixed-arity commands reject surplus tokens.
-  fn rejects_excessive_connect_arguments() {
-    let result = parse_command("connect now");
+  /// Verifies `connect` accepts current, profile, and direct target forms.
+  fn accepts_connect_target_forms() {
+    let command = parse_command("connect").expect("valid command");
+    assert!(matches!(
+      command,
+      UserCommand::Connect {
+        target: ConnectTarget::Current,
+      }
+    ));
+
+    let command = parse_command("connect demo").expect("valid command");
+    assert!(matches!(
+      command,
+      UserCommand::Connect {
+        target: ConnectTarget::Profile { name },
+      } if name == "demo"
+    ));
+
+    let command = parse_command("connect ws://localhost:9000/ocpp CP-TEST")
+      .expect("valid command");
+    assert!(matches!(
+      command,
+      UserCommand::Connect {
+        target: ConnectTarget::Direct { ws_url, cp_id },
+      } if ws_url == "ws://localhost:9000/ocpp" && cp_id == "CP-TEST"
+    ));
+
+    let result = parse_command("connect one two three");
     assert!(result.is_err());
   }
 
@@ -402,6 +454,7 @@ mod tests {
   fn help_text_is_descriptive() {
     let help = help_text();
     assert!(help.contains("Show current simulator snapshot"));
+    assert!(help.contains("connect [<profile> | <ws-url> <cp-id>]"));
     assert!(help.contains("connector-status <connector> <status>"));
     assert!(help.contains("Valid statuses:"));
     assert!(help.contains("exit | quit"));

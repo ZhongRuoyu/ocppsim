@@ -153,13 +153,15 @@ impl Simulator {
       format!("{} ({})", pending.call.action, pending.message_id)
     });
 
-    let connection_url = self
-      .connection_url()
-      .map_or_else(|_| self.config.ws_url.clone(), |u| u.to_string());
+    let connection_url = self.connection_url().map_or_else(
+      |_| self.config.ws_url.clone().unwrap_or_default(),
+      |u| u.to_string(),
+    );
 
     let snapshot = SimulatorSnapshot {
+      profile: self.config.profile.clone(),
       cp_id: self.config.cp_id.clone(),
-      protocol: self.config.protocol.label().to_string(),
+      protocol: self.config.protocol,
       connection_url,
       connected: self.connected,
       heartbeat_seconds,

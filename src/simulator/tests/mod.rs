@@ -5,8 +5,8 @@ use tokio::sync::mpsc;
 
 use super::{
   ConfigurationKey, ConnectorStatus, OcppVersion, PendingCall, PendingContext,
-  ResponseStatus, SecurityProfileFallback, Simulator, SimulatorConfig,
-  TxEventType, UiEvent, UiLogLevel, now_timestamp,
+  ResponseStatus, SecurityProfileFallback, Simulator, SimulatorCommand,
+  SimulatorConfig, TxEventType, UiEvent, UiLogLevel, now_timestamp,
   validate_negotiated_subprotocol,
 };
 
@@ -20,8 +20,9 @@ mod ws_lifecycle;
 
 fn simulator_test_config(protocol: OcppVersion) -> SimulatorConfig {
   SimulatorConfig {
-    ws_url: "ws://localhost:9000/ocpp".to_string(),
-    cp_id: "CP-TEST".to_string(),
+    profile: None,
+    ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+    cp_id: Some("CP-TEST".to_string()),
     protocol,
     connectors: 2,
     vendor: "ocppsim".to_string(),

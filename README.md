@@ -40,7 +40,20 @@ configuration state, then emits protocol-shaped OCPP messages from that state.
 
 ## Quick Start
 
-Run `ocppsim` directly against a CSMS endpoint:
+Run `ocppsim` without a CSMS connection target for local simulation:
+
+```sh
+ocppsim
+```
+
+You can connect later from inside the terminal UI:
+
+```text
+connect some-profile
+connect ws://csms.example.com/ocpp CP-001
+```
+
+Or start `ocppsim` directly against a CSMS endpoint:
 
 ```sh
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001

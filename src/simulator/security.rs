@@ -82,7 +82,12 @@ impl Simulator {
     let Some(password) = self.security.basic_auth_password.as_deref() else {
       return Ok(None);
     };
-    let credentials = format!("{}:{password}", self.config.cp_id);
+    let Some(cp_id) = self.config.cp_id.as_deref() else {
+      return Err(anyhow!(
+        "Security profile {profile} requires a charge point id."
+      ));
+    };
+    let credentials = format!("{cp_id}:{password}");
     let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
     HeaderValue::from_str(&format!("Basic {encoded}"))
       .map(Some)
@@ -457,10 +462,11 @@ impl Simulator {
       ResponseStatus::Uploaded.as_str(),
       Some(request_id),
     );
+    let cp_id = self.config.cp_id.as_deref().unwrap_or("unknown");
     let filename = if normalize_identifier(log_type) == "securitylog" {
-      format!("security-{}.log", self.config.cp_id)
+      format!("security-{cp_id}.log")
     } else {
-      format!("log-{}.txt", self.config.cp_id)
+      format!("log-{cp_id}.txt")
     };
     Ok(to_value(&GetLog_V2_X_Response {
       status: ResponseStatus::Accepted.as_str(),

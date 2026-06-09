@@ -674,7 +674,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
 async fn secure_connection_setup_failure_records_local_security_event() {
   let path = write_temp_security_file("not a certificate");
   let mut simulator = simulator_for_tests();
-  simulator.config.ws_url = "wss://127.0.0.1:9/ocpp".to_string();
+  simulator.config.ws_url = Some("wss://127.0.0.1:9/ocpp".to_string());
   simulator.config.ca_cert_path = Some(path.clone());
   simulator.security.security_profile = Some(2);
   simulator.security.basic_auth_password =

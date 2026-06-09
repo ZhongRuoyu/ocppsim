@@ -4,6 +4,36 @@ use serde_json::json;
 
 use super::*;
 
+#[tokio::test]
+async fn connect_without_target_warns_and_stays_offline() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.config.ws_url = None;
+  simulator.config.cp_id = None;
+
+  let outcome = simulator
+    .handle_offline_command(SimulatorCommand::Connect { config: None })
+    .await
+    .expect("offline connect should be handled");
+
+  assert!(matches!(outcome, super::super::OfflineOutcome::Continue));
+  assert!(!simulator.connected);
+
+  let mut events = Vec::new();
+  while let Ok(event) = ui_rx.try_recv() {
+    events.push(event);
+  }
+  assert!(events.iter().any(|event| {
+    matches!(
+      event,
+      UiEvent::Log {
+        level: UiLogLevel::Warn,
+        message,
+      } if message.contains("No connection target configured")
+    )
+  }));
+}
+
 #[test]
 fn reserve_and_cancel_updates_connector_status() {
   let mut simulator = simulator_for_tests();

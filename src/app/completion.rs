@@ -25,6 +25,7 @@ const STATUS_WORDS_V2_X: &[OcppConnectorStatus] = OcppConnectorStatus::V2_X;
 const STOP_REASON_HINTS_V1_6: &[StopReason] = StopReason::V1_6;
 const STOP_REASON_HINTS_V2_0_1: &[StopReason] = StopReason::V2_0_1;
 const STOP_REASON_HINTS_V2_1: &[StopReason] = StopReason::V2_1;
+const CONNECT_URL_PREFIXES: &[&str] = &["ws://", "wss://"];
 
 #[derive(Debug, Clone)]
 pub(super) struct CompletionState {
@@ -61,6 +62,7 @@ pub(super) fn completion_seed(
   input: &str,
   protocol: OcppVersion,
   known_connectors: &[u16],
+  profile_names: &[String],
 ) -> Option<(String, Vec<String>)> {
   let ends_with_space = input.ends_with(char::is_whitespace);
   let parts: Vec<&str> = input.split_whitespace().collect();
@@ -76,6 +78,9 @@ pub(super) fn completion_seed(
   let command = parts[0].to_ascii_lowercase();
 
   match command.as_str() {
+    "connect" => {
+      seed_for_connect_targets(&parts, ends_with_space, profile_names)
+    }
     "start" | "meter" | "send-meter" => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
@@ -117,6 +122,43 @@ pub(super) fn completion_seed(
     }
     _ => None,
   }
+}
+
+/// Produces completion candidates for `connect <profile>` and direct URLs.
+fn seed_for_connect_targets(
+  parts: &[&str],
+  ends_with_space: bool,
+  profile_names: &[String],
+) -> Option<(String, Vec<String>)> {
+  let token_index = if ends_with_space {
+    parts.len()
+  } else {
+    parts.len().saturating_sub(1)
+  };
+
+  if token_index != 1 {
+    return None;
+  }
+
+  let base = completion_base(parts, ends_with_space);
+  let prefix = if ends_with_space {
+    ""
+  } else {
+    parts.last().copied().unwrap_or("")
+  };
+
+  let mut candidates = filter_words(prefix, profile_names)
+    .into_iter()
+    .map(|profile| format!("{profile} "))
+    .collect::<Vec<_>>();
+  candidates.extend(
+    CONNECT_URL_PREFIXES
+      .iter()
+      .filter(|prefix_candidate| prefix_candidate.starts_with(prefix))
+      .map(|prefix_candidate| (*prefix_candidate).to_string()),
+  );
+
+  Some((base, candidates))
 }
 
 /// Filters static command words by prefix and appends trailing spaces.
@@ -290,9 +332,46 @@ mod tests {
     assert!(v2_1_words.contains(&"ReqEnergyTransferRejected".to_string(),));
   }
 
-  fn completion_words(input: &str, protocol: OcppVersion) -> Vec<String> {
+  #[test]
+  /// Verifies connect target completions include profiles and URL prefixes.
+  fn connect_completion_includes_profiles_and_url_prefixes() {
+    let profiles = vec!["demo".to_string(), "yard".to_string()];
     let (_, candidates) =
-      completion_seed(input, protocol, &[1]).expect("completion candidates");
+      completion_seed("connect ", OcppVersion::V1_6, &[1], &profiles)
+        .expect("completion candidates");
+
+    assert_eq!(
+      candidates,
+      vec![
+        "demo ".to_string(),
+        "yard ".to_string(),
+        "ws://".to_string(),
+        "wss://".to_string(),
+      ]
+    );
+  }
+
+  #[test]
+  /// Verifies connect target completions filter profile and URL prefixes.
+  fn connect_completion_filters_profiles_and_url_prefixes() {
+    let profiles = vec!["demo".to_string(), "yard".to_string()];
+    let (_, profile_candidates) =
+      completion_seed("connect de", OcppVersion::V1_6, &[1], &profiles)
+        .expect("profile candidates");
+    assert_eq!(profile_candidates, vec!["demo ".to_string()]);
+
+    let (_, url_candidates) =
+      completion_seed("connect w", OcppVersion::V1_6, &[1], &profiles)
+        .expect("url candidates");
+    assert_eq!(
+      url_candidates,
+      vec!["ws://".to_string(), "wss://".to_string()]
+    );
+  }
+
+  fn completion_words(input: &str, protocol: OcppVersion) -> Vec<String> {
+    let (_, candidates) = completion_seed(input, protocol, &[1], &[])
+      .expect("completion candidates");
     candidates
       .into_iter()
       .map(|candidate| candidate.trim_end().to_string())

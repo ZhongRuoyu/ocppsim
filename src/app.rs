@@ -425,6 +425,7 @@ pub struct TerminalApp {
   cursor: usize,
   history: CommandHistory,
   known_connectors: Vec<u16>,
+  profile_completions: Vec<String>,
   completion: Option<CompletionState>,
   log_sink: Option<FileLogSink>,
   screen_clear_requested: bool,
@@ -443,6 +444,7 @@ impl TerminalApp {
       cursor: 0,
       history: CommandHistory::new(),
       known_connectors: Vec::new(),
+      profile_completions: Vec::new(),
       completion: None,
       log_sink: None,
       screen_clear_requested: false,
@@ -453,10 +455,20 @@ impl TerminalApp {
   pub fn set_connection_target(
     &mut self,
     profile_name: Option<String>,
-    ws_url: String,
+    ws_url: Option<String>,
   ) {
     self.profile_name = profile_name;
-    self.ws_url = ws_url;
+    self.ws_url = ws_url.unwrap_or_default();
+  }
+
+  /// Returns the active protocol for command help and completions.
+  pub fn protocol(&self) -> OcppVersion {
+    self.protocol
+  }
+
+  /// Sets profile names offered for `connect <profile>` completion.
+  pub fn set_profile_completions(&mut self, profiles: Vec<String>) {
+    self.profile_completions = profiles;
   }
 
   /// Enables persistent log appending to `path`.
@@ -697,9 +709,12 @@ impl TerminalApp {
       return;
     }
 
-    let Some((base, candidates)) =
-      completion_seed(&self.input, self.protocol, &self.known_connectors)
-    else {
+    let Some((base, candidates)) = completion_seed(
+      &self.input,
+      self.protocol,
+      &self.known_connectors,
+      &self.profile_completions,
+    ) else {
       return;
     };
     if candidates.is_empty() {
@@ -892,15 +907,17 @@ impl TerminalApp {
   fn push_snapshot(&mut self, snapshot: SimulatorSnapshot) {
     self.known_connectors =
       snapshot.connectors.iter().map(|item| item.id).collect();
+    self.profile_name.clone_from(&snapshot.profile);
     self.ws_url.clone_from(&snapshot.connection_url);
     self.connected = snapshot.connected;
+    self.protocol = snapshot.protocol;
 
     self.push_log(
       UiLogLevel::Info,
       format!(
         "CP {} protocol={} connected={} heartbeat={} queue={} pending={}",
-        snapshot.cp_id,
-        snapshot.protocol,
+        display_taskbar_value(snapshot.cp_id.as_deref().unwrap_or("")),
+        snapshot.protocol.label(),
         snapshot.connected,
         display_heartbeat(snapshot.heartbeat_seconds),
         snapshot.queue_depth,
@@ -1015,7 +1032,7 @@ mod tests {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
     app.set_connection_target(
       Some("demo".to_string()),
-      "ws://example.test/ocpp".to_string(),
+      Some("ws://example.test/ocpp".to_string()),
     );
 
     assert_eq!(app.taskbar_line(), " profile demo | disconnected");
@@ -1028,7 +1045,7 @@ mod tests {
   /// Verifies the taskbar falls back to the WebSocket URL.
   fn taskbar_uses_ws_url_without_profile() {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
-    app.set_connection_target(None, "ws://example.test/ocpp".to_string());
+    app.set_connection_target(None, Some("ws://example.test/ocpp".to_string()));
 
     assert_eq!(
       app.taskbar_line(),

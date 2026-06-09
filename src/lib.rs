@@ -16,10 +16,14 @@ use std::thread;
 
 use anyhow::Result;
 use app::{InputAction, TerminalApp, TerminalSession, restore_console};
-use args::{Cli, CliCommand, ResolvedCliArgs};
+use args::{Cli, CliArgs, CliCommand, ResolvedCliArgs};
 use clap::Parser;
-use commands::{UserCommand, help_text, parse_command, standards_text};
-use simulator::{SimulatorCommand, SimulatorConfig, run_simulator};
+use commands::{
+  ConnectTarget, UserCommand, help_text, parse_command, standards_text,
+};
+use simulator::{
+  SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig, run_simulator,
+};
 use tokio::sync::mpsc;
 use version::version_string;
 
@@ -40,8 +44,8 @@ pub async fn run() -> Result<()> {
     return Ok(());
   }
 
-  let cli = cli.args;
-  let resolved = cli.resolve()?;
+  let cli_args = cli.args;
+  let resolved = cli_args.clone().resolve()?;
   let protocol = resolved.protocol;
 
   let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SimulatorCommand>();
@@ -53,6 +57,9 @@ pub async fn run() -> Result<()> {
 
   let mut terminal = TerminalSession::new()?;
   let mut app = TerminalApp::new(protocol);
+  app.set_profile_completions(args::profile_completion_names(
+    resolved.config_path.as_deref(),
+  ));
   // Seed taskbar metadata before the simulator emits its first snapshot.
   app.set_connection_target(resolved.profile.clone(), resolved.ws_url.clone());
   if let Some(path) = resolved.log_path.as_ref() {
@@ -63,12 +70,14 @@ pub async fn run() -> Result<()> {
   log_profile_source(&mut app, &resolved);
   app.push_info(format!(
     "Simulator ready: cp-id={} protocol={} connectors={}",
-    resolved.cp_id,
+    display_optional(resolved.cp_id.as_deref()),
     protocol.label(),
     resolved.connectors
   ));
+  app.push_info("Type `help` for commands.");
   app.push_info(
-    "Type `help` for commands. Type `connect` to open a CSMS connection.",
+    "Type `connect [<profile> | <ws-url> <cp-id>]` \
+    to open a CSMS connection.",
   );
 
   let mut should_exit = false;
@@ -92,7 +101,7 @@ pub async fn run() -> Result<()> {
         match parse_command(&line) {
           Ok(command) => {
             should_exit =
-              handle_user_command(command, protocol, &cmd_tx, &mut app);
+              handle_user_command(command, &cli_args, &cmd_tx, &mut app);
           }
           Err(message) => {
             app.push_error(message);
@@ -167,19 +176,35 @@ fn log_profile_source(app: &mut TerminalApp, resolved: &ResolvedCliArgs) {
   app.push_info(format!("Loaded profile `{profile}` from {path}"));
 }
 
+fn display_optional(value: Option<&str>) -> &str {
+  value.filter(|item| !item.is_empty()).unwrap_or("-")
+}
+
 /// Converts a parsed user command into simulator actions.
 ///
 /// Returns `true` when the UI loop should exit, otherwise `false`.
 fn handle_user_command(
   command: UserCommand,
-  protocol: ocpp::OcppVersion,
+  cli_args: &CliArgs,
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
   app: &mut TerminalApp,
 ) -> bool {
   match command {
     UserCommand::Status => send_command(cmd_tx, SimulatorCommand::Status, app),
-    UserCommand::Connect => {
-      send_command(cmd_tx, SimulatorCommand::Connect, app)
+    UserCommand::Connect { target } => {
+      match resolve_connect_config(target, cli_args) {
+        Ok(config) => send_command(
+          cmd_tx,
+          SimulatorCommand::Connect {
+            config: config.map(Box::new),
+          },
+          app,
+        ),
+        Err(error) => {
+          app.push_error(error.to_string());
+          false
+        }
+      }
     }
     UserCommand::Disconnect => {
       send_command(cmd_tx, SimulatorCommand::Disconnect, app)
@@ -250,7 +275,7 @@ fn handle_user_command(
       false
     }
     UserCommand::Standards => {
-      app.push_info(standards_text(protocol));
+      app.push_info(standards_text(app.protocol()));
       false
     }
     UserCommand::Help => {
@@ -259,6 +284,22 @@ fn handle_user_command(
     }
     UserCommand::Exit => true,
   }
+}
+
+fn resolve_connect_config(
+  target: ConnectTarget,
+  cli_args: &CliArgs,
+) -> Result<Option<SimulatorConnectionConfig>> {
+  let resolved = match target {
+    ConnectTarget::Current => return Ok(None),
+    ConnectTarget::Profile { name } => {
+      cli_args.resolve_profile_for_connect(&name)?
+    }
+    ConnectTarget::Direct { ws_url, cp_id } => {
+      cli_args.resolve_direct_for_connect(ws_url, cp_id)?
+    }
+  };
+  Ok(SimulatorConnectionConfig::from_resolved(&resolved))
 }
 
 /// Sends a simulator command over the command channel.
@@ -286,24 +327,39 @@ mod tests {
   #[test]
   /// Verifies connection-oriented commands dispatch the expected variants.
   fn parsed_connection_commands_dispatch_to_simulator_commands() {
-    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
-    assert!(!dispatch("connect", protocol, &cmd_tx, &mut app));
-    assert!(matches!(
-      next_command(&mut cmd_rx),
-      SimulatorCommand::Connect
+    assert!(!dispatch("connect", &cli_args, &cmd_tx, &mut app));
+    match next_command(&mut cmd_rx) {
+      SimulatorCommand::Connect { config } => assert!(config.is_none()),
+      other => panic!("unexpected command: {other:?}"),
+    }
+
+    assert!(!dispatch(
+      "connect ws://localhost:9000/ocpp CP-TEST",
+      &cli_args,
+      &cmd_tx,
+      &mut app,
     ));
+    match next_command(&mut cmd_rx) {
+      SimulatorCommand::Connect { config } => {
+        let config = config.expect("direct connect config");
+        assert_eq!(config.ws_url, "ws://localhost:9000/ocpp");
+        assert_eq!(config.cp_id, "CP-TEST");
+      }
+      other => panic!("unexpected command: {other:?}"),
+    }
 
-    assert!(!dispatch("status", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("status", &cli_args, &cmd_tx, &mut app));
     assert!(matches!(
       next_command(&mut cmd_rx),
       SimulatorCommand::Status
     ));
 
-    assert!(!dispatch("boot", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("boot", &cli_args, &cmd_tx, &mut app));
     assert!(matches!(next_command(&mut cmd_rx), SimulatorCommand::Boot));
 
-    assert!(!dispatch("disconnect", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("disconnect", &cli_args, &cmd_tx, &mut app));
     assert!(matches!(
       next_command(&mut cmd_rx),
       SimulatorCommand::Disconnect
@@ -313,9 +369,9 @@ mod tests {
   #[test]
   /// Verifies transaction-oriented commands retain their parsed fields.
   fn parsed_transaction_commands_dispatch_to_simulator_commands() {
-    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
-    assert!(!dispatch("authorize TOKEN", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("authorize TOKEN", &cli_args, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
       SimulatorCommand::Authorize { id_token } => assert_eq!(id_token, "TOKEN"),
       other => panic!("unexpected command: {other:?}"),
@@ -323,7 +379,7 @@ mod tests {
 
     assert!(!dispatch(
       "data-transfer vendor message hello world",
-      protocol,
+      &cli_args,
       &cmd_tx,
       &mut app,
     ));
@@ -340,7 +396,7 @@ mod tests {
       other => panic!("unexpected command: {other:?}"),
     }
 
-    assert!(!dispatch("start 2 ID", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("start 2 ID", &cli_args, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
       SimulatorCommand::StartTransaction {
         connector,
@@ -354,7 +410,7 @@ mod tests {
 
     assert!(!dispatch(
       "stop 2 EVDisconnected",
-      protocol,
+      &cli_args,
       &cmd_tx,
       &mut app,
     ));
@@ -370,9 +426,9 @@ mod tests {
   #[test]
   /// Verifies metering, heartbeat, and connector commands dispatch correctly.
   fn parsed_runtime_commands_dispatch_to_simulator_commands() {
-    let (protocol, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
-    assert!(!dispatch("meter 2 1234", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("meter 2 1234", &cli_args, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
       SimulatorCommand::SetMeter {
         connector,
@@ -384,25 +440,30 @@ mod tests {
       other => panic!("unexpected command: {other:?}"),
     }
 
-    assert!(!dispatch("send-meter 2", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("send-meter 2", &cli_args, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
       SimulatorCommand::SendMeter { connector } => assert_eq!(connector, 2),
       other => panic!("unexpected command: {other:?}"),
     }
 
-    assert!(!dispatch("heartbeat start 12", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch(
+      "heartbeat start 12",
+      &cli_args,
+      &cmd_tx,
+      &mut app,
+    ));
     match next_command(&mut cmd_rx) {
       SimulatorCommand::StartHeartbeat { seconds } => assert_eq!(seconds, 12),
       other => panic!("unexpected command: {other:?}"),
     }
 
-    assert!(!dispatch("heartbeat", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("heartbeat", &cli_args, &cmd_tx, &mut app));
     assert!(matches!(
       next_command(&mut cmd_rx),
       SimulatorCommand::Heartbeat
     ));
 
-    assert!(!dispatch("heartbeat stop", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("heartbeat stop", &cli_args, &cmd_tx, &mut app));
     assert!(matches!(
       next_command(&mut cmd_rx),
       SimulatorCommand::StopHeartbeat
@@ -410,7 +471,7 @@ mod tests {
 
     assert!(!dispatch(
       "connector-status 2 Faulted",
-      protocol,
+      &cli_args,
       &cmd_tx,
       &mut app,
     ));
@@ -427,31 +488,32 @@ mod tests {
   /// Verifies local UI commands do not enqueue simulator work.
   fn local_commands_do_not_dispatch_to_simulator() {
     let protocol = ocpp::OcppVersion::V2_1;
+    let cli_args = base_cli_args();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
     let mut app = TerminalApp::new(protocol);
 
-    assert!(!dispatch("help", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("help", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
 
-    assert!(!dispatch("standards", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("standards", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
 
     app.push_info("temporary log");
-    assert!(!dispatch("clear", protocol, &cmd_tx, &mut app));
+    assert!(!dispatch("clear", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
 
-    assert!(dispatch("exit", protocol, &cmd_tx, &mut app));
+    assert!(dispatch("exit", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
   }
 
   fn dispatch(
     input: &str,
-    protocol: ocpp::OcppVersion,
+    cli_args: &CliArgs,
     cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
     app: &mut TerminalApp,
   ) -> bool {
     let command = parse_command(input).expect("valid command");
-    handle_user_command(command, protocol, cmd_tx, app)
+    handle_user_command(command, cli_args, cmd_tx, app)
   }
 
   fn next_command(
@@ -461,7 +523,7 @@ mod tests {
   }
 
   fn command_test_context() -> (
-    ocpp::OcppVersion,
+    CliArgs,
     mpsc::UnboundedSender<SimulatorCommand>,
     mpsc::UnboundedReceiver<SimulatorCommand>,
     TerminalApp,
@@ -469,6 +531,31 @@ mod tests {
     let protocol = ocpp::OcppVersion::V1_6;
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let app = TerminalApp::new(protocol);
-    (protocol, cmd_tx, cmd_rx, app)
+    (base_cli_args(), cmd_tx, cmd_rx, app)
+  }
+
+  fn base_cli_args() -> CliArgs {
+    CliArgs {
+      profile: None,
+      config_path: None,
+      ws_url: None,
+      cp_id: None,
+      no_append_cp_id: false,
+      connectors: None,
+      protocol: None,
+      vendor: None,
+      model: None,
+      firmware: None,
+      log_path: None,
+      trace_frames: false,
+      strict: false,
+      request_timeout_seconds: None,
+      heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
+    }
   }
 }

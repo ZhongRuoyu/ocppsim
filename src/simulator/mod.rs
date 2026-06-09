@@ -44,8 +44,8 @@ pub(in crate::simulator) use types::{
   TxEventType, normalize_identifier,
 };
 pub use types::{
-  ConnectorSnapshot, SimulatorCommand, SimulatorConfig, SimulatorSnapshot,
-  UiEvent, UiLogLevel,
+  ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
+  SimulatorConnectionConfig, SimulatorSnapshot, UiEvent, UiLogLevel,
 };
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -376,7 +376,18 @@ impl Simulator {
     command: SimulatorCommand,
   ) -> Result<OfflineOutcome> {
     match command {
-      SimulatorCommand::Connect => {
+      SimulatorCommand::Connect { config } => {
+        if let Some(config) = config {
+          self.apply_connection_config(*config);
+        }
+        if !self.has_connection_target() {
+          self.log(
+            UiLogLevel::Warn,
+            "No connection target configured. Use `connect <profile>` or \
+            `connect <ws-url> <cp-id>`.",
+          );
+          return Ok(OfflineOutcome::Continue);
+        }
         let connection = self.connect().await?;
         Ok(OfflineOutcome::Connect(connection))
       }
@@ -399,7 +410,7 @@ impl Simulator {
     write: &mut WsWrite,
   ) -> Result<CommandOutcome> {
     match command {
-      SimulatorCommand::Connect => {
+      SimulatorCommand::Connect { .. } => {
         self.log(UiLogLevel::Warn, "Already connected.");
         Ok(CommandOutcome::Continue)
       }
@@ -519,11 +530,100 @@ impl Simulator {
           self.enqueue_heartbeat();
         }
       }
-      SimulatorCommand::Connect
+      SimulatorCommand::Connect { .. }
       | SimulatorCommand::Disconnect
       | SimulatorCommand::Shutdown => {}
     }
     Ok(())
+  }
+
+  /// Applies an interactive connection target before opening the WebSocket.
+  fn apply_connection_config(&mut self, config: SimulatorConnectionConfig) {
+    self.config.profile = config.profile;
+    self.config.ws_url = Some(config.ws_url);
+    self.config.cp_id = Some(config.cp_id);
+    self.config.append_cp_id = config.append_cp_id;
+    self.config.protocol = config.protocol;
+    self.config.vendor = config.vendor;
+    self.config.model = config.model;
+    self.config.firmware = config.firmware;
+    self.config.trace_frames = config.trace_frames;
+    self.config.strict = config.strict;
+    self.config.request_timeout = config.request_timeout;
+    self.config.security_profile = config.security_profile;
+    self.config.basic_auth_password = config.basic_auth_password;
+    self.config.ca_cert_path = config.ca_cert_path;
+    self.config.client_cert_path = config.client_cert_path;
+    self.config.client_key_path = config.client_key_path;
+    self.security.security_profile = self.config.security_profile;
+    self.security.basic_auth_password = self.config.basic_auth_password.clone();
+    self.resize_connectors(config.connectors);
+    self.apply_heartbeat_config(config.heartbeat_seconds);
+    self.refresh_runtime_configuration_entries();
+    self.emit_snapshot();
+  }
+
+  fn has_connection_target(&self) -> bool {
+    self.config.ws_url.is_some() && self.config.cp_id.is_some()
+  }
+
+  fn resize_connectors(&mut self, count: u16) {
+    let current = self.config.connectors;
+    self.config.connectors = count;
+
+    if count > current {
+      for connector in current.saturating_add(1)..=count {
+        self.connectors.insert(
+          connector,
+          ConnectorState {
+            status: ConnectorStatus::Available,
+            meter_wh: 0,
+            offered_limit: None,
+            scheduled_availability: None,
+            transaction: None,
+          },
+        );
+      }
+    } else if count < current {
+      self.connectors.retain(|connector, _| *connector <= count);
+      self.reservations.retain(|_, connector| *connector <= count);
+      self
+        .charging_profiles
+        .retain(|connector, _| *connector <= count);
+    }
+  }
+
+  fn apply_heartbeat_config(&mut self, heartbeat_seconds: Option<u64>) {
+    if self.config.heartbeat_seconds == heartbeat_seconds {
+      return;
+    }
+    self.config.heartbeat_seconds = heartbeat_seconds;
+    if let Some(seconds) = heartbeat_seconds {
+      self.start_heartbeat(seconds);
+    } else {
+      self.stop_heartbeat();
+    }
+  }
+
+  fn refresh_runtime_configuration_entries(&mut self) {
+    if let Some(entry) = self
+      .configuration
+      .get_mut(&ConfigurationKey::NumberOfConnectors)
+    {
+      entry.value = self.config.connectors.to_string();
+    }
+    if let Some(entry) = self
+      .configuration
+      .get_mut(&ConfigurationKey::HeartbeatInterval)
+    {
+      entry.value = self.config.heartbeat_seconds.unwrap_or(30).to_string();
+    }
+    if let Some(entry) = self
+      .configuration
+      .get_mut(&ConfigurationKey::SecurityProfile)
+    {
+      entry.value = self.config.security_profile.unwrap_or(0).to_string();
+    }
   }
 
   /// Opens the WebSocket connection and performs initial boot/status enqueue.
@@ -596,12 +696,22 @@ impl Simulator {
 
   /// Builds the final WebSocket URL, appending charge point id when enabled.
   fn connection_url(&self) -> Result<Url> {
-    let mut url = Url::parse(&self.config.ws_url)?;
+    let ws_url = self
+      .config
+      .ws_url
+      .as_deref()
+      .ok_or_else(|| anyhow!("No WebSocket URL configured."))?;
+    let cp_id = self
+      .config
+      .cp_id
+      .as_deref()
+      .ok_or_else(|| anyhow!("No charge point id configured."))?;
+    let mut url = Url::parse(ws_url)?;
     if self.config.append_cp_id {
       let mut segments = url
         .path_segments_mut()
         .map_err(|()| anyhow!("WebSocket URL cannot be a base URL."))?;
-      segments.pop_if_empty().push(&self.config.cp_id);
+      segments.pop_if_empty().push(cp_id);
     }
     Ok(url)
   }

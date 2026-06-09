@@ -20,8 +20,9 @@ const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 30;
 const DEFAULT_CONFIG_PATH_HINT: &str = "~/.config/ocppsim/ocppsim.toml";
 const CLI_LONG_ABOUT: &str =
   "Command-line OCPP charge point simulator for OCPP-J.
-Run in direct mode with --ws-url and --cp-id,
-or pass a profile name from a TOML config file.";
+Run without a remote target for local simulation,
+with --ws-url and --cp-id for direct mode,
+or with a profile name from a TOML config file.";
 const CLI_AFTER_HELP: &str = r#"Config file format:
   # Optional global defaults that can be overridden by charge point configs.
   # CLI options take precedence over config file items.
@@ -47,6 +48,7 @@ const CLI_AFTER_HELP: &str = r#"Config file format:
   connectors = 1
 
 Examples:
+  ocppsim
   ocppsim --ws-url ws://csms.local/ocpp --cp-id CP-001
   ocppsim --ws-url ws://csms.local/ocpp --cp-id CP-001 --log-path ./ocpp.log
   ocppsim example
@@ -115,11 +117,11 @@ pub struct CliArgs {
   #[arg(long, value_name = "PATH")]
   pub config_path: Option<PathBuf>,
 
-  /// CSMS WebSocket URL. Required without PROFILE
+  /// CSMS WebSocket URL for the initial connection target
   #[arg(long, value_name = "URL")]
   pub ws_url: Option<String>,
 
-  /// Charge point ID. Required without PROFILE
+  /// Charge point ID for the initial connection target
   #[arg(long, value_name = "ID")]
   pub cp_id: Option<String>,
 
@@ -231,8 +233,8 @@ pub fn write_completion_script(
 pub struct ResolvedCliArgs {
   pub profile: Option<String>,
   pub config_path: Option<PathBuf>,
-  pub ws_url: String,
-  pub cp_id: String,
+  pub ws_url: Option<String>,
+  pub cp_id: Option<String>,
   pub append_cp_id: bool,
   pub connectors: u16,
   pub protocol: OcppVersion,
@@ -260,8 +262,8 @@ impl CliArgs {
   /// 3. Charge-point profile values.
   /// 4. Explicit CLI overrides.
   ///
-  /// Returns an error when required direct-mode flags are missing, when
-  /// profile constraints are violated, or when overrides are invalid.
+  /// Returns an error when partial direct-mode flags are provided, when profile
+  /// constraints are violated, or when overrides are invalid.
   pub fn resolve(self) -> Result<ResolvedCliArgs> {
     if self.profile.is_some() && (self.ws_url.is_some() || self.cp_id.is_some())
     {
@@ -285,8 +287,8 @@ impl CliArgs {
       ResolvedCliArgs {
         profile: Some(profile_name.clone()),
         config_path: Some(config_path),
-        ws_url: profile.ws_url,
-        cp_id: profile.cp_id,
+        ws_url: Some(profile.ws_url),
+        cp_id: Some(profile.cp_id),
         append_cp_id: profile.append_cp_id,
         connectors: profile.connectors,
         protocol: profile.protocol,
@@ -319,6 +321,32 @@ impl CliArgs {
     )?;
     Ok(resolved)
   }
+
+  /// Resolves a profile supplied to the interactive `connect` command.
+  pub fn resolve_profile_for_connect(
+    &self,
+    profile_name: &str,
+  ) -> Result<ResolvedCliArgs> {
+    let mut args = self.clone();
+    args.profile = Some(profile_name.to_string());
+    args.ws_url = None;
+    args.cp_id = None;
+    args.resolve()
+  }
+
+  /// Resolves direct target arguments supplied to the interactive `connect`
+  /// command.
+  pub fn resolve_direct_for_connect(
+    &self,
+    ws_url: String,
+    cp_id: String,
+  ) -> Result<ResolvedCliArgs> {
+    let mut args = self.clone();
+    args.profile = None;
+    args.ws_url = Some(ws_url);
+    args.cp_id = Some(cp_id);
+    args.resolve()
+  }
 }
 
 /// CLI-facing protocol selector accepted by clap value parsing.
@@ -343,27 +371,28 @@ impl ProtocolArg {
   }
 }
 
-/// Resolves configuration in direct mode, without profile loading.
+/// Resolves configuration without profile loading.
 ///
-/// Inputs must include both `--ws-url` and `--cp-id`. The function returns
-/// baseline defaults plus direct CLI protocol selection.
+/// Inputs may omit both `--ws-url` and `--cp-id` to start in offline-only
+/// local simulation mode. If either direct connection flag is present, both
+/// must be present.
 fn resolve_with_direct_args(cli: &CliArgs) -> Result<ResolvedCliArgs> {
   let (ws_url, cp_id) = match (&cli.ws_url, &cli.cp_id) {
-    (None, None) => {
-      bail!("--ws-url and --cp-id are required when no profile is used.");
-    }
+    (None, None) => (None, None),
     (None, Some(_)) => {
       bail!("--ws-url is required when no profile is used.");
     }
     (Some(_), None) => {
       bail!("--cp-id is required when no profile is used.");
     }
-    (Some(ws_url), Some(cp_id)) => (ws_url.clone(), cp_id.clone()),
+    (Some(ws_url), Some(cp_id)) => (Some(ws_url.clone()), Some(cp_id.clone())),
   };
+  let config_path =
+    cli.config_path.as_ref().map(|path| expand_tilde_path(path));
 
   Ok(ResolvedCliArgs {
     profile: None,
-    config_path: None,
+    config_path,
     ws_url,
     cp_id,
     append_cp_id: true,
@@ -533,6 +562,12 @@ fn profile_name_candidates(
     .collect()
 }
 
+/// Returns profile names for interactive command completion.
+pub fn profile_completion_names(config_path: Option<&Path>) -> Vec<String> {
+  let path = config_path.map_or_else(default_config_path, expand_tilde_path);
+  profile_names(&path).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
   use std::ffi::OsStr;
@@ -586,8 +621,8 @@ mod tests {
   }
 
   #[test]
-  /// Verifies direct mode requires both `--ws-url` and `--cp-id`.
-  fn direct_args_require_ws_url_and_cp_id() {
+  /// Verifies startup can resolve without an initial connection target.
+  fn resolves_without_initial_connection_target() {
     let args = CliArgs {
       profile: None,
       config_path: None,
@@ -610,11 +645,15 @@ mod tests {
       client_cert: None,
       client_key: None,
     };
-    let error = args.resolve().expect_err("resolution should fail");
-    assert_eq!(
-      error.to_string(),
-      "--ws-url and --cp-id are required when no profile is used."
-    );
+    let resolved = args.resolve().expect("resolution should succeed");
+    assert!(resolved.ws_url.is_none());
+    assert!(resolved.cp_id.is_none());
+    assert_eq!(resolved.config_path, None);
+    assert_eq!(resolved.connectors, 2);
+    assert_eq!(resolved.vendor, "vendor");
+    assert!(resolved.trace_frames);
+    assert_eq!(resolved.request_timeout_seconds, 20);
+    assert_eq!(resolved.heartbeat_seconds, Some(5));
   }
 
   #[test]
@@ -724,8 +763,8 @@ id = "CP-DEMO"
     };
 
     let resolved = args.resolve().expect("profile should resolve");
-    assert_eq!(resolved.cp_id, "CP-DEMO");
-    assert_eq!(resolved.ws_url, "wss://example.com/ocpp");
+    assert_eq!(resolved.cp_id.as_deref(), Some("CP-DEMO"));
+    assert_eq!(resolved.ws_url.as_deref(), Some("wss://example.com/ocpp"));
     assert_eq!(resolved.protocol, OcppVersion::V1_6);
     assert_eq!(resolved.connectors, 1);
     assert_eq!(resolved.vendor, "ocppsim");
@@ -1583,8 +1622,8 @@ append-cp-id = true
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
-    assert_eq!(resolved.ws_url, "ws://localhost:9000/ocpp");
-    assert_eq!(resolved.cp_id, "CP-TEST");
+    assert_eq!(resolved.ws_url.as_deref(), Some("ws://localhost:9000/ocpp"));
+    assert_eq!(resolved.cp_id.as_deref(), Some("CP-TEST"));
     assert!(resolved.append_cp_id);
     assert_eq!(resolved.connectors, 1);
     assert_eq!(resolved.protocol, OcppVersion::V1_6);

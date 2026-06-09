@@ -1,10 +1,28 @@
 # Usage
 
-`ocppsim` can run directly from CLI flags or from a named TOML profile.
+`ocppsim` can run without a remote target, directly from CLI flags, or from a
+named TOML profile.
+
+## Local Mode
+
+Run `ocppsim` without a startup connection target when you want to exercise
+local simulator state before connecting to a CSMS endpoint.
+
+```sh
+ocppsim
+```
+
+Inside the terminal UI, connect later with a profile or direct WebSocket
+arguments:
+
+```text
+connect some-profile
+connect ws://csms.example.com/ocpp CP-001
+```
 
 ## Direct Mode
 
-`ocppsim` can connect to a CSMS endpoint directly from CLI flags.
+`ocppsim` can start with a CSMS endpoint directly from CLI flags.
 
 ```sh
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
@@ -107,7 +125,10 @@ Logs are printed into normal terminal scrollback, so they can be selected with
 the mouse and remain available after `ocppsim` exits.
 
 - `status`: show current simulator state.
-- `connect`: open the WebSocket and enqueue boot/status messages.
+- `connect`: open the configured WebSocket target and enqueue boot/status
+  messages.
+- `connect <profile>`: load a profile and connect to its WebSocket target.
+- `connect <ws-url> <cp-id>`: connect to a direct WebSocket target.
 - `disconnect`: close the active WebSocket connection.
 - `boot`: send `BootNotification` immediately.
 - `authorize <idToken>`: send `Authorize`.
