@@ -8,8 +8,6 @@
 use serde::Serialize;
 use serde_json::Value;
 
-// ── Common nested types ────────────────────────────────────────
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ChargingStationInfo<'a> {
@@ -80,8 +78,6 @@ pub(super) struct ChargingSchedulePeriod {
   pub start_period: i64,
   pub limit: f64,
 }
-
-// ── Outbound CALL payloads ─────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,8 +228,6 @@ pub(super) struct TransactionEvent_V2_X_Request<'a> {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub id_token: Option<IdTokenPayload<'a>>,
 }
-
-// ── Response payloads ──────────────────────────────────────────
 
 #[derive(Serialize)]
 pub(super) struct ConfigurationKeyEntry<'a> {
