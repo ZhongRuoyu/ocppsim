@@ -113,8 +113,10 @@ impl TerminalSession {
       self.stdout,
       MoveToColumn(0),
       Clear(ClearType::CurrentLine),
+      SetForegroundColor(Color::DarkGrey),
+      Print(format!("{} [{}] ", entry.timestamp, entry.level.label())),
       SetForegroundColor(log_level_color(entry.level)),
-      Print(entry.formatted.as_str()),
+      Print(entry.message.as_str()),
       ResetColor,
       Print("\r\n")
     )
@@ -361,7 +363,6 @@ struct LogEntry {
   timestamp: String,
   level: UiLogLevel,
   message: String,
-  formatted: String,
 }
 
 #[derive(Debug)]
@@ -844,16 +845,6 @@ impl TerminalApp {
     format!(" {target} | {status}")
   }
 
-  /// Formats one log entry using the configured timestamp and level pattern.
-  fn format_log_entry(entry: &LogEntry) -> String {
-    format!(
-      "{} [{}] {}",
-      entry.timestamp,
-      entry.level.label(),
-      entry.message
-    )
-  }
-
   /// Pushes one or more log lines to memory and optional file sink.
   ///
   /// Multi-line messages are split so each line gets its own timestamped
@@ -869,7 +860,6 @@ impl TerminalApp {
         timestamp: timestamp.clone(),
         level,
         message: line.to_string(),
-        formatted: String::new(),
       });
 
       if let Some(sink) = self.log_sink.as_mut()
@@ -891,8 +881,7 @@ impl TerminalApp {
   }
 
   /// Appends one pending terminal log entry.
-  fn push_log_entry(&mut self, mut entry: LogEntry) {
-    entry.formatted = Self::format_log_entry(&entry);
+  fn push_log_entry(&mut self, entry: LogEntry) {
     self.pending_logs.push_back(entry);
     while self.pending_logs.len() > MAX_LOG_LINES {
       let _ = self.pending_logs.pop_front();
@@ -1013,8 +1002,10 @@ mod tests {
 
     let logs = app.drain_pending_logs();
     assert_eq!(logs.len(), 2);
-    assert!(logs[0].formatted.contains("[INFO] hello"));
-    assert!(logs[1].formatted.contains("[ERROR] oops"));
+    assert_eq!(logs[0].level.label(), "INFO");
+    assert_eq!(logs[0].message, "hello");
+    assert_eq!(logs[1].level.label(), "ERROR");
+    assert_eq!(logs[1].message, "oops");
     assert!(app.drain_pending_logs().is_empty());
   }
 
