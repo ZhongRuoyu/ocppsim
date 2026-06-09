@@ -261,7 +261,7 @@ pub fn help_text() -> &'static str {
   heartbeat stop
     Stop periodic heartbeats.
   clear
-    Clear UI log view (does not affect simulator state).
+    Clear the visible terminal screen (does not affect simulator state).
   standards
     Show OCPP protocol/framing reference summary.
   help | h | ?

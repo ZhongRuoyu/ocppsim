@@ -156,8 +156,8 @@ logs, so known password writes are not printed in frame traces.
 
 ## Terminal UI
 
-The terminal app keeps rendering, input routing, log scrolling, snapshots, and
-file logging in the main app module.
+The terminal app keeps inline rendering, input routing, snapshots, and file
+logging in the main app module.
 Command history navigation and tab completion are split into focused
 submodules under `src/app/` so editing behavior can evolve without making the
 rendering path harder to scan.

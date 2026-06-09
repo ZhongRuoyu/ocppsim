@@ -53,6 +53,8 @@ pub async fn run() -> Result<()> {
 
   let mut terminal = TerminalSession::new()?;
   let mut app = TerminalApp::new(protocol);
+  // Seed taskbar metadata before the simulator emits its first snapshot.
+  app.set_connection_target(resolved.profile.clone(), resolved.ws_url.clone());
   if let Some(path) = resolved.log_path.as_ref() {
     app.enable_log_path(path)?;
     app.push_info(format!("Appending logs to {}", path.display()));
@@ -100,6 +102,7 @@ pub async fn run() -> Result<()> {
     }
   }
 
+  terminal.draw(&mut app)?;
   let _ = cmd_tx.send(SimulatorCommand::Shutdown);
   let _ = simulator_task.await;
   Ok(())

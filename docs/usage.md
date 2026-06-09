@@ -103,6 +103,8 @@ old file before startup.
 ## Interactive Commands
 
 After startup, type commands into the terminal UI.
+Logs are printed into normal terminal scrollback, so they can be selected with
+the mouse and remain available after `ocppsim` exits.
 
 - `status`: show current simulator state.
 - `connect`: open the WebSocket and enqueue boot/status messages.
@@ -249,8 +251,8 @@ Set a charging profile first.
 A stored zero-watt limit is distinct from no profile and intentionally
 suspends the connector.
 
-If the terminal UI grows noisy during stress tests, lower the message rate or
-increase the CSMS response speed.
+If the terminal output grows noisy during stress tests, lower the message rate
+or increase the CSMS response speed.
 The simulator warns when the outbound queue grows past the built-in warning
 threshold, but the queue is intentionally not capped so scripted tests do not
 drop messages silently.

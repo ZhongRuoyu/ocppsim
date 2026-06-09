@@ -21,7 +21,7 @@ crossterm = "0.29.0"
 futures-util = "0.3.32"
 http = "1.4.1"
 jsonschema = "0.46.5"
-ratatui = { version = "0.30.0", features = ["unstable-rendered-line-info"] }
+ratatui = "0.30.0"
 rustls = { version = "0.23.40", features = ["ring"] }
 rustls-pemfile = "2.2.0"
 serde = { version = "1.0.228", features = ["derive"] }

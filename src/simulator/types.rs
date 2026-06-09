@@ -78,18 +78,6 @@ impl UiLogLevel {
       Self::Rx => "RX",
     }
   }
-
-  /// Returns the terminal color associated with this log level.
-  pub fn color(self) -> ratatui::style::Color {
-    use ratatui::style::Color;
-    match self {
-      Self::Info => Color::White,
-      Self::Warn => Color::Yellow,
-      Self::Error => Color::Red,
-      Self::Tx => Color::Cyan,
-      Self::Rx => Color::Green,
-    }
-  }
 }
 
 #[derive(Debug, Clone)]
