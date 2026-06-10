@@ -1,29 +1,52 @@
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use http::HeaderValue;
-use http::header::SEC_WEBSOCKET_PROTOCOL;
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
-use tokio_tungstenite::tungstenite::handshake::server::{
-  ErrorResponse, Request, Response,
-};
-use tokio_tungstenite::tungstenite::protocol::Message;
-use tokio_tungstenite::{accept_async, accept_hdr_async, connect_async};
+use tokio::io::{DuplexStream, duplex};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::{Message, Role};
 
 use crate::ocpp::{OcppFrame, build_call, build_call_result, parse_frame};
 
 use super::*;
 
-// The tungstenite handshake callback trait requires this large error type
-// and result wrapping.
-#[allow(clippy::result_large_err, clippy::unnecessary_wraps)]
-fn accept_v1_6_subprotocol(
-  _request: &Request,
-  mut response: Response,
-) -> Result<Response, ErrorResponse> {
-  response
-    .headers_mut()
-    .insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("ocpp1.6"));
-  Ok(response)
+type TestWsStream = WebSocketStream<DuplexStream>;
+type TestWsWrite = SplitSink<TestWsStream, Message>;
+type TestWsRead = SplitStream<TestWsStream>;
+
+async fn in_memory_ws_pair()
+-> (TestWsWrite, TestWsRead, TestWsWrite, TestWsRead) {
+  let (client, server) = duplex(64 * 1024);
+  let client_ws =
+    WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+  let server_ws =
+    WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+  let (client_write, client_read) = client_ws.split();
+  let (server_write, server_read) = server_ws.split();
+  (client_write, client_read, server_write, server_read)
+}
+
+async fn read_ws_text(read: &mut TestWsRead) -> String {
+  let message = read
+    .next()
+    .await
+    .expect("response frame")
+    .expect("response frame ok");
+  message.to_text().expect("text frame").to_string()
+}
+
+async fn read_ocpp_frame(read: &mut TestWsRead) -> OcppFrame {
+  parse_frame(&read_ws_text(read).await).expect("parse response")
+}
+
+async fn read_ocpp_frames(
+  read: &mut TestWsRead,
+  count: usize,
+) -> Vec<OcppFrame> {
+  let mut frames = Vec::new();
+  for _ in 0..count {
+    frames.push(read_ocpp_frame(read).await);
+  }
+  frames
 }
 
 async fn capture_inbound_call_response(
@@ -56,26 +79,8 @@ async fn capture_inbound_call_response_with_events(
   action: &str,
   payload: Value,
 ) -> (OcppFrame, Simulator, Vec<UiEvent>) {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    let message = server_read
-      .next()
-      .await
-      .expect("response frame")
-      .expect("response frame ok");
-    parse_frame(message.to_text().expect("text frame")).expect("parse response")
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, _read) = client_stream.split();
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(protocol);
   simulator.config.strict = strict;
@@ -85,7 +90,7 @@ async fn capture_inbound_call_response_with_events(
     .expect("handle inbound call");
   drop(write);
 
-  let frame = server.await.expect("server task");
+  let frame = read_ocpp_frame(&mut server_read).await;
   let mut events = Vec::new();
   while let Ok(event) = ui_rx.try_recv() {
     events.push(event);
@@ -97,26 +102,8 @@ async fn capture_ws_text_response_with_events(
   protocol: OcppVersion,
   text: String,
 ) -> (OcppFrame, Simulator, Vec<UiEvent>) {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    let message = server_read
-      .next()
-      .await
-      .expect("response frame")
-      .expect("response frame ok");
-    parse_frame(message.to_text().expect("text frame")).expect("parse response")
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, _read) = client_stream.split();
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(protocol);
   simulator.config.trace_frames = true;
@@ -126,7 +113,7 @@ async fn capture_ws_text_response_with_events(
     .expect("handle text");
   drop(write);
 
-  let frame = server.await.expect("server task");
+  let frame = read_ocpp_frame(&mut server_read).await;
   let mut events = Vec::new();
   while let Ok(event) = ui_rx.try_recv() {
     events.push(event);
@@ -138,20 +125,8 @@ async fn capture_ws_text_events(
   protocol: OcppVersion,
   text: String,
 ) -> Vec<UiEvent> {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    drop(websocket);
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, read) = client_stream.split();
+  let (mut write, read, _server_write, _server_read) =
+    in_memory_ws_pair().await;
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(protocol);
   simulator.config.trace_frames = true;
@@ -161,7 +136,6 @@ async fn capture_ws_text_events(
     .expect("handle text");
   drop(write);
   drop(read);
-  server.await.expect("server task");
 
   let mut events = Vec::new();
   while let Ok(event) = ui_rx.try_recv() {
@@ -424,28 +398,8 @@ fn trace_frame_text_redacts_v2_x_id_tokens() {
 
 #[tokio::test]
 async fn outbound_trace_logs_redacted_frame_but_sends_real_frame() {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    server_read
-      .next()
-      .await
-      .expect("request frame")
-      .expect("request frame ok")
-      .to_text()
-      .expect("text frame")
-      .to_string()
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, read) = client_stream.split();
+  let (mut write, read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
   simulator.config.trace_frames = true;
@@ -459,7 +413,7 @@ async fn outbound_trace_logs_redacted_frame_but_sends_real_frame() {
   drop(write);
   drop(read);
 
-  let wire_frame = server.await.expect("server task");
+  let wire_frame = read_ws_text(&mut server_read).await;
   assert!(wire_frame.contains("\"idTag\":\"SECRET-TOKEN\""));
 
   let messages = drain_log_messages(&mut ui_rx);
@@ -507,46 +461,11 @@ async fn boot_response_starts_heartbeat_from_interval() {
 
 #[tokio::test]
 async fn mock_csms_boot_lifecycle_updates_heartbeat() {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let mut websocket = accept_hdr_async(stream, accept_v1_6_subprotocol)
-      .await
-      .expect("accept websocket");
-    let message = websocket
-      .next()
-      .await
-      .expect("boot frame")
-      .expect("boot frame ok");
-    let frame =
-      parse_frame(message.to_text().expect("text frame")).expect("parse frame");
-    let OcppFrame::Call {
-      message_id, action, ..
-    } = frame
-    else {
-      panic!("expected CALL frame");
-    };
-    assert_eq!(action, "BootNotification");
-    let response = build_call_result(
-      &message_id,
-      &json!({
-        "status": "Accepted",
-        "currentTime": now_timestamp(),
-        "interval": 9
-      }),
-    );
-    websocket
-      .send(Message::Text(response.into()))
-      .await
-      .expect("send boot response");
-  });
-
+  let (mut write, mut read, mut server_write, mut server_read) =
+    in_memory_ws_pair().await;
   let mut simulator = simulator_for_tests();
-  simulator.config.ws_url = Some(format!("ws://{address}"));
-  let mut connection = simulator.connect().await.expect("connect");
+  simulator.connected = true;
+  simulator.enqueue_boot_notification();
   assert_eq!(
     simulator
       .queue
@@ -556,17 +475,36 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
     vec!["BootNotification"]
   );
   simulator
-    .try_send_next(&mut connection.write)
+    .try_send_next(&mut write)
     .await
     .expect("send boot");
-  let message = connection
-    .read
+  let frame = read_ocpp_frame(&mut server_read).await;
+  let OcppFrame::Call {
+    message_id, action, ..
+  } = frame
+  else {
+    panic!("expected CALL frame");
+  };
+  assert_eq!(action, "BootNotification");
+  let response = build_call_result(
+    &message_id,
+    &json!({
+      "status": "Accepted",
+      "currentTime": now_timestamp(),
+      "interval": 9
+    }),
+  );
+  server_write
+    .send(Message::Text(response.into()))
+    .await
+    .expect("send boot response");
+  let message = read
     .next()
     .await
     .expect("boot response")
     .expect("boot response ok");
   simulator
-    .handle_ws_message(message, &mut connection.write)
+    .handle_ws_message(message, &mut write)
     .await
     .expect("handle response");
 
@@ -586,44 +524,16 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
     Some(9)
   );
   simulator.stop_heartbeat();
-  server.await.expect("server task");
 }
 
 #[tokio::test]
 async fn malformed_remote_start_returns_call_error() {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    let message = server_read
-      .next()
-      .await
-      .expect("response frame")
-      .expect("response frame ok");
-    parse_frame(message.to_text().expect("text frame")).expect("parse response")
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, _read) = client_stream.split();
-  let mut simulator = simulator_for_tests();
-  simulator
-    .handle_incoming_call_v1_6(
-      &mut write,
-      "bad-remote-start",
-      "RemoteStartTransaction",
-      json!({}),
-    )
-    .await
-    .expect("handle malformed remote start");
-  drop(write);
-
-  let frame = server.await.expect("server task");
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "RemoteStartTransaction",
+    json!({}),
+  )
+  .await;
   let OcppFrame::CallError { code, .. } = frame else {
     panic!("expected CALLERROR frame");
   };
@@ -1094,33 +1004,8 @@ fn trigger_message_v2_x_can_trigger_active_transaction_event() {
 #[tokio::test]
 async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
   for protocol in v2_x_protocols() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-      .await
-      .expect("bind listener");
-    let address = listener.local_addr().expect("local address");
-    let server = tokio::spawn(async move {
-      let (stream, _) = listener.accept().await.expect("accept client");
-      let websocket = accept_async(stream).await.expect("accept websocket");
-      let (_server_write, mut server_read) = websocket.split();
-      let mut frames = Vec::new();
-      for _ in 0..2 {
-        let message = server_read
-          .next()
-          .await
-          .expect("response frame")
-          .expect("response frame ok");
-        frames.push(
-          parse_frame(message.to_text().expect("text frame"))
-            .expect("parse response"),
-        );
-      }
-      frames
-    });
-
-    let (client_stream, _) = connect_async(format!("ws://{address}"))
-      .await
-      .expect("connect client");
-    let (mut write, _read) = client_stream.split();
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
     let mut simulator = simulator_for_tests_with_protocol(protocol);
     simulator
       .handle_incoming_call_v2_x(
@@ -1152,7 +1037,7 @@ async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
       .expect("handle request stop");
     drop(write);
 
-    let frames = server.await.expect("server task");
+    let frames = read_ocpp_frames(&mut server_read, 2).await;
     assert_eq!(frames.len(), 2);
     assert!(frames.iter().all(|frame| {
       matches!(
@@ -1184,34 +1069,11 @@ async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
 
 #[tokio::test]
 async fn malformed_ws_text_returns_protocol_error() {
-  let listener = TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind listener");
-  let address = listener.local_addr().expect("local address");
-  let server = tokio::spawn(async move {
-    let (stream, _) = listener.accept().await.expect("accept client");
-    let websocket = accept_async(stream).await.expect("accept websocket");
-    let (_server_write, mut server_read) = websocket.split();
-    let message = server_read
-      .next()
-      .await
-      .expect("response frame")
-      .expect("response frame ok");
-    parse_frame(message.to_text().expect("text frame")).expect("parse response")
-  });
-
-  let (client_stream, _) = connect_async(format!("ws://{address}"))
-    .await
-    .expect("connect client");
-  let (mut write, _read) = client_stream.split();
-  let mut simulator = simulator_for_tests();
-  simulator
-    .handle_ws_text("not-json".to_string(), &mut write)
-    .await
-    .expect("handle malformed text");
-  drop(write);
-
-  let frame = server.await.expect("server task");
+  let (frame, _, _) = capture_ws_text_response_with_events(
+    OcppVersion::V1_6,
+    "not-json".to_string(),
+  )
+  .await;
   let OcppFrame::CallError { code, .. } = frame else {
     panic!("expected CALLERROR frame");
   };

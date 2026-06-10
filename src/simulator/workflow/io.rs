@@ -2,7 +2,7 @@ use super::super::{
   ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
   OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
   SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel,
-  Value, WsWrite, build_call_error, build_call_result, json,
+  Value, WsMessageSink, build_call_error, build_call_result, json,
   sanitized_trace_frame_text,
 };
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
@@ -48,7 +48,7 @@ impl Simulator {
   /// Sends a CALLRESULT frame for an inbound CALL.
   pub(in crate::simulator) async fn send_call_result(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: Value,
   ) -> Result<()> {
@@ -66,7 +66,7 @@ impl Simulator {
   /// Sends a CALLERROR frame for an inbound CALL.
   pub(in crate::simulator) async fn send_call_error(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     code: &str,
     description: &str,
@@ -86,7 +86,7 @@ impl Simulator {
   /// Sends a `FormationViolation` CALLERROR for invalid inbound payloads.
   pub(in crate::simulator) async fn send_formation_violation(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     description: &str,
   ) -> Result<()> {
@@ -104,7 +104,7 @@ impl Simulator {
   /// Sends raw text over WebSocket and logs either summary or full frame.
   pub(in crate::simulator) async fn send_text(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     text: String,
     level: UiLogLevel,
     summary: String,

@@ -1,11 +1,13 @@
 use super::super::payloads::{StatusPayload, to_value};
-use super::super::{ResponseStatus, Result, Simulator, UiLogLevel, WsWrite};
+use super::super::{
+  ResponseStatus, Result, Simulator, UiLogLevel, WsMessageSink,
+};
 
 impl Simulator {
   /// Sends a CALLRESULT with a standard `{ "status": "..." }` payload.
   pub(in crate::simulator) async fn send_status_response(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     status: ResponseStatus,
   ) -> Result<()> {
@@ -34,7 +36,7 @@ impl Simulator {
   /// Resolves a start connector or replies with `Rejected` when none exist.
   pub(in crate::simulator) async fn resolve_start_connector_or_reject(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     requested_connector: Option<u16>,
   ) -> Result<Option<u16>> {
@@ -53,7 +55,7 @@ impl Simulator {
   /// Logs and acknowledges a reset request without mutating simulator state.
   pub(in crate::simulator) async fn handle_reset_only_call(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
   ) -> Result<()> {
     self.log(

@@ -2,8 +2,9 @@ use crate::ocpp::OcppMessageTypeId;
 
 use super::super::{
   Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
-  UiLogLevel, Value, WsWrite, anyhow, build_call_error, json, parse_frame,
-  sanitized_trace_details, sanitized_trace_frame, sanitized_trace_payload,
+  UiLogLevel, Value, WsMessageSink, anyhow, build_call_error, json,
+  parse_frame, sanitized_trace_details, sanitized_trace_frame,
+  sanitized_trace_payload,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +18,7 @@ impl Simulator {
   pub(in crate::simulator) async fn handle_ws_message(
     &mut self,
     frame: Message,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
   ) -> Result<()> {
     match frame {
       Message::Text(text) => {
@@ -42,7 +43,7 @@ impl Simulator {
   pub(in crate::simulator) async fn handle_ws_text(
     &mut self,
     text: String,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
   ) -> Result<()> {
     match parse_frame(&text) {
       Ok(frame) => {
@@ -67,7 +68,7 @@ impl Simulator {
   async fn handle_parsed_ws_frame(
     &mut self,
     frame: OcppFrame,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
   ) -> Result<()> {
     match frame {
       OcppFrame::Call {
@@ -205,7 +206,7 @@ impl Simulator {
 
   async fn handle_malformed_ws_frame(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     error: impl std::fmt::Display,
   ) -> Result<()> {
     self.log(UiLogLevel::Warn, format!("Malformed OCPP frame: {error}"));
@@ -223,7 +224,7 @@ impl Simulator {
   /// Dispatches an inbound CALL to the active protocol-version handler.
   pub(in crate::simulator) async fn handle_incoming_call(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: &str,
     payload: Value,

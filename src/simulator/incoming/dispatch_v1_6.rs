@@ -2,7 +2,7 @@ use super::super::payloads::{ListVersionV1_6Response, to_value};
 use super::super::{
   ExtendedTriggerMessage_V1_6, IncomingAction_V1_6, OcppErrorCode,
   ResponseStatus, Result, Simulator, TriggerMessage_V1_6, UiLogLevel, Value,
-  WsWrite, json,
+  WsMessageSink, json,
 };
 use super::request::{
   RemoteStartTransactionRequestV1_6, RemoteStopTransactionRequestV1_6,
@@ -13,7 +13,7 @@ impl Simulator {
   /// Dispatches an inbound OCPP 1.6 CALL action and sends its response.
   pub(in crate::simulator) async fn handle_incoming_call_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: &str,
     payload: Value,
@@ -36,7 +36,7 @@ impl Simulator {
 
   async fn handle_parsed_incoming_call_v1_6_primary(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: IncomingAction_V1_6,
     payload: &Value,
@@ -140,7 +140,7 @@ impl Simulator {
 
   async fn handle_parsed_incoming_call_v1_6_secondary(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: IncomingAction_V1_6,
     payload: &Value,
@@ -247,7 +247,7 @@ impl Simulator {
 
   async fn handle_remote_start_transaction_call_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -281,7 +281,7 @@ impl Simulator {
 
   async fn handle_remote_stop_transaction_call_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -306,7 +306,7 @@ impl Simulator {
 
   async fn handle_trigger_message_call_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -336,7 +336,7 @@ impl Simulator {
 
   async fn handle_extended_trigger_message_call_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -367,7 +367,7 @@ impl Simulator {
 
   async fn handle_unknown_incoming_action_v1_6(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: &str,
   ) -> Result<()> {

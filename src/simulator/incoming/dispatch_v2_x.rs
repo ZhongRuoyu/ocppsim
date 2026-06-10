@@ -3,7 +3,7 @@ use super::super::payloads::{
 };
 use super::super::{
   IncomingAction_V2_X, OcppErrorCode, ResponseStatus, Result, Simulator,
-  TriggerMessage_V2_X, UiLogLevel, Value, WsWrite, json,
+  TriggerMessage_V2_X, UiLogLevel, Value, WsMessageSink, json,
 };
 use super::request::{
   RequestStartTransactionRequest_V2_X, RequestStopTransactionRequest_V2_X,
@@ -14,7 +14,7 @@ impl Simulator {
   /// Dispatches an inbound OCPP 2.x CALL action and sends its response.
   pub(in crate::simulator) async fn handle_incoming_call_v2_x(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: &str,
     payload: Value,
@@ -37,7 +37,7 @@ impl Simulator {
 
   async fn handle_parsed_incoming_call_v2_x_primary(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: IncomingAction_V2_X,
     payload: &Value,
@@ -132,7 +132,7 @@ impl Simulator {
 
   async fn handle_parsed_incoming_call_v2_x_secondary(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: IncomingAction_V2_X,
     payload: &Value,
@@ -216,7 +216,7 @@ impl Simulator {
 
   async fn handle_request_start_transaction_call_v2_x(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -267,7 +267,7 @@ impl Simulator {
 
   async fn handle_request_stop_transaction_call_v2_x(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -295,7 +295,7 @@ impl Simulator {
 
   async fn handle_trigger_message_call_v2_x(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
@@ -327,7 +327,7 @@ impl Simulator {
 
   async fn handle_unknown_incoming_action_v2_x(
     &mut self,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
     message_id: &str,
     action: &str,
   ) -> Result<()> {

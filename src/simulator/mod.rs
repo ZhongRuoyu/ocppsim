@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use http::HeaderValue;
 use http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
 use serde_json::{Value, json};
@@ -57,6 +57,16 @@ pub use types::{
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
+
+pub(in crate::simulator) trait WsMessageSink:
+  Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
+{
+}
+
+impl<T> WsMessageSink for T where
+  T: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
+{
+}
 
 /// Runs the simulator event loop and bridges UI commands, WS I/O, and state.
 pub async fn run_simulator(
@@ -166,7 +176,7 @@ async fn handle_connected_loop_step(
 async fn handle_connected_command_result(
   simulator: &mut Simulator,
   maybe_command: Option<SimulatorCommand>,
-  write: &mut WsWrite,
+  write: &mut impl WsMessageSink,
   outcome: &mut CommandOutcome,
 ) {
   match maybe_command {
@@ -191,7 +201,7 @@ async fn handle_connected_ws_message(
   message: Option<
     std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
   >,
-  write: &mut WsWrite,
+  write: &mut impl WsMessageSink,
   outcome: &mut CommandOutcome,
 ) -> bool {
   match message {
@@ -414,7 +424,7 @@ impl Simulator {
   async fn handle_connected_command(
     &mut self,
     command: SimulatorCommand,
-    write: &mut WsWrite,
+    write: &mut impl WsMessageSink,
   ) -> Result<CommandOutcome> {
     match command {
       SimulatorCommand::Connect { .. } => {
@@ -719,7 +729,7 @@ impl Simulator {
   }
 
   /// Sends a WebSocket close frame.
-  async fn close_connection(&mut self, write: &mut WsWrite) {
+  async fn close_connection(&mut self, write: &mut impl WsMessageSink) {
     let _ = write.send(Message::Close(None)).await;
   }
 
@@ -734,7 +744,10 @@ impl Simulator {
   }
 
   /// Sends the next queued CALL frame when no pending request exists.
-  async fn try_send_next(&mut self, write: &mut WsWrite) -> Result<()> {
+  async fn try_send_next(
+    &mut self,
+    write: &mut impl WsMessageSink,
+  ) -> Result<()> {
     if self.pending.is_some() {
       return Ok(());
     }
