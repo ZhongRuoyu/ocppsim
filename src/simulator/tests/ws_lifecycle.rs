@@ -667,6 +667,101 @@ async fn malformed_request_start_v2_x_returns_call_error() {
 }
 
 #[tokio::test]
+async fn request_start_v2_x_accepts_not_yet_authorized_active_evse() {
+  for protocol in v2_x_protocols() {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start transaction");
+    let transaction_id = simulator
+      .active_transaction_uid(1)
+      .expect("active transaction uid");
+
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "duplicate-start",
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 12,
+          "idToken": { "idToken": "TOKEN" },
+          "evseId": 1
+        }),
+      )
+      .await
+      .expect("handle request start");
+
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+    assert_eq!(payload["transactionId"], json!(transaction_id));
+  }
+}
+
+#[tokio::test]
+async fn request_start_v2_x_rejects_authorized_active_evse() {
+  for protocol in v2_x_protocols() {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start transaction");
+    let context = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          &call.context,
+          PendingContext::TxEvent {
+            event_type: TxEventType::Started,
+            ..
+          }
+        )
+      })
+      .map(|call| call.context.clone())
+      .expect("queued started event");
+    simulator
+      .apply_call_result_context(
+        &context,
+        &json!({
+          "idTokenInfo": { "status": "Accepted" }
+        }),
+      )
+      .expect("apply transaction event response");
+    simulator.queue.clear();
+
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "duplicate-start",
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 13,
+          "idToken": { "idToken": "TOKEN" },
+          "evseId": 1
+        }),
+      )
+      .await
+      .expect("handle request start");
+
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+    assert!(payload.get("transactionId").is_none());
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[tokio::test]
 async fn malformed_request_stop_v2_x_returns_call_error() {
   for protocol in v2_x_protocols() {
     let (frame, simulator) = capture_inbound_call_response(

@@ -320,6 +320,7 @@ pub(in crate::simulator) struct TransactionState {
   pub(in crate::simulator) local_id: u64,
   pub(in crate::simulator) transaction_uid: String,
   pub(in crate::simulator) id_token: String,
+  pub(in crate::simulator) authorization_accepted: bool,
   pub(in crate::simulator) v1_6_transaction_id: Option<i64>,
   pub(in crate::simulator) remote_start_id: Option<i64>,
   pub(in crate::simulator) seq_no: u64,

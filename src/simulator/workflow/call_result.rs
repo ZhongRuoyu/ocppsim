@@ -309,6 +309,7 @@ impl Simulator {
       return Ok(false);
     };
     if status == ResponseStatus::Accepted {
+      self.mark_transaction_authorized(connector, local_tx_id);
       return Ok(false);
     }
 
@@ -325,6 +326,18 @@ impl Simulator {
       return Ok(true);
     }
     Ok(false)
+  }
+
+  fn mark_transaction_authorized(&mut self, connector: u16, local_tx_id: u64) {
+    let Some(transaction) = self
+      .connectors
+      .get_mut(&connector)
+      .and_then(|state| state.transaction.as_mut())
+      .filter(|transaction| transaction.local_id == local_tx_id)
+    else {
+      return;
+    };
+    transaction.authorization_accepted = true;
   }
 
   fn enqueue_deauthorized_transaction_end(

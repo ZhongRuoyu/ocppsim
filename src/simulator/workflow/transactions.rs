@@ -37,6 +37,7 @@ impl Simulator {
         local_id: local_tx_id,
         transaction_uid: tx_uid,
         id_token: id_token.clone(),
+        authorization_accepted: false,
         v1_6_transaction_id: None,
         remote_start_id,
         seq_no: 0,

@@ -236,13 +236,19 @@ impl Simulator {
     };
 
     if let Some(existing) = self.active_transaction_uid(connector) {
+      let (status, transaction_id) =
+        if self.active_transaction_authorized(connector) {
+          (ResponseStatus::Rejected, None)
+        } else {
+          (ResponseStatus::Accepted, Some(existing.as_str()))
+        };
       return self
         .send_call_result(
           write,
           message_id,
           to_value(&RequestStartTransactionResponse {
-            status: ResponseStatus::Accepted.as_str(),
-            transaction_id: Some(&existing),
+            status: status.as_str(),
+            transaction_id,
           }),
         )
         .await;

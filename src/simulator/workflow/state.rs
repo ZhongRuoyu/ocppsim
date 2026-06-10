@@ -534,6 +534,18 @@ impl Simulator {
     })
   }
 
+  /// Returns whether the connector's active transaction is authorized.
+  pub(in crate::simulator) fn active_transaction_authorized(
+    &self,
+    connector: u16,
+  ) -> bool {
+    self
+      .connectors
+      .get(&connector)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some_and(|tx| tx.authorization_accepted)
+  }
+
   /// Finds a connector by OCPP 2.x transaction ID.
   pub(in crate::simulator) fn find_transaction_by_uid(
     &self,
