@@ -9,7 +9,9 @@ use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
 use crate::config::{ProfileDefaults, profile_names, resolve_profile};
-use crate::ocpp::{OcppVersion, is_valid_basic_auth_password};
+use crate::ocpp::{
+  OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
+};
 
 const DEFAULT_CONNECTORS: u16 = 1;
 const DEFAULT_PROTOCOL: OcppVersion = OcppVersion::V1_6;
@@ -316,6 +318,7 @@ impl CliArgs {
 
     apply_cli_overrides(&mut resolved, &self)?;
     validate_basic_auth_password(
+      resolved.protocol,
       resolved.basic_auth_password.as_deref(),
       "basic auth password",
     )?;
@@ -465,7 +468,11 @@ fn apply_cli_overrides(
     resolved.security_profile = Some(profile);
   }
   if let Some(password) = &cli.basic_auth_password {
-    validate_basic_auth_password(Some(password), "--basic-auth-password")?;
+    validate_basic_auth_password(
+      resolved.protocol,
+      Some(password),
+      "--basic-auth-password",
+    )?;
     resolved.basic_auth_password = Some(password.clone());
   }
   if let Some(path) = &cli.ca_cert {
@@ -489,13 +496,18 @@ fn validate_security_profile(profile: u8) -> Result<()> {
 }
 
 fn validate_basic_auth_password(
+  protocol: OcppVersion,
   password: Option<&str>,
   source: &str,
 ) -> Result<()> {
-  if password.is_none_or(is_valid_basic_auth_password) {
+  if password.is_none_or(|value| is_valid_basic_auth_password(protocol, value))
+  {
     Ok(())
   } else {
-    bail!("{source} must be 32 to 40 ASCII hexadecimal characters.")
+    bail!(
+      "{source} must be {}.",
+      basic_auth_password_requirement(protocol)
+    )
   }
 }
 
@@ -1237,6 +1249,39 @@ id = "CP-DEMO"
     assert!(
       error.to_string().contains("ASCII hexadecimal"),
       "unexpected error: {error}"
+    );
+  }
+
+  #[test]
+  /// Verifies OCPP 2.x CLI Basic Auth passwords use passwordString rules.
+  fn cli_basic_auth_password_accepts_v2_x_password_string() {
+    let args = CliArgs {
+      profile: None,
+      config_path: None,
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("CP-TEST".to_string()),
+      no_append_cp_id: false,
+      connectors: None,
+      protocol: Some(super::ProtocolArg::V2_0_1),
+      vendor: None,
+      model: None,
+      firmware: None,
+      log_path: None,
+      trace_frames: false,
+      strict: false,
+      request_timeout_seconds: None,
+      heartbeat_seconds: None,
+      security_profile: Some(1),
+      basic_auth_password: Some("not-a-hex-passwd".to_string()),
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
+    };
+
+    let resolved = args.resolve().expect("arguments should resolve");
+    assert_eq!(
+      resolved.basic_auth_password.as_deref(),
+      Some("not-a-hex-passwd")
     );
   }
 

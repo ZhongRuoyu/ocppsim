@@ -176,7 +176,13 @@ Security profile settings validate the transport before connecting.
 Profile 1 requires `ws://` plus HTTP Basic authentication.
 Profile 2 requires `wss://` plus HTTP Basic authentication.
 Profile 3 requires `wss://` plus `--client-cert` and `--client-key`.
-Basic Auth passwords must be 32 to 40 ASCII hexadecimal characters.
+Basic Auth password validation follows the selected OCPP version.
+OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
+characters.
+OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
+`passwordString` characters.
+OCPP 2.1 `BasicAuthPassword` values must be 16 to 64 UTF-8 `passwordString`
+characters.
 Profile 1 sends Basic Auth over an unencrypted WebSocket; the password is only
 Base64 encoded on the wire.
 Use profile 1 only on trusted lab networks, tunnels, or VPNs.

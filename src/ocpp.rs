@@ -1,15 +1,62 @@
 use serde_json::{Value, json};
 
-pub const BASIC_AUTH_PASSWORD_MIN_LENGTH: usize = 32;
-pub const BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 40;
+const OCPP_V1_6_AUTHORIZATION_KEY_MIN_LENGTH: usize = 32;
+const OCPP_V1_6_AUTHORIZATION_KEY_MAX_LENGTH: usize = 40;
+const OCPP_V2_X_BASIC_AUTH_PASSWORD_MIN_LENGTH: usize = 16;
+const OCPP_V2_0_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 40;
+const OCPP_V2_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 64;
 
-/// Returns whether a Basic Auth password fits the supported OCPP security key
-/// representation.
-pub fn is_valid_basic_auth_password(value: &str) -> bool {
+/// Returns the human-readable Basic Auth password requirement for a protocol.
+pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
+  match protocol {
+    OcppVersion::V1_6 => "32 to 40 ASCII hexadecimal characters",
+    OcppVersion::V2_0_1 => "16 to 40 OCPP passwordString characters",
+    OcppVersion::V2_1 => "16 to 64 UTF-8 passwordString characters",
+  }
+}
+
+/// Returns whether a Basic Auth password fits the active OCPP protocol.
+pub fn is_valid_basic_auth_password(
+  protocol: OcppVersion,
+  value: &str,
+) -> bool {
+  match protocol {
+    OcppVersion::V1_6 => is_valid_v1_6_authorization_key(value),
+    OcppVersion::V2_0_1 => is_valid_v2_0_1_basic_auth_password(value),
+    OcppVersion::V2_1 => has_char_length(
+      value,
+      OCPP_V2_X_BASIC_AUTH_PASSWORD_MIN_LENGTH,
+      OCPP_V2_1_BASIC_AUTH_PASSWORD_MAX_LENGTH,
+    ),
+  }
+}
+
+fn is_valid_v1_6_authorization_key(value: &str) -> bool {
   let bytes = value.as_bytes();
-  (BASIC_AUTH_PASSWORD_MIN_LENGTH..=BASIC_AUTH_PASSWORD_MAX_LENGTH)
+  (OCPP_V1_6_AUTHORIZATION_KEY_MIN_LENGTH
+    ..=OCPP_V1_6_AUTHORIZATION_KEY_MAX_LENGTH)
     .contains(&bytes.len())
     && bytes.iter().all(u8::is_ascii_hexdigit)
+}
+
+fn is_valid_v2_0_1_basic_auth_password(value: &str) -> bool {
+  has_char_length(
+    value,
+    OCPP_V2_X_BASIC_AUTH_PASSWORD_MIN_LENGTH,
+    OCPP_V2_0_1_BASIC_AUTH_PASSWORD_MAX_LENGTH,
+  ) && value.chars().all(is_v2_0_1_password_string_char)
+}
+
+fn has_char_length(value: &str, min: usize, max: usize) -> bool {
+  (min..=max).contains(&value.chars().count())
+}
+
+fn is_v2_0_1_password_string_char(character: char) -> bool {
+  character.is_ascii_alphanumeric()
+    || matches!(
+      character,
+      '*' | '-' | '_' | '=' | ':' | '+' | '|' | '@' | '.'
+    )
 }
 
 #[allow(non_camel_case_types)]

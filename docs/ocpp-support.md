@@ -30,8 +30,12 @@ Security support is intentionally simulator-level.
 The transport layer supports security profiles 1 and 2 with HTTP Basic
 authentication and profile 3 with configured client certificate/key paths.
 OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
-characters, are write-only on readback, and trigger reconnect when changed on
-an active connection.
+characters.
+OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
+`passwordString` characters, and OCPP 2.1 `BasicAuthPassword` values must be
+16 to 64 UTF-8 `passwordString` characters.
+Security password values are write-only on readback and trigger reconnect when
+changed on an active connection.
 Certificate-management and signed-firmware actions keep an in-memory synthetic
 certificate store and obvious invalid-value detection, but they do not perform
 full PKI validation, OCSP/CRL checks, real CSR generation, firmware binary

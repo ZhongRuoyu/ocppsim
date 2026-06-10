@@ -82,7 +82,7 @@ impl Simulator {
   }
 
   fn set_basic_auth_password(&mut self, value: &str) -> ResponseStatus {
-    if !is_valid_basic_auth_password(value) {
+    if !is_valid_basic_auth_password(self.config.protocol, value) {
       return ResponseStatus::Rejected;
     }
     self.security.basic_auth_password = Some(value.to_string());
@@ -144,7 +144,9 @@ impl Simulator {
         .security
         .basic_auth_password
         .as_deref()
-        .is_some_and(is_valid_basic_auth_password)
+        .is_some_and(|password| {
+          is_valid_basic_auth_password(self.config.protocol, password)
+        })
     {
       return false;
     }

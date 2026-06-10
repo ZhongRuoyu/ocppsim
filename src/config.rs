@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
-use crate::ocpp::{OcppVersion, is_valid_basic_auth_password};
+use crate::ocpp::{
+  OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
+};
 
 /// Built-in defaults used when profile/global config entries are omitted.
 #[derive(Debug, Clone)]
@@ -192,13 +194,14 @@ pub fn resolve_profile(
   let basic_auth_password =
     profile.basic_auth_password.or(global.basic_auth_password);
   if let Some(password) = basic_auth_password.as_deref()
-    && !is_valid_basic_auth_password(password)
+    && !is_valid_basic_auth_password(protocol, password)
   {
     bail!(
       "Profile `{}` has invalid `basic-auth-password` in {}. \
-      Expected 32 to 40 ASCII hexadecimal characters.",
+      Expected {}.",
       profile_name,
-      config_path.display()
+      config_path.display(),
+      basic_auth_password_requirement(protocol)
     );
   }
 
@@ -419,6 +422,39 @@ basic-auth-password = "not-a-hex-password"
     assert!(
       error.to_string().contains("basic-auth-password"),
       "unexpected error: {error}"
+    );
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies OCPP 2.x profiles accept passwordString Basic Auth passwords.
+  fn resolve_profile_accepts_v2_x_basic_auth_password_string() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.0.1"
+
+[charge-points.demo]
+ws-url = "wss://example.com/ocpp"
+id = "CP-DEMO"
+security-profile = 2
+basic-auth-password = "not-a-hex-passwd"
+"#,
+    );
+    let defaults = super::ProfileDefaults {
+      connectors: 1,
+      protocol: super::OcppVersion::V1_6,
+      vendor: "ocppsim".to_string(),
+      model: "ocppsim".to_string(),
+      firmware: "test".to_string(),
+      request_timeout_seconds: 30,
+    };
+
+    let resolved =
+      super::resolve_profile(&path, "demo", &defaults).expect("profile");
+    assert_eq!(
+      resolved.basic_auth_password.as_deref(),
+      Some("not-a-hex-passwd")
     );
 
     let _ = fs::remove_file(path);

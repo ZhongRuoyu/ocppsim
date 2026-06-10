@@ -200,6 +200,47 @@ fn basic_auth_password_rejects_non_hex_and_short_and_long_values() {
 }
 
 #[test]
+fn basic_auth_password_v2_x_uses_password_string_rules() {
+  let mut v2_0_1 = simulator_for_tests_with_protocol(OcppVersion::V2_0_1);
+  let response = v2_0_1
+    .set_variables_v2_x(&json!({
+      "setVariableData": [
+        set_variable_data("BasicAuthPassword", "not-a-hex-passwd")
+      ]
+    }))
+    .expect("set variables");
+  assert_eq!(
+    response["setVariableResult"][0]["attributeStatus"],
+    ResponseStatus::Accepted.as_str()
+  );
+
+  let response = v2_0_1
+    .set_variables_v2_x(&json!({
+      "setVariableData": [
+        set_variable_data("BasicAuthPassword", "abcdefghijklmnop!")
+      ]
+    }))
+    .expect("set variables");
+  assert_eq!(
+    response["setVariableResult"][0]["attributeStatus"],
+    ResponseStatus::Rejected.as_str()
+  );
+
+  let mut v2_1 = simulator_for_tests_with_protocol(OcppVersion::V2_1);
+  let response = v2_1
+    .set_variables_v2_x(&json!({
+      "setVariableData": [
+        set_variable_data("BasicAuthPassword", "abcdefghijklmnop!")
+      ]
+    }))
+    .expect("set variables");
+  assert_eq!(
+    response["setVariableResult"][0]["attributeStatus"],
+    ResponseStatus::Accepted.as_str()
+  );
+}
+
+#[test]
 fn security_profile_v1_6_enforces_upgrade_prerequisites() {
   let mut simulator = simulator_for_tests();
 
