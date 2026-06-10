@@ -635,39 +635,13 @@ mod tests {
 
   static TEMP_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-  /// Builds baseline profile-mode args used by test cases.
-  fn base_profile_args() -> CliArgs {
-    CliArgs {
-      profile: Some("test".to_string()),
-      config_path: None,
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
-    }
-  }
-
-  /// Builds baseline direct-mode args used by test cases.
-  fn base_direct_args() -> CliArgs {
+  /// Builds all-default args used by test cases.
+  fn base_args() -> CliArgs {
     CliArgs {
       profile: None,
       config_path: None,
-      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
-      cp_id: Some("CP-TEST".to_string()),
+      ws_url: None,
+      cp_id: None,
       no_append_cp_id: false,
       connectors: None,
       protocol: None,
@@ -690,8 +664,11 @@ mod tests {
   #[test]
   /// Verifies profile mode rejects simultaneous direct connection flags.
   fn rejects_profile_with_ws_url_or_cp_id() {
-    let mut args = base_profile_args();
-    args.ws_url = Some("ws://example".to_string());
+    let args = CliArgs {
+      profile: Some("test".to_string()),
+      ws_url: Some("ws://example".to_string()),
+      ..base_args()
+    };
     assert!(args.resolve().is_err());
   }
 
@@ -699,26 +676,16 @@ mod tests {
   /// Verifies startup can resolve without an initial connection target.
   fn resolves_without_initial_connection_target() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
-      ws_url: None,
-      cp_id: None,
       no_append_cp_id: true,
       connectors: Some(2),
       protocol: Some(super::ProtocolArg::V1_6),
       vendor: Some("vendor".to_string()),
       model: Some("model".to_string()),
       firmware: Some("1.0.0".to_string()),
-      log_path: None,
       trace_frames: true,
-      strict: false,
       request_timeout_seconds: Some(20),
       heartbeat_seconds: Some(5),
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let resolved = args.resolve().expect("resolution should succeed");
     assert!(resolved.ws_url.is_none());
@@ -735,26 +702,8 @@ mod tests {
   /// Verifies direct mode fails when `--cp-id` is set without `--ws-url`.
   fn direct_args_require_ws_url_when_only_cp_id_is_set() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
-      ws_url: None,
       cp_id: Some("CP-DEMO".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("resolution should fail");
     assert_eq!(
@@ -767,26 +716,8 @@ mod tests {
   /// Verifies direct mode fails when `--ws-url` is set without `--cp-id`.
   fn direct_args_require_cp_id_when_only_ws_url_is_set() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("resolution should fail");
     assert_eq!(
@@ -817,24 +748,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -862,24 +776,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     assert!(args.resolve().is_err());
 
@@ -954,26 +851,10 @@ id = "CP-BETA"
   /// Verifies CLI `--log-path` overrides resolved log file destination.
   fn applies_log_path_override() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
       log_path: Some(PathBuf::from("./sim.log")),
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -995,24 +876,7 @@ log-path = "./profile.log"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1045,24 +909,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1112,24 +959,7 @@ heartbeat-seconds = 0
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1177,10 +1007,6 @@ heartbeat-seconds = 12
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
       protocol: Some(super::ProtocolArg::V2_1),
       vendor: Some("cli-vendor".to_string()),
       model: Some("cli-model".to_string()),
@@ -1190,11 +1016,7 @@ heartbeat-seconds = 12
       strict: true,
       request_timeout_seconds: Some(99),
       heartbeat_seconds: Some(0),
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1227,24 +1049,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1257,26 +1062,10 @@ id = "CP-DEMO"
   /// Verifies CLI heartbeat value `0` disables startup heartbeats.
   fn cli_heartbeat_zero_disables_periodic_heartbeat() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
       heartbeat_seconds: Some(0),
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1287,26 +1076,11 @@ id = "CP-DEMO"
   /// Verifies invalid CLI Basic Auth passwords fail before runtime.
   fn cli_basic_auth_password_rejects_invalid_format() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
       security_profile: Some(1),
       basic_auth_password: Some("not-a-hex-password".to_string()),
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should reject password");
     assert!(
@@ -1319,26 +1093,12 @@ id = "CP-DEMO"
   /// Verifies OCPP 2.x CLI Basic Auth passwords use passwordString rules.
   fn cli_basic_auth_password_accepts_v2_x_password_string() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
       protocol: Some(super::ProtocolArg::V2_0_1),
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
       security_profile: Some(1),
       basic_auth_password: Some("not-a-hex-passwd".to_string()),
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1351,11 +1111,13 @@ id = "CP-DEMO"
   #[test]
   /// Verifies Basic Auth profiles reject ambiguous identity separators.
   fn basic_auth_rejects_colon_in_charge_point_id() {
-    let mut args = base_direct_args();
-    args.cp_id = Some("CP:TEST".to_string());
-    args.security_profile = Some(1);
-    args.basic_auth_password =
-      Some("0123456789abcdef0123456789abcdef".to_string());
+    let args = CliArgs {
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("CP:TEST".to_string()),
+      security_profile: Some(1),
+      basic_auth_password: Some("0123456789abcdef0123456789abcdef".to_string()),
+      ..base_args()
+    };
 
     let error = args.resolve().expect_err("should reject cp id");
     assert!(
@@ -1367,18 +1129,24 @@ id = "CP-DEMO"
   #[test]
   /// Verifies OCPP 2.x charge point identity limits are enforced.
   fn ocpp_2_x_rejects_invalid_charge_point_id() {
-    let mut colon_args = base_direct_args();
-    colon_args.protocol = Some(super::ProtocolArg::V2_1);
-    colon_args.cp_id = Some("CP:TEST".to_string());
+    let colon_args = CliArgs {
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("CP:TEST".to_string()),
+      protocol: Some(super::ProtocolArg::V2_1),
+      ..base_args()
+    };
     let error = colon_args.resolve().expect_err("should reject colon");
     assert!(
       error.to_string().contains("must not contain `:`"),
       "unexpected error: {error}"
     );
 
-    let mut long_args = base_direct_args();
-    long_args.protocol = Some(super::ProtocolArg::V2_0_1);
-    long_args.cp_id = Some("C".repeat(49));
+    let long_args = CliArgs {
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("C".repeat(49)),
+      protocol: Some(super::ProtocolArg::V2_0_1),
+      ..base_args()
+    };
     let error = long_args.resolve().expect_err("should reject length");
     assert!(
       error.to_string().contains("at most 48"),
@@ -1390,26 +1158,10 @@ id = "CP-DEMO"
   /// Verifies tilde expansion for CLI paths and helper behavior.
   fn expands_tilde_in_cli_paths() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
       log_path: Some(PathBuf::from("~/sim.log")),
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1429,24 +1181,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(PathBuf::from("/nonexistent/path/ocppsim.toml")),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1469,24 +1204,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("no-such-profile".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1512,24 +1230,7 @@ protocol = "3.0"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1556,24 +1257,7 @@ id = "CP-DEMO"
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1599,24 +1283,7 @@ connectors = 0
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1631,26 +1298,10 @@ connectors = 0
   /// Verifies that `--connectors 0` on the CLI is rejected.
   fn cli_connectors_zero_rejects() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
       connectors: Some(0),
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
@@ -1674,24 +1325,7 @@ append-cp-id = false
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1715,24 +1349,8 @@ append-cp-id = true
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
       no_append_cp_id: true,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1745,26 +1363,9 @@ append-cp-id = true
   /// Verifies direct mode applies expected default values correctly.
   fn direct_mode_applies_defaults() {
     let args = CliArgs {
-      profile: None,
-      config_path: None,
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       cp_id: Some("CP-TEST".to_string()),
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("arguments should resolve");
@@ -1796,24 +1397,7 @@ connectors = 3
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1837,24 +1421,8 @@ connectors = 3
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
       connectors: Some(5),
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
 
     let resolved = args.resolve().expect("profile should resolve");
@@ -1871,24 +1439,7 @@ connectors = 3
     let args = CliArgs {
       profile: Some("demo".to_string()),
       config_path: Some(path.clone()),
-      ws_url: None,
-      cp_id: None,
-      no_append_cp_id: false,
-      connectors: None,
-      protocol: None,
-      vendor: None,
-      model: None,
-      firmware: None,
-      log_path: None,
-      trace_frames: false,
-      strict: false,
-      request_timeout_seconds: None,
-      heartbeat_seconds: None,
-      security_profile: None,
-      basic_auth_password: None,
-      ca_cert: None,
-      client_cert: None,
-      client_key: None,
+      ..base_args()
     };
     let error = args.resolve().expect_err("should fail");
     assert!(
