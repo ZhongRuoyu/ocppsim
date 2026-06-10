@@ -3,6 +3,8 @@ use serde_json::{Value, json};
 use super::*;
 
 type SchemaCase = (&'static str, Value);
+const TEST_CERTIFICATE: &str =
+  "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----";
 
 #[test]
 fn supported_v1_6_inbound_responses_validate_against_schemas() {
@@ -100,7 +102,7 @@ fn v1_6_dynamic_inbound_response_cases(
     simulator
       .install_certificate_from_payload(&json!({
         "certificateType": "CentralSystemRootCertificate",
-        "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificate": TEST_CERTIFICATE
       }))
       .expect("install certificate"),
     ResponseStatus::Accepted
@@ -200,7 +202,7 @@ fn v2_x_dynamic_inbound_response_cases(
     simulator
       .install_certificate_from_payload(&json!({
         "certificateType": "CSMSRootCertificate",
-        "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificate": TEST_CERTIFICATE
       }))
       .expect("install certificate"),
     ResponseStatus::Accepted
@@ -352,7 +354,7 @@ fn assert_representative_v1_6_security_payloads_validate(
       "firmware": {
         "location": "https://csms.example/firmware.bin",
         "retrieveDateTime": now_timestamp(),
-        "signingCertificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----",
+        "signingCertificate": TEST_CERTIFICATE,
         "signature": "signature"
       }
     }))

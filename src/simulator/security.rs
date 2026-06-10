@@ -26,7 +26,11 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_tungstenite::Connector;
 use url::Url;
 
-const SIMULATED_CSR: &str = "-----BEGIN CERTIFICATE REQUEST-----\nT0NQUFNJTS1TSU1VTEFURUQtQ1NS\n-----END CERTIFICATE REQUEST-----";
+const SIMULATED_CSR: &str = concat!(
+  "-----BEGIN CERTIFICATE REQUEST-----\n",
+  "T0NQUFNJTS1TSU1VTEFURUQtQ1NS\n",
+  "-----END CERTIFICATE REQUEST-----"
+);
 const MAX_INSTALL_CERTIFICATE_LENGTH: usize = 5_500;
 
 impl Simulator {
@@ -41,7 +45,8 @@ impl Simulator {
     match profile {
       1 if scheme != "ws" => {
         return Err(anyhow!(
-          "Security profile 1 requires a ws:// URL with HTTP Basic authentication."
+          "Security profile 1 requires a ws:// URL with HTTP Basic \
+          authentication."
         ));
       }
       2 | 3 if scheme != "wss" => {
@@ -141,7 +146,8 @@ impl Simulator {
       (None, None) => builder.with_no_client_auth(),
       _ => {
         return Err(anyhow!(
-          "Client certificate authentication requires both --client-cert and --client-key."
+          "Client certificate authentication requires both --client-cert and \
+          --client-key."
         ));
       }
     };
@@ -444,15 +450,16 @@ impl Simulator {
         .map(|info| format!(" ({info})"))
         .unwrap_or_default();
       self.log(
-          UiLogLevel::Info,
-          format!(
-            "Including {} recorded security event(s) in log export; latest={} at {}{}.",
-            self.security.events.len(),
-            event.event_type,
-            event.timestamp,
-            detail
-          ),
-        );
+        UiLogLevel::Info,
+        format!(
+          "Including {} recorded security event(s) in log export; \
+            latest={} at {}{}.",
+          self.security.events.len(),
+          event.event_type,
+          event.timestamp,
+          detail
+        ),
+      );
     }
     self.enqueue_log_status_notification(
       ResponseStatus::Uploading.as_str(),

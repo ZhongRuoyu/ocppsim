@@ -111,7 +111,8 @@ impl Simulator {
             write,
             message_id,
             OcppErrorCode::NotSupported.as_str(),
-            "Use SignedUpdateFirmware for OCPP 1.6 security whitepaper firmware updates.",
+            "Use SignedUpdateFirmware for OCPP 1.6 security whitepaper \
+            firmware updates.",
             json!({}),
           )
           .await?;

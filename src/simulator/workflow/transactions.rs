@@ -46,7 +46,8 @@ impl Simulator {
     self.log(
       UiLogLevel::Info,
       format!(
-        "Transaction started locally on connector {connector} with idToken {id_token}"
+        "Transaction started locally on connector {connector} with \
+        idToken {id_token}"
       ),
     );
 

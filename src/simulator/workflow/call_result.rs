@@ -211,7 +211,8 @@ impl Simulator {
         self.log(
           UiLogLevel::Info,
           format!(
-            "StartTransaction accepted on connector {connector} transactionId={tx_id}"
+            "StartTransaction accepted on connector {connector} \
+            transactionId={tx_id}"
           ),
         );
       } else {
@@ -246,7 +247,8 @@ impl Simulator {
     self.log(
       UiLogLevel::Info,
       format!(
-        "StopTransaction acknowledged on connector {connector} localTx={local_tx_id}"
+        "StopTransaction acknowledged on connector {connector} \
+        localTx={local_tx_id}"
       ),
     );
     Ok(())
@@ -278,7 +280,8 @@ impl Simulator {
     self.log(
       UiLogLevel::Info,
       format!(
-        "TransactionEvent {event_type:?} acknowledged connector={connector} localTx={local_tx_id}"
+        "TransactionEvent {event_type:?} acknowledged \
+        connector={connector} localTx={local_tx_id}"
       ),
     );
     Ok(())

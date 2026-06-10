@@ -8,6 +8,10 @@ use serde_json::json;
 use super::*;
 
 static TEMP_SECURITY_COUNTER: AtomicU64 = AtomicU64::new(0);
+const TEST_CERTIFICATE: &str =
+  "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----";
+const ROOT_CERTIFICATE: &str =
+  "-----BEGIN CERTIFICATE-----ROOT-----END CERTIFICATE-----";
 
 #[test]
 fn certificate_install_list_and_delete_v1_6() {
@@ -15,7 +19,7 @@ fn certificate_install_list_and_delete_v1_6() {
   let install_status = simulator
     .install_certificate_from_payload(&json!({
       "certificateType": "CentralSystemRootCertificate",
-      "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+      "certificate": TEST_CERTIFICATE
     }))
     .expect("install certificate");
 
@@ -56,7 +60,7 @@ fn certificate_install_list_and_delete_v2_x() {
     let install_status = simulator
       .install_certificate_from_payload(&json!({
         "certificateType": "CSMSRootCertificate",
-        "certificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificate": TEST_CERTIFICATE
       }))
       .expect("install certificate");
     assert_eq!(install_status, ResponseStatus::Accepted);
@@ -98,7 +102,7 @@ fn signed_firmware_invalid_signature_records_security_event() {
       "firmware": {
         "location": "https://csms.example/firmware.bin",
         "retrieveDateTime": now_timestamp(),
-        "signingCertificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----",
+        "signingCertificate": TEST_CERTIFICATE,
         "signature": "invalid-signature"
       }
     }))
@@ -285,7 +289,7 @@ fn security_profile_v1_6_enforces_upgrade_prerequisites() {
     simulator
       .install_certificate_from_payload(&json!({
         "certificateType": "CentralSystemRootCertificate",
-        "certificate": "-----BEGIN CERTIFICATE-----ROOT-----END CERTIFICATE-----"
+        "certificate": ROOT_CERTIFICATE
       }))
       .expect("install root"),
     ResponseStatus::Accepted
@@ -417,7 +421,7 @@ fn security_configuration_changes_request_reconnect_when_connected() {
     simulator
       .install_certificate_from_payload(&json!({
         "certificateType": "CentralSystemRootCertificate",
-        "certificate": "-----BEGIN CERTIFICATE-----ROOT-----END CERTIFICATE-----"
+        "certificate": ROOT_CERTIFICATE
       }))
       .expect("install root"),
     ResponseStatus::Accepted
@@ -644,7 +648,7 @@ fn signed_firmware_rejects_unsupported_file_transfer_schemes() {
       "firmware": {
         "location": "ftp://csms.example/firmware.bin",
         "retrieveDateTime": now_timestamp(),
-        "signingCertificate": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----",
+        "signingCertificate": TEST_CERTIFICATE,
         "signature": "abcdef"
       }
     }))
@@ -674,7 +678,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
   assert_eq!(
     simulator
       .certificate_signed_v2_x(&json!({
-        "certificateChain": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificateChain": TEST_CERTIFICATE
       }))
       .expect("missing request id"),
     ResponseStatus::Rejected
@@ -686,7 +690,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
     simulator
       .certificate_signed_v2_x(&json!({
         "requestId": request_id + 1,
-        "certificateChain": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificateChain": TEST_CERTIFICATE
       }))
       .expect("unknown request id"),
     ResponseStatus::Rejected
@@ -695,7 +699,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
     simulator
       .certificate_signed_v2_x(&json!({
         "requestId": request_id,
-        "certificateChain": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificateChain": TEST_CERTIFICATE
       }))
       .expect("matching request id"),
     ResponseStatus::Accepted
@@ -704,7 +708,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
     simulator
       .certificate_signed_v2_x(&json!({
         "requestId": request_id,
-        "certificateChain": "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----"
+        "certificateChain": TEST_CERTIFICATE
       }))
       .expect("duplicate request id"),
     ResponseStatus::Rejected
