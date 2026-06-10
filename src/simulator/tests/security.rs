@@ -730,7 +730,7 @@ fn signed_firmware_rejects_unsupported_file_transfer_schemes() {
 }
 
 #[test]
-fn certificate_signed_v2_1_correlates_request_ids() {
+fn certificate_signed_v2_1_accepts_optional_request_id() {
   let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
 
   assert_eq!(
@@ -739,7 +739,7 @@ fn certificate_signed_v2_1_correlates_request_ids() {
         "certificateChain": TEST_CERTIFICATE
       }))
       .expect("missing request id"),
-    ResponseStatus::Rejected
+    ResponseStatus::Accepted
   );
 
   simulator.enqueue_sign_certificate(Some("ChargingStationCertificate"));

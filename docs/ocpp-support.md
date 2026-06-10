@@ -60,7 +60,7 @@ synthetic.
 - A02/A03 certificate update: simulated.
   `ExtendedTriggerMessage(SignChargePointCertificate)` can enqueue
   `SignCertificate`, `CertificateSigned` installs a synthetic Charge Point
-  certificate, and OCPP 2.1 request ids are correlated.
+  certificate, and OCPP 2.1 request ids are correlated when provided.
   Real key generation, CSR creation, and certificate-chain validation are not
   implemented.
 - A05 security profile upgrade: implemented at simulator level.

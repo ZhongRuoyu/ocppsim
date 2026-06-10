@@ -410,11 +410,9 @@ impl Simulator {
     &mut self,
     payload: &Value,
   ) -> Result<ResponseStatus> {
-    if self.config.protocol == OcppVersion::V2_1 {
-      let Some(request_id) = payload.get("requestId").and_then(Value::as_i64)
-      else {
-        return Ok(ResponseStatus::Rejected);
-      };
+    if self.config.protocol == OcppVersion::V2_1
+      && let Some(request_id) = payload.get("requestId").and_then(Value::as_i64)
+    {
       if !self
         .security
         .pending_signing_request_ids
