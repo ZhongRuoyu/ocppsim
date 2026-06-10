@@ -872,6 +872,28 @@ async fn strict_mode_warns_when_request_schema_is_missing() {
 }
 
 #[tokio::test]
+async fn invalid_composite_schedule_unit_returns_property_constraint() {
+  for strict in [false, true] {
+    let (frame, _) = capture_inbound_call_response_with_strict(
+      OcppVersion::V1_6,
+      strict,
+      "GetCompositeSchedule",
+      json!({
+        "connectorId": 1,
+        "duration": 60,
+        "chargingRateUnit": "Wh",
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "PropertyConstraintViolation");
+  }
+}
+
+#[tokio::test]
 async fn non_strict_mode_keeps_pragmatic_v2_x_request_handling() {
   for protocol in v2_x_protocols() {
     let (frame, _) =

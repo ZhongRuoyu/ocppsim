@@ -227,6 +227,15 @@ impl Simulator {
     payload: &Value,
   ) -> Result<Value> {
     let request = CompositeScheduleRequestV1_6::parse(payload)?;
+    let charging_rate_unit = request
+      .charging_rate_unit
+      .as_deref()
+      .map(|value| {
+        ChargingRateUnit::parse(value)
+          .ok_or_else(|| anyhow!("chargingRateUnit must be A or W."))
+      })
+      .transpose()?
+      .unwrap_or(ChargingRateUnit::W);
     let Some(state) = self.connectors.get(&request.connector) else {
       return Ok(to_value(&GetCompositeScheduleV1_6Response {
         status: ResponseStatus::Rejected.as_str(),
@@ -243,10 +252,6 @@ impl Simulator {
         charging_schedule: None,
       }));
     };
-    let charging_rate_unit = request
-      .charging_rate_unit
-      .as_deref()
-      .unwrap_or(ChargingRateUnit::W.as_str());
     let timestamp = now_timestamp();
 
     Ok(to_value(&GetCompositeScheduleV1_6Response {
@@ -255,7 +260,7 @@ impl Simulator {
       schedule_start: Some(&timestamp),
       charging_schedule: Some(ChargingScheduleV1_6 {
         duration: request.duration,
-        charging_rate_unit,
+        charging_rate_unit: charging_rate_unit.as_str(),
         charging_schedule_period: vec![ChargingSchedulePeriod {
           start_period: 0,
           limit,

@@ -347,6 +347,8 @@ The first supported limit in the stored profile drives connector suspension and
 composite schedule output.
 A connector with no stored profile returns `Rejected` for composite schedule
 requests.
+OCPP 1.6 `GetCompositeSchedule` rejects invalid `chargingRateUnit` values with
+CALLERROR `PropertyConstraintViolation`.
 A stored limit of `0` is different from no profile: it is accepted and drives
 the connector into a suspended state while the transaction remains active.
 `ClearChargingProfile` honors connector or EVSE, profile id, purpose, and stack

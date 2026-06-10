@@ -147,6 +147,24 @@ fn get_composite_schedule_v1_6_uses_profile_limit() {
 }
 
 #[test]
+fn get_composite_schedule_v1_6_rejects_invalid_unit() {
+  let simulator = simulator_for_tests();
+  let error = simulator
+    .get_composite_schedule_v1_6(&json!({
+      "connectorId": 1,
+      "duration": 60,
+      "chargingRateUnit": "Wh",
+    }))
+    .expect_err("invalid unit should reject");
+
+  assert!(
+    error
+      .to_string()
+      .contains("chargingRateUnit must be A or W")
+  );
+}
+
+#[test]
 fn clear_charging_profile_v1_6_honors_connector_filter() {
   let mut simulator = simulator_for_tests();
   assert_eq!(

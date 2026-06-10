@@ -6,6 +6,7 @@ use super::super::{
   parse_frame, sanitized_trace_details, sanitized_trace_frame,
   sanitized_trace_payload,
 };
+use super::request::CompositeScheduleRequestV1_6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IncomingRequestSchemaValidation {
@@ -229,6 +230,15 @@ impl Simulator {
     action: &str,
     payload: Value,
   ) -> Result<()> {
+    if self
+      .handle_get_composite_schedule_unit_error(
+        write, message_id, action, &payload,
+      )
+      .await?
+    {
+      return Ok(());
+    }
+
     if self.config.strict {
       match self.validate_incoming_request_schema(action, &payload) {
         Ok(IncomingRequestSchemaValidation::Valid) => {}
@@ -267,6 +277,45 @@ impl Simulator {
           .await
       }
     }
+  }
+
+  async fn handle_get_composite_schedule_unit_error(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+    action: &str,
+    payload: &Value,
+  ) -> Result<bool> {
+    if self.config.protocol != OcppVersion::V1_6
+      || action != "GetCompositeSchedule"
+    {
+      return Ok(false);
+    }
+
+    let invalid_unit =
+      match CompositeScheduleRequestV1_6::invalid_charging_rate_unit(payload) {
+        Ok(value) => value,
+        Err(error) => {
+          self
+            .send_formation_violation(write, message_id, &error.to_string())
+            .await?;
+          return Ok(true);
+        }
+      };
+    let Some(unit) = invalid_unit else {
+      return Ok(false);
+    };
+
+    self
+      .send_call_error(
+        write,
+        message_id,
+        OcppErrorCode::PropertyConstraintViolation.as_str(),
+        &format!("Invalid chargingRateUnit `{unit}`."),
+        json!({}),
+      )
+      .await?;
+    Ok(true)
   }
 
   /// Validates an inbound CALL payload against the checked-in request schema.

@@ -1,9 +1,9 @@
 #![allow(non_camel_case_types)]
 
 use super::super::{
-  ConnectorStatus, Result, Value, anyhow, normalize_identifier,
-  optional_u16_field, required_i64_field, required_string_field,
-  required_u16_field, required_u64_field,
+  ChargingRateUnit, ConnectorStatus, Result, Value, anyhow,
+  normalize_identifier, optional_u16_field, required_i64_field,
+  required_string_field, required_u16_field, required_u64_field,
 };
 
 #[derive(Debug, Clone)]
@@ -240,6 +240,16 @@ pub(in crate::simulator) struct CompositeScheduleRequestV1_6 {
 }
 
 impl CompositeScheduleRequestV1_6 {
+  pub(in crate::simulator) fn invalid_charging_rate_unit(
+    payload: &Value,
+  ) -> Result<Option<String>> {
+    let Some(value) = optional_string_field(payload, "chargingRateUnit")?
+    else {
+      return Ok(None);
+    };
+    Ok(ChargingRateUnit::parse(&value).is_none().then_some(value))
+  }
+
   pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
     Ok(Self {
       connector: required_u16_field(payload, "connectorId")?,
