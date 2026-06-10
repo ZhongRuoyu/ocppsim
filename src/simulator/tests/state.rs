@@ -35,6 +35,161 @@ async fn connect_without_target_warns_and_stays_offline() {
 }
 
 #[test]
+fn emit_snapshot_redacts_connection_url_secrets() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.config.ws_url =
+    Some("wss://user:secret@example.test/ocpp?token=SECRET".to_string());
+
+  simulator.emit_snapshot();
+
+  let snapshot = loop {
+    match ui_rx.try_recv().expect("snapshot event should be emitted") {
+      UiEvent::Snapshot(snapshot) => break snapshot,
+      UiEvent::Log { .. } => {}
+    }
+  };
+  assert_eq!(
+    snapshot.connection_url,
+    "wss://<redacted>@example.test/ocpp?token=<redacted>"
+  );
+}
+
+#[test]
+fn get_diagnostics_redacts_location_url_secrets_in_logs() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  let payload = json!({
+    "location": "https://user:secret@example.test/logs?token=SECRET"
+  });
+
+  let _ = simulator
+    .get_diagnostics_v1_6(&payload)
+    .expect("diagnostics response should be built");
+
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(
+    messages
+      .iter()
+      .all(|message| !message.contains("secret") && !message.contains("SECRET"))
+  );
+  assert!(messages.iter().any(|message| {
+    message.contains("https://<redacted>@example.test/logs?token=<redacted>")
+  }));
+}
+
+#[test]
+fn trace_frame_redacts_url_secrets_in_string_values() {
+  let frame = json!([
+    2,
+    "m1",
+    "GetDiagnostics",
+    { "location": "https://user:secret@example.test/logs?token=SECRET" }
+  ])
+  .to_string();
+
+  let trace = sanitized_trace_frame_text(&frame);
+
+  assert!(!trace.contains("secret"));
+  assert!(!trace.contains("SECRET"));
+  assert!(
+    trace.contains("https://<redacted>@example.test/logs?token=<redacted>")
+  );
+}
+
+#[test]
+fn trace_frame_redacts_token_aliases() {
+  let frame = json!([
+    3,
+    "m1",
+    {
+      "idTagInfo": {
+        "parentIdTag": "PARENT-TOKEN",
+        "status": "Accepted"
+      },
+      "idToken": {
+        "additionalInfo": [
+          {
+            "additionalIdToken": "ADDITIONAL-TOKEN",
+            "type": "PaymentBrand"
+          }
+        ],
+        "idToken": "PRIMARY-TOKEN",
+        "type": "Central"
+      }
+    }
+  ])
+  .to_string();
+
+  let trace = sanitized_trace_frame_text(&frame);
+
+  for token in ["PARENT-TOKEN", "ADDITIONAL-TOKEN", "PRIMARY-TOKEN"] {
+    assert!(!trace.contains(token), "{token} appeared in {trace}");
+  }
+  assert!(trace.contains("\"parentIdTag\":\"<redacted>\""));
+  assert!(trace.contains("\"additionalIdToken\":\"<redacted>\""));
+  assert!(trace.contains("\"idToken\":\"<redacted>\""));
+}
+
+#[test]
+fn trace_frame_redacts_network_profile_secrets() {
+  let frame = json!([
+    2,
+    "m1",
+    "SetNetworkProfile",
+    {
+      "configurationSlot": 1,
+      "connectionData": {
+        "apn": {
+          "apn": "internet",
+          "apnAuthentication": "CHAP",
+          "apnPassword": "APN-PASSWORD",
+          "simPin": 9876
+        },
+        "basicAuthPassword": "BASIC-PASSWORD",
+        "messageTimeout": 30,
+        "ocppCsmsUrl": "wss://user:secret@example.test/ocpp?token=SECRET",
+        "ocppInterface": "Wired0",
+        "ocppTransport": "JSON",
+        "ocppVersion": "OCPP20",
+        "securityProfile": 2,
+        "vpn": {
+          "group": "group",
+          "key": "VPN-KEY",
+          "password": "VPN-PASSWORD",
+          "server": "vpn.example.test",
+          "type": "IKEv2",
+          "user": "user"
+        }
+      }
+    }
+  ])
+  .to_string();
+
+  let trace = sanitized_trace_frame_text(&frame);
+
+  for secret in [
+    "APN-PASSWORD",
+    "BASIC-PASSWORD",
+    "VPN-KEY",
+    "VPN-PASSWORD",
+    "9876",
+    "secret",
+    "SECRET",
+  ] {
+    assert!(!trace.contains(secret), "{secret} appeared in {trace}");
+  }
+  assert!(trace.contains("\"apnPassword\":\"<redacted>\""));
+  assert!(trace.contains("\"basicAuthPassword\":\"<redacted>\""));
+  assert!(trace.contains("\"key\":\"<redacted>\""));
+  assert!(trace.contains("\"password\":\"<redacted>\""));
+  assert!(trace.contains("\"simPin\":\"<redacted>\""));
+  assert!(
+    trace.contains("wss://<redacted>@example.test/ocpp?token=<redacted>")
+  );
+}
+
+#[test]
 fn reserve_and_cancel_updates_connector_status() {
   let mut simulator = simulator_for_tests();
   let reserve_payload = json!({

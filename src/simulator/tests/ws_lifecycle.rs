@@ -134,6 +134,42 @@ async fn capture_ws_text_response_with_events(
   (frame, simulator, events)
 }
 
+async fn capture_ws_text_events(
+  protocol: OcppVersion,
+  text: String,
+) -> Vec<UiEvent> {
+  let listener = TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind listener");
+  let address = listener.local_addr().expect("local address");
+  let server = tokio::spawn(async move {
+    let (stream, _) = listener.accept().await.expect("accept client");
+    let websocket = accept_async(stream).await.expect("accept websocket");
+    drop(websocket);
+  });
+
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
+    .await
+    .expect("connect client");
+  let (mut write, read) = client_stream.split();
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(protocol);
+  simulator.config.trace_frames = true;
+  simulator
+    .handle_ws_text(text, &mut write)
+    .await
+    .expect("handle text");
+  drop(write);
+  drop(read);
+  server.await.expect("server task");
+
+  let mut events = Vec::new();
+  while let Ok(event) = ui_rx.try_recv() {
+    events.push(event);
+  }
+  events
+}
+
 fn assert_trace_redacted(events: &[UiEvent], secret: &str) {
   let log_messages = events
     .iter()
@@ -154,6 +190,25 @@ fn assert_trace_redacted(events: &[UiEvent], secret: &str) {
       .iter()
       .any(|message| message.contains("<redacted>")),
     "redacted marker missing from logs: {log_messages:?}"
+  );
+}
+
+fn assert_log_contains(events: &[UiEvent], expected: &str) {
+  let log_messages = events
+    .iter()
+    .filter_map(|event| {
+      if let UiEvent::Log { message, .. } = event {
+        Some(message.as_str())
+      } else {
+        None
+      }
+    })
+    .collect::<Vec<_>>();
+  assert!(
+    log_messages
+      .iter()
+      .any(|message| message.contains(expected)),
+    "expected `{expected}` in logs: {log_messages:?}"
   );
 }
 
@@ -193,6 +248,66 @@ async fn trace_frames_redacts_change_configuration_authorization_key() {
 }
 
 #[tokio::test]
+async fn trace_frames_redacts_call_error_details() {
+  let password = "0123456789abcdef0123456789abcdef";
+  let frame = json!([
+    4,
+    "secret-message",
+    "GenericError",
+    "failed",
+    { "BasicAuthPassword": password }
+  ])
+  .to_string();
+
+  let events = capture_ws_text_events(OcppVersion::V1_6, frame).await;
+
+  assert_trace_redacted(&events, password);
+  assert_log_contains(&events, "CALLERROR details=");
+  assert_log_contains(&events, "\"BasicAuthPassword\":\"<redacted>\"");
+}
+
+#[tokio::test]
+async fn trace_frames_redacts_call_result_error_details() {
+  let password = "0123456789abcdef0123456789abcdef";
+  let frame = json!([
+    5,
+    "secret-message",
+    "GenericError",
+    "failed",
+    { "AuthorizationKey": password }
+  ])
+  .to_string();
+
+  let events = capture_ws_text_events(OcppVersion::V2_1, frame).await;
+
+  assert_trace_redacted(&events, password);
+  assert_log_contains(&events, "CALLRESULTERROR details=");
+  assert_log_contains(&events, "\"AuthorizationKey\":\"<redacted>\"");
+}
+
+#[tokio::test]
+async fn trace_frames_redacts_send_payload() {
+  let password = "0123456789abcdef0123456789abcdef";
+  let frame = json!([
+    6,
+    "secret-message",
+    "SetVariables",
+    {
+      "setVariableData": [
+        set_variable_data("BasicAuthPassword", password)
+      ]
+    }
+  ])
+  .to_string();
+
+  let events = capture_ws_text_events(OcppVersion::V2_1, frame).await;
+
+  assert_trace_redacted(&events, password);
+  assert_log_contains(&events, "SEND payload=");
+  assert_log_contains(&events, "\"attributeValue\":\"<redacted>\"");
+}
+
+#[tokio::test]
 async fn trace_frames_redacts_set_variables_basic_auth_password() {
   let password = "0123456789abcdef0123456789abcdef";
   let frame = build_call(
@@ -213,6 +328,116 @@ async fn trace_frames_redacts_set_variables_basic_auth_password() {
     Some(password)
   );
   assert_trace_redacted(&events, password);
+}
+
+#[test]
+fn trace_frame_text_redacts_v1_6_transaction_id_tags() {
+  let start = build_call(
+    "start-message",
+    "StartTransaction",
+    &json!({
+      "connectorId": 1,
+      "idTag": "SECRET-TOKEN",
+      "meterStart": 0,
+      "timestamp": now_timestamp()
+    }),
+  );
+  let stop = build_call(
+    "stop-message",
+    "StopTransaction",
+    &json!({
+      "idTag": "SECRET-TOKEN",
+      "meterStop": 0,
+      "timestamp": now_timestamp(),
+      "transactionId": 42
+    }),
+  );
+
+  for trace in [
+    sanitized_trace_frame_text(&start),
+    sanitized_trace_frame_text(&stop),
+  ] {
+    assert!(!trace.contains("SECRET-TOKEN"), "idTag appeared in {trace}");
+    assert!(trace.contains("\"idTag\":\"<redacted>\""));
+  }
+}
+
+#[test]
+fn trace_frame_text_redacts_v2_x_id_tokens() {
+  let frame = build_call(
+    "auth-message",
+    "Authorize",
+    &json!({
+      "idToken": {
+        "idToken": "SECRET-TOKEN",
+        "type": "ISO14443"
+      }
+    }),
+  );
+
+  let trace = sanitized_trace_frame_text(&frame);
+
+  assert!(
+    !trace.contains("SECRET-TOKEN"),
+    "idToken appeared in {trace}"
+  );
+  assert!(trace.contains("\"idToken\":\"<redacted>\""));
+  assert!(trace.contains("\"type\":\"ISO14443\""));
+}
+
+#[tokio::test]
+async fn outbound_trace_logs_redacted_frame_but_sends_real_frame() {
+  let listener = TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind listener");
+  let address = listener.local_addr().expect("local address");
+  let server = tokio::spawn(async move {
+    let (stream, _) = listener.accept().await.expect("accept client");
+    let websocket = accept_async(stream).await.expect("accept websocket");
+    let (_server_write, mut server_read) = websocket.split();
+    server_read
+      .next()
+      .await
+      .expect("request frame")
+      .expect("request frame ok")
+      .to_text()
+      .expect("text frame")
+      .to_string()
+  });
+
+  let (client_stream, _) = connect_async(format!("ws://{address}"))
+    .await
+    .expect("connect client");
+  let (mut write, read) = client_stream.split();
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.config.trace_frames = true;
+  simulator
+    .start_transaction(1, "SECRET-TOKEN".to_string(), false, None, true)
+    .expect("start should enqueue");
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send start");
+  drop(write);
+  drop(read);
+
+  let wire_frame = server.await.expect("server task");
+  assert!(wire_frame.contains("\"idTag\":\"SECRET-TOKEN\""));
+
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(
+    messages
+      .iter()
+      .all(|message| !message.contains("SECRET-TOKEN")),
+    "id token appeared in logs: {messages:?}"
+  );
+  assert!(
+    messages
+      .iter()
+      .any(|message| message.contains("\"idTag\":\"<redacted>\"")),
+    "redacted idTag missing from logs: {messages:?}"
+  );
 }
 
 #[tokio::test]

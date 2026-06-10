@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 use crate::ocpp::{
   OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppVersion,
 };
+use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
 
 const USAGE_STATUS: &str = "Usage: status";
 const USAGE_CONNECT: &str = "Usage: connect [<profile> | <ws-url> <cp-id>]";
@@ -107,6 +108,39 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
       "Unknown command `{}`. Type `help` for available commands.",
       parts[0]
     )),
+  }
+}
+
+/// Returns a display-safe command line with sensitive arguments masked.
+pub fn redact_sensitive_command(input: &str) -> String {
+  let mut parts = input.split_whitespace().collect::<Vec<_>>();
+  let Some(command) = parts.first() else {
+    return String::new();
+  };
+
+  match command.to_ascii_lowercase().as_str() {
+    "authorize" if parts.len() >= 2 => {
+      parts[1] = REDACTED_VALUE;
+      parts.join(" ")
+    }
+    "start" if parts.len() >= 3 => {
+      parts[2] = REDACTED_VALUE;
+      parts.join(" ")
+    }
+    "connect" if parts.len() >= 2 => {
+      let redacted_url = redact_url_secrets(parts[1]);
+      if redacted_url == parts[1] {
+        input.to_string()
+      } else {
+        let mut redacted_parts = parts
+          .iter()
+          .map(|part| (*part).to_string())
+          .collect::<Vec<_>>();
+        redacted_parts[1] = redacted_url;
+        redacted_parts.join(" ")
+      }
+    }
+    _ => input.to_string(),
   }
 }
 
@@ -383,7 +417,10 @@ fn ensure_range(
 
 #[cfg(test)]
 mod tests {
-  use super::{ConnectTarget, UserCommand, help_text, parse_command};
+  use super::{
+    ConnectTarget, UserCommand, help_text, parse_command,
+    redact_sensitive_command,
+  };
 
   #[test]
   /// Verifies fixed-arity commands reject surplus tokens.
@@ -458,5 +495,31 @@ mod tests {
     assert!(help.contains("connector-status <connector> <status>"));
     assert!(help.contains("Valid statuses:"));
     assert!(help.contains("exit | quit"));
+  }
+
+  #[test]
+  /// Verifies sensitive command arguments are masked for UI logging.
+  fn redacts_sensitive_command_arguments() {
+    assert_eq!(
+      redact_sensitive_command("authorize TOKEN"),
+      "authorize <redacted>"
+    );
+    assert_eq!(
+      redact_sensitive_command("start 2 TOKEN"),
+      "start 2 <redacted>"
+    );
+    assert_eq!(
+      redact_sensitive_command(
+        "connect ws://user:secret@example.test/ocpp CP-001"
+      ),
+      "connect ws://<redacted>@example.test/ocpp CP-001"
+    );
+    assert_eq!(
+      redact_sensitive_command(
+        "connect wss://example.test/ocpp?token=SECRET CP-001"
+      ),
+      "connect wss://example.test/ocpp?token=<redacted> CP-001"
+    );
+    assert_eq!(redact_sensitive_command("status"), "status");
   }
 }

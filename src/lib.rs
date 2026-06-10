@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod embedded_schemas;
 mod ocpp;
+mod sensitive;
 mod simulator;
 mod version;
 
@@ -19,8 +20,10 @@ use app::{InputAction, TerminalApp, TerminalSession, restore_console};
 use args::{Cli, CliArgs, CliCommand, ResolvedCliArgs};
 use clap::Parser;
 use commands::{
-  ConnectTarget, UserCommand, help_text, parse_command, standards_text,
+  ConnectTarget, UserCommand, help_text, parse_command,
+  redact_sensitive_command, standards_text,
 };
+use sensitive::redact_text_secrets;
 use simulator::{
   SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig, run_simulator,
 };
@@ -96,7 +99,7 @@ pub async fn run() -> Result<()> {
         if line.is_empty() {
           continue;
         }
-        app.push_user_input(&line);
+        app.push_user_input(&redact_sensitive_command(&line));
 
         match parse_command(&line) {
           Ok(command) => {
@@ -134,8 +137,9 @@ fn install_panic_hook() {
       || "<unknown>".to_string(),
       |loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
     );
-    let message = panic_message(info);
-    let backtrace = Backtrace::force_capture();
+    let message = redact_text_secrets(&panic_message(info));
+    let backtrace =
+      redact_text_secrets(&Backtrace::force_capture().to_string());
 
     eprintln!();
     eprintln!("==================================================");

@@ -26,6 +26,8 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_tungstenite::Connector;
 use url::Url;
 
+use crate::sensitive::{redact_text_secrets, redact_url_secrets};
+
 const SIMULATED_CSR: &str = concat!(
   "-----BEGIN CERTIFICATE REQUEST-----\n",
   "T0NQUFNJTS1TSU1VTEFURUQtQ1NS\n",
@@ -435,7 +437,10 @@ impl Simulator {
       .ok_or_else(|| anyhow!("log.remoteLocation is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received {log_type} GetLog request for {location}"),
+      format!(
+        "Received {log_type} GetLog request for {}",
+        redact_url_secrets(location)
+      ),
     );
     if !self.supports_file_transfer_location(location) {
       return Ok(to_value(&GetLog_V2_X_Response {
@@ -457,7 +462,7 @@ impl Simulator {
           self.security.events.len(),
           event.event_type,
           event.timestamp,
-          detail
+          redact_text_secrets(&detail)
         ),
       );
     }
@@ -520,7 +525,10 @@ impl Simulator {
 
     self.log(
       UiLogLevel::Info,
-      format!("Received SignedUpdateFirmware request from {location}"),
+      format!(
+        "Received SignedUpdateFirmware request from {}",
+        redact_url_secrets(location)
+      ),
     );
     if is_simulated_invalid(signature) {
       self.enqueue_signed_firmware_status_notification(

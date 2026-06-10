@@ -7,7 +7,7 @@ use super::{
   ConfigurationKey, ConnectorStatus, OcppVersion, PendingCall, PendingContext,
   ResponseStatus, SecurityProfileFallback, Simulator, SimulatorCommand,
   SimulatorConfig, TxEventType, UiEvent, UiLogLevel, now_timestamp,
-  validate_negotiated_subprotocol,
+  sanitized_trace_frame_text, validate_negotiated_subprotocol,
 };
 
 mod charging_profiles;
@@ -57,6 +57,18 @@ fn simulator_for_tests_with_protocol_and_ui(
 
 fn simulator_for_tests() -> Simulator {
   simulator_for_tests_with_protocol(OcppVersion::V1_6)
+}
+
+fn drain_log_messages(
+  ui_rx: &mut mpsc::UnboundedReceiver<UiEvent>,
+) -> Vec<String> {
+  let mut messages = Vec::new();
+  while let Ok(event) = ui_rx.try_recv() {
+    if let UiEvent::Log { message, .. } = event {
+      messages.push(message);
+    }
+  }
+  messages
 }
 
 fn v2_x_protocols() -> [OcppVersion; 2] {

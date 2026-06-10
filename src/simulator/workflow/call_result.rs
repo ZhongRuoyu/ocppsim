@@ -1,6 +1,6 @@
 use super::super::{
-  ConfigurationKey, PendingContext, ResponseStatus, Result, Simulator,
-  TxEventType, UiLogLevel, Value, authorize_status,
+  ConfigurationKey, PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus,
+  Result, Simulator, TxEventType, UiLogLevel, Value, authorize_status,
 };
 
 impl Simulator {
@@ -138,11 +138,11 @@ impl Simulator {
     self.log(UiLogLevel::Info, format!("{action} acknowledged."));
   }
 
-  fn log_authorize_call_result(&mut self, id_token: &str, payload: &Value) {
+  fn log_authorize_call_result(&mut self, _id_token: &str, payload: &Value) {
     let status = authorize_status(self.config.protocol, payload);
     self.log(
       UiLogLevel::Info,
-      format!("Authorize {id_token} status={status}"),
+      format!("Authorize {REDACTED_SENSITIVE_VALUE} status={status}"),
     );
   }
 
@@ -157,7 +157,7 @@ impl Simulator {
       UiLogLevel::Info,
       format!(
         "RemoteStartTransaction authorization {} status={}",
-        id_token,
+        REDACTED_SENSITIVE_VALUE,
         status.as_str()
       ),
     );

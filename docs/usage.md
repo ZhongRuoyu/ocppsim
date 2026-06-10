@@ -211,9 +211,10 @@ for a manual test.
 Use `--trace-frames` when debugging interoperability.
 It logs complete JSON CALL, CALLRESULT, and CALLERROR frames in addition to the
 normal summary lines.
-Known credential fields are redacted before inbound frames are logged,
-including OCPP 1.6 `AuthorizationKey` changes and OCPP 2.x
-`BasicAuthPassword` variable writes.
+Known sensitive fields are redacted before frames are logged in either
+direction, including OCPP 1.6 `AuthorizationKey` changes, OCPP 2.x
+`BasicAuthPassword` variable writes, OCPP `idTag` or `idToken` values, and
+URL-contained credentials.
 
 Use `--strict` or profile `strict = true` when you want inbound CSMS requests
 validated against the checked-in JSON schemas before simulator dispatch.

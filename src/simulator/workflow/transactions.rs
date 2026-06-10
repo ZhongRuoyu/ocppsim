@@ -2,10 +2,11 @@ use super::super::payloads::{
   StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
 };
 use super::super::{
-  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext, Result,
-  Simulator, StopReason, TransactionEventRequest, TransactionState,
-  TransactionTriggerReason, TxEventType, UiLogLevel, anyhow,
-  map_stop_reason_v1_6, map_stop_reason_v2_x, now_timestamp,
+  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext,
+  REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
+  TransactionEventRequest, TransactionState, TransactionTriggerReason,
+  TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
+  now_timestamp,
 };
 
 impl Simulator {
@@ -47,7 +48,7 @@ impl Simulator {
       UiLogLevel::Info,
       format!(
         "Transaction started locally on connector {connector} with \
-        idToken {id_token}"
+        idToken {REDACTED_SENSITIVE_VALUE}"
       ),
     );
 

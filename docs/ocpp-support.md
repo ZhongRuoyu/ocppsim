@@ -40,7 +40,8 @@ Certificate-management and signed-firmware actions keep an in-memory synthetic
 certificate store and obvious invalid-value detection, but they do not perform
 full PKI validation, OCSP/CRL checks, real CSR generation, firmware binary
 verification, or file transfer.
-Known password fields are redacted from inbound trace-frame logs.
+Known password, id token, and URL-contained credential values are redacted from
+trace-frame logs in both directions.
 The original OCPP 1.6 `UpdateFirmware` request is rejected with CALLERROR
 `NotSupported`; whitepaper firmware tests should use `SignedUpdateFirmware`.
 

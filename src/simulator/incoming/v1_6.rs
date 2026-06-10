@@ -12,6 +12,7 @@ use super::request::{
   ReserveNowRequestV1_6, SendLocalListRequestV1_6,
   SetChargingProfileRequestV1_6, UnlockConnectorRequestV1_6,
 };
+use crate::sensitive::redact_url_secrets;
 
 impl Simulator {
   /// Builds `GetConfiguration.conf` data for OCPP 1.6.
@@ -118,7 +119,10 @@ impl Simulator {
       .ok_or_else(|| anyhow!("location is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received GetDiagnostics request for {location}"),
+      format!(
+        "Received GetDiagnostics request for {}",
+        redact_url_secrets(location)
+      ),
     );
     if !self.supports_file_transfer_location(location) {
       return Ok(to_value(&GetDiagnosticsV1_6Response { file_name: None }));

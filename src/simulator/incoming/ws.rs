@@ -1,10 +1,8 @@
 use super::super::{
   Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
-  UiLogLevel, Value, WsWrite, anyhow, build_call, build_call_error,
-  build_call_result, json, normalize_identifier, parse_frame,
+  UiLogLevel, Value, WsWrite, anyhow, build_call_error, json, parse_frame,
+  sanitized_trace_details, sanitized_trace_frame, sanitized_trace_payload,
 };
-
-const REDACTED_SECRET: &str = "<redacted>";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IncomingRequestSchemaValidation {
@@ -47,7 +45,7 @@ impl Simulator {
     match parse_frame(&text) {
       Ok(frame) => {
         if self.config.trace_frames {
-          self.log(UiLogLevel::Rx, sanitized_inbound_frame(&frame));
+          self.log(UiLogLevel::Rx, sanitized_trace_frame(&frame));
         }
         self.handle_parsed_ws_frame(frame, write).await?;
       }
@@ -91,14 +89,12 @@ impl Simulator {
         description,
         details,
       } => {
-        self.log(
-          UiLogLevel::Rx,
-          format!("CALLERROR {message_id} {code} {description}"),
-        );
-        if self.config.trace_frames {
-          self.log(UiLogLevel::Rx, format!("CALLERROR details={details}"));
-        }
-        self.handle_call_error(&message_id, &code, &description)?;
+        self.handle_call_error_frame(
+          &message_id,
+          &code,
+          &description,
+          &details,
+        )?;
       }
       OcppFrame::CallResultError {
         message_id,
@@ -106,29 +102,19 @@ impl Simulator {
         description,
         details,
       } => {
-        self.log(
-          UiLogLevel::Warn,
-          format!("Received CALLRESULTERROR {message_id} {code} {description}"),
+        self.handle_call_result_error_frame(
+          &message_id,
+          &code,
+          &description,
+          &details,
         );
-        if self.config.trace_frames {
-          self.log(
-            UiLogLevel::Warn,
-            format!("CALLRESULTERROR details={details}"),
-          );
-        }
       }
       OcppFrame::Send {
         message_id,
         action,
         payload,
       } => {
-        self.log(
-          UiLogLevel::Warn,
-          format!("Received SEND {message_id} {action} (no response expected)"),
-        );
-        if self.config.trace_frames {
-          self.log(UiLogLevel::Rx, format!("SEND payload={payload}"));
-        }
+        self.handle_send_frame(&message_id, &action, &payload);
       }
       OcppFrame::Unsupported {
         message_type,
@@ -151,6 +137,66 @@ impl Simulator {
       }
     }
     Ok(())
+  }
+
+  fn handle_call_error_frame(
+    &mut self,
+    message_id: &str,
+    code: &str,
+    description: &str,
+    details: &Value,
+  ) -> Result<()> {
+    self.log(
+      UiLogLevel::Rx,
+      format!("CALLERROR {message_id} {code} {description}"),
+    );
+    if self.config.trace_frames {
+      self.log(
+        UiLogLevel::Rx,
+        format!("CALLERROR details={}", sanitized_trace_details(details)),
+      );
+    }
+    self.handle_call_error(message_id, code, description)
+  }
+
+  fn handle_call_result_error_frame(
+    &mut self,
+    message_id: &str,
+    code: &str,
+    description: &str,
+    details: &Value,
+  ) {
+    self.log(
+      UiLogLevel::Warn,
+      format!("Received CALLRESULTERROR {message_id} {code} {description}"),
+    );
+    if self.config.trace_frames {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "CALLRESULTERROR details={}",
+          sanitized_trace_details(details)
+        ),
+      );
+    }
+  }
+
+  fn handle_send_frame(
+    &mut self,
+    message_id: &str,
+    action: &str,
+    payload: &Value,
+  ) {
+    self.log(
+      UiLogLevel::Warn,
+      format!("Received SEND {message_id} {action} (no response expected)"),
+    );
+    if self.config.trace_frames {
+      self.log(
+        UiLogLevel::Rx,
+        format!("SEND payload={}", sanitized_trace_payload(action, payload)),
+      );
+    }
   }
 
   async fn handle_malformed_ws_frame(
@@ -246,122 +292,4 @@ impl Simulator {
 
     Err(anyhow!(errors.join("; ")))
   }
-}
-
-fn sanitized_inbound_frame(frame: &OcppFrame) -> String {
-  match frame {
-    OcppFrame::Call {
-      message_id,
-      action,
-      payload,
-    } => build_call(message_id, action, &redact_call_payload(action, payload)),
-    OcppFrame::CallResult {
-      message_id,
-      payload,
-    } => build_call_result(message_id, &redact_secret_fields(payload)),
-    OcppFrame::CallError {
-      message_id,
-      code,
-      description,
-      details,
-    }
-    | OcppFrame::CallResultError {
-      message_id,
-      code,
-      description,
-      details,
-    } => build_call_error(
-      message_id,
-      code,
-      description,
-      &redact_secret_fields(details),
-    ),
-    OcppFrame::Send {
-      message_id,
-      action,
-      payload,
-    } => json!([6, message_id, action, redact_call_payload(action, payload)])
-      .to_string(),
-    OcppFrame::Unsupported {
-      message_type,
-      message_id,
-    } => json!([message_type, message_id]).to_string(),
-  }
-}
-
-fn redact_call_payload(action: &str, payload: &Value) -> Value {
-  let mut redacted = redact_secret_fields(payload);
-  match action {
-    "ChangeConfiguration" => redact_change_configuration(&mut redacted),
-    "SetVariables" => redact_set_variables(&mut redacted),
-    _ => {}
-  }
-  redacted
-}
-
-fn redact_change_configuration(payload: &mut Value) {
-  let Some(key) = payload.get("key").and_then(Value::as_str) else {
-    return;
-  };
-  if is_secret_variable(key)
-    && let Some(object) = payload.as_object_mut()
-  {
-    object.insert(
-      "value".to_string(),
-      Value::String(REDACTED_SECRET.to_string()),
-    );
-  }
-}
-
-fn redact_set_variables(payload: &mut Value) {
-  let Some(entries) = payload
-    .get_mut("setVariableData")
-    .and_then(Value::as_array_mut)
-  else {
-    return;
-  };
-  for entry in entries {
-    let variable_name = entry
-      .get("variable")
-      .and_then(Value::as_object)
-      .and_then(|variable| variable.get("name"))
-      .and_then(Value::as_str);
-    if variable_name.is_some_and(is_secret_variable)
-      && let Some(object) = entry.as_object_mut()
-    {
-      object.insert(
-        "attributeValue".to_string(),
-        Value::String(REDACTED_SECRET.to_string()),
-      );
-    }
-  }
-}
-
-fn redact_secret_fields(value: &Value) -> Value {
-  match value {
-    Value::Object(object) => Value::Object(
-      object
-        .iter()
-        .map(|(key, value)| {
-          let redacted_value = if is_secret_variable(key) {
-            Value::String(REDACTED_SECRET.to_string())
-          } else {
-            redact_secret_fields(value)
-          };
-          (key.clone(), redacted_value)
-        })
-        .collect(),
-    ),
-    Value::Array(items) => {
-      Value::Array(items.iter().map(redact_secret_fields).collect())
-    }
-    _ => value.clone(),
-  }
-}
-
-fn is_secret_variable(value: &str) -> bool {
-  matches!(
-    normalize_identifier(value).as_str(),
-    "authorizationkey" | "basicauthpassword"
-  )
 }

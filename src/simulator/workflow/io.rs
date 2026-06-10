@@ -2,8 +2,9 @@ use super::super::{
   ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
   OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
   SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel, Value, WsWrite,
-  build_call_error, build_call_result, json,
+  build_call_error, build_call_result, json, sanitized_trace_frame_text,
 };
+use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 
 impl Simulator {
   /// Starts or restarts periodic heartbeat scheduling.
@@ -109,7 +110,7 @@ impl Simulator {
   ) -> Result<()> {
     write.send(Message::Text(text.clone().into())).await?;
     if self.config.trace_frames {
-      self.log(level, text);
+      self.log(level, sanitized_trace_frame_text(&text));
     } else {
       self.log(level, summary);
     }
@@ -154,8 +155,15 @@ impl Simulator {
     });
 
     let connection_url = self.connection_url().map_or_else(
-      |_| self.config.ws_url.clone().unwrap_or_default(),
-      |u| u.to_string(),
+      |_| {
+        self
+          .config
+          .ws_url
+          .as_deref()
+          .map(redact_url_secrets)
+          .unwrap_or_default()
+      },
+      |u| redact_url_secrets(u.as_str()),
     );
 
     let snapshot = SimulatorSnapshot {
@@ -178,9 +186,10 @@ impl Simulator {
     level: UiLogLevel,
     message: S,
   ) {
+    let message = message.into();
     let _ = self.ui_tx.send(UiEvent::Log {
       level,
-      message: message.into(),
+      message: redact_text_secrets(&message),
     });
   }
 }

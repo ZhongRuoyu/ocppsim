@@ -26,16 +26,21 @@ use crate::ocpp::{
   TriggerMessage_V1_6, TriggerMessage_V2_X, VariableAttributeType, build_call,
   build_call_error, build_call_result, parse_frame,
 };
+use crate::sensitive::redact_url_secrets;
 
 mod security;
 mod support;
 mod types;
 
+pub(in crate::simulator) use redaction::{
+  sanitized_trace_details, sanitized_trace_frame, sanitized_trace_frame_text,
+  sanitized_trace_payload,
+};
 pub(in crate::simulator) use support::{
-  authorize_status, default_configuration_entries, map_stop_reason_v1_6,
-  map_stop_reason_v2_x, now_timestamp, optional_u16_field, required_i64_field,
-  required_string_field, required_u16_field, required_u64_field,
-  validate_negotiated_subprotocol,
+  REDACTED_SENSITIVE_VALUE, authorize_status, default_configuration_entries,
+  map_stop_reason_v1_6, map_stop_reason_v2_x, now_timestamp,
+  optional_u16_field, required_i64_field, required_string_field,
+  required_u16_field, required_u64_field, validate_negotiated_subprotocol,
 };
 pub(in crate::simulator) use types::{
   ConfigurationEntry, ConnectorState, ConnectorStatus, HeartbeatTask,
@@ -643,7 +648,7 @@ impl Simulator {
       UiLogLevel::Info,
       format!(
         "Connecting to {} with subprotocol {} ...",
-        url,
+        redact_url_secrets(url.as_str()),
         self.config.protocol.subprotocol()
       ),
     );
@@ -835,6 +840,7 @@ impl Simulator {
 
 mod incoming;
 mod payloads;
+mod redaction;
 mod workflow;
 
 #[cfg(test)]

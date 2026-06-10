@@ -14,6 +14,7 @@ use super::request::{
   SetChargingProfileRequest_V2_X, UnlockConnectorRequest_V2_X,
   UpdateFirmwareRequest_V2_X,
 };
+use crate::sensitive::redact_url_secrets;
 
 impl Simulator {
   /// Handles `ChangeAvailability.req` for OCPP 2.x.
@@ -56,7 +57,10 @@ impl Simulator {
       .ok_or_else(|| anyhow!("log.remoteLocation is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received GetLog request for {location}"),
+      format!(
+        "Received GetLog request for {}",
+        redact_url_secrets(location)
+      ),
     );
     if !self.supports_file_transfer_location(location) {
       return Ok(to_value(&GetLog_V2_X_Response {
@@ -171,7 +175,10 @@ impl Simulator {
       .ok_or_else(|| anyhow!("firmware is required."))?;
     self.log(
       UiLogLevel::Info,
-      format!("Received UpdateFirmware request from {location}"),
+      format!(
+        "Received UpdateFirmware request from {}",
+        redact_url_secrets(location)
+      ),
     );
     self.secure_update_firmware_v2_x(request.request_id, firmware)
   }

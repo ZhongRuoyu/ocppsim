@@ -23,6 +23,7 @@ use crossterm::terminal::{
 use ratatui::text::Line;
 
 use crate::ocpp::OcppVersion;
+use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 use crate::simulator::{
   ConnectorSnapshot, SimulatorSnapshot, UiEvent, UiLogLevel,
 };
@@ -458,7 +459,9 @@ impl TerminalApp {
     ws_url: Option<String>,
   ) {
     self.profile_name = profile_name;
-    self.ws_url = ws_url.unwrap_or_default();
+    self.ws_url = ws_url
+      .map(|url| redact_url_secrets(&url))
+      .unwrap_or_default();
   }
 
   /// Returns the active protocol for command help and completions.
@@ -867,6 +870,7 @@ impl TerminalApp {
   /// is appended to pending terminal output.
   fn push_log<S: Into<String>>(&mut self, level: UiLogLevel, message: S) {
     let message = message.into();
+    let message = redact_text_secrets(&message);
     let mut sink_error: Option<String> = None;
 
     for line in message.lines() {
@@ -1050,6 +1054,21 @@ mod tests {
     assert_eq!(
       app.taskbar_line(),
       " url ws://example.test/ocpp | disconnected"
+    );
+  }
+
+  #[test]
+  /// Verifies taskbar URL display masks credentials.
+  fn taskbar_redacts_ws_url_secrets() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.set_connection_target(
+      None,
+      Some("wss://user:secret@example.test/ocpp?token=SECRET".to_string()),
+    );
+
+    assert_eq!(
+      app.taskbar_line(),
+      " url wss://<redacted>@example.test/ocpp?token=<redacted> | disconnected"
     );
   }
 

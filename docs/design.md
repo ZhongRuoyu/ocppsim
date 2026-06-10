@@ -151,8 +151,9 @@ OCSP/CRL checks, or generate real CSRs.
 The original OCPP 1.6 `UpdateFirmware` action returns CALLERROR
 `NotSupported`; OCPP 1.6 security firmware testing uses
 `SignedUpdateFirmware`.
-Inbound trace-frame logging runs through parsed-frame redaction before emitting
-logs, so known password writes are not printed in frame traces.
+Trace-frame logging runs through parsed-frame redaction before emitting logs,
+so known password, id token, and URL-contained credential values are not
+printed in frame traces.
 
 ## Terminal UI
 

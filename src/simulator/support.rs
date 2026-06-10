@@ -5,8 +5,11 @@ use chrono::{SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::ocpp::{ConfigurationKey, OcppVersion, ResponseStatus, StopReason};
+use crate::sensitive::REDACTED_VALUE;
 
 use super::{ConfigurationEntry, SimulatorConfig};
+
+pub(in crate::simulator) const REDACTED_SENSITIVE_VALUE: &str = REDACTED_VALUE;
 
 /// Builds the baseline OCPP configuration key map exposed by the simulator.
 pub(in crate::simulator) fn default_configuration_entries(

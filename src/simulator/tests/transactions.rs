@@ -5,6 +5,66 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn local_start_logs_redacted_id_token() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+
+  simulator
+    .start_transaction(1, "SECRET-TOKEN".to_string(), false, None, false)
+    .expect("start should succeed");
+
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(
+    messages
+      .iter()
+      .all(|message| !message.contains("SECRET-TOKEN")),
+    "id token appeared in logs: {messages:?}"
+  );
+  assert!(
+    messages
+      .iter()
+      .any(|message| message.contains("<redacted>")),
+    "redacted marker missing from logs: {messages:?}"
+  );
+}
+
+#[test]
+fn authorize_result_logs_redacted_id_token() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.enqueue_authorize("SECRET-TOKEN".to_string());
+  let authorize_call = simulator.queue.pop_front().expect("queued authorize");
+  simulator.pending = Some(PendingCall {
+    message_id: "auth-ack".to_string(),
+    sent_at: Instant::now(),
+    call: authorize_call,
+  });
+
+  simulator
+    .handle_call_result(
+      "auth-ack",
+      &json!({
+        "idTagInfo": { "status": "Accepted" }
+      }),
+    )
+    .expect("authorization acknowledgement should apply");
+
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(
+    messages
+      .iter()
+      .all(|message| !message.contains("SECRET-TOKEN")),
+    "id token appeared in logs: {messages:?}"
+  );
+  assert!(
+    messages
+      .iter()
+      .any(|message| message.contains("<redacted>")),
+    "redacted marker missing from logs: {messages:?}"
+  );
+}
+
+#[test]
 fn stop_transaction_timeout_restores_v1_6_status() {
   let mut simulator = simulator_for_tests();
   simulator.config.request_timeout = Duration::from_millis(1);
