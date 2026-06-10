@@ -11,9 +11,10 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tokio_tungstenite::{
-  MaybeTlsStream, WebSocketStream, connect_async, connect_async_tls_with_config,
+  MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
+  connect_async_with_config,
 };
 use url::Url;
 
@@ -58,6 +59,8 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
 
+const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
+
 pub(in crate::simulator) trait WsMessageSink:
   Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
 {
@@ -66,6 +69,10 @@ pub(in crate::simulator) trait WsMessageSink:
 impl<T> WsMessageSink for T where
   T: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
 {
+}
+
+fn websocket_config() -> WebSocketConfig {
+  WebSocketConfig::default().max_message_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
 }
 
 /// Runs the simulator event loop and bridges UI commands, WS I/O, and state.
@@ -683,10 +690,11 @@ impl Simulator {
         return Err(error);
       }
     };
+    let ws_config = Some(websocket_config());
     let connection_result = if connector.is_some() {
-      connect_async_tls_with_config(request, None, false, connector).await
+      connect_async_tls_with_config(request, ws_config, false, connector).await
     } else {
-      connect_async(request).await
+      connect_async_with_config(request, ws_config, false).await
     };
     let (stream, response) = match connection_result {
       Ok(connection) => connection,

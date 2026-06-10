@@ -5,6 +5,7 @@ const OCPP_V1_6_AUTHORIZATION_KEY_MAX_LENGTH: usize = 40;
 const OCPP_V2_X_BASIC_AUTH_PASSWORD_MIN_LENGTH: usize = 16;
 const OCPP_V2_0_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 40;
 const OCPP_V2_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 64;
+const OCPP_MESSAGE_ID_MAX_CHARS: usize = 36;
 
 /// Returns the human-readable Basic Auth password requirement for a protocol.
 pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
@@ -1718,7 +1719,7 @@ pub fn parse_frame(text: &str) -> Result<OcppFrame, String> {
   let message_type = array[0]
     .as_i64()
     .ok_or_else(|| "MessageTypeId must be an integer.".to_string())?;
-  let message_id = array[1].as_str().map(ToOwned::to_owned);
+  let message_id = array[1].as_str().map(validate_message_id).transpose()?;
 
   match OcppMessageTypeId::from_i64(message_type) {
     Some(OcppMessageTypeId::Call | OcppMessageTypeId::Send) => {
@@ -1849,6 +1850,15 @@ fn parse_payload_object(value: &Value) -> Result<Value, String> {
     return Err("Payload must be a JSON object.".to_string());
   }
   Ok(value.clone())
+}
+
+fn validate_message_id(value: &str) -> Result<String, String> {
+  if value.chars().count() > OCPP_MESSAGE_ID_MAX_CHARS {
+    return Err(format!(
+      "MessageId must be at most {OCPP_MESSAGE_ID_MAX_CHARS} characters."
+    ));
+  }
+  Ok(value.to_string())
 }
 
 #[cfg(test)]
@@ -2224,6 +2234,17 @@ mod tests {
     assert!(parse_frame(r#"[2,"m1","Heartbeat"]"#).is_err());
     assert!(parse_frame(r#"[3,"m1",[]]"#).is_err());
     assert!(parse_frame(r#"[4,"m1","Error",{},{}]"#).is_err());
+  }
+
+  #[test]
+  /// Verifies OCPP-J wrapper limits are enforced before dispatch.
+  fn parser_rejects_oversized_message_id() {
+    let oversized = "m".repeat(37);
+    let frame = format!(r#"[2,"{oversized}","Heartbeat",{{}}]"#);
+
+    let error = parse_frame(&frame).expect_err("oversized id should fail");
+
+    assert!(error.contains("MessageId must be at most 36 characters"));
   }
 
   fn request_schema_actions(protocol: OcppVersion) -> BTreeSet<String> {
