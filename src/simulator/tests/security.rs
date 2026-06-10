@@ -121,6 +121,30 @@ fn signed_firmware_invalid_signature_records_security_event() {
 }
 
 #[test]
+fn update_firmware_invalid_certificate_rejects_immediately() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    let status = simulator
+      .update_firmware_v2_x(&json!({
+        "requestId": 9,
+        "firmware": {
+          "location": "https://csms.example/firmware.bin",
+          "retrieveDateTime": now_timestamp(),
+          "signingCertificate": "invalid-certificate"
+        }
+      }))
+      .expect("update firmware request");
+
+    assert_eq!(status, ResponseStatus::InvalidCertificate);
+    assert_eq!(simulator.security.events.len(), 1);
+    assert_eq!(
+      simulator.security.events[0].event_type,
+      "InvalidFirmwareSigningCertificate"
+    );
+    assert!(simulator.queue.is_empty());
+  });
+}
+
+#[test]
 fn basic_auth_password_is_write_only() {
   let mut simulator = simulator_for_tests();
   let password = "0123456789abcdef0123456789abcdef";

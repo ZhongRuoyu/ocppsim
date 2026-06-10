@@ -594,11 +594,7 @@ impl Simulator {
         "InvalidFirmwareSigningCertificate",
         Some("UpdateFirmware signing certificate rejected".to_string()),
       );
-      self.enqueue_firmware_status_notification(
-        ResponseStatus::InstallVerificationFailed.as_str(),
-        Some(request_id),
-      );
-      return Ok(ResponseStatus::Accepted);
+      return Ok(ResponseStatus::InvalidCertificate);
     }
     if signature.is_some_and(is_simulated_invalid) {
       self.record_security_event(
