@@ -90,6 +90,8 @@ CALLRESULT.
 Events recorded while disconnected, or queued immediately before a security
 reconnect, are replayed after the next successful connection.
 Events may also appear in a later simulated security-log export.
+Retention is capped by `security-event-limit`; sent events are discarded before
+unsent events when the cap is reached.
 
 Synthetic certificate hashes are stable simulator identifiers for tests.
 They are not cryptographic certificate fingerprints.

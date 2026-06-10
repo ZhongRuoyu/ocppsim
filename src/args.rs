@@ -19,6 +19,8 @@ const DEFAULT_VENDOR: &str = "ocppsim";
 const DEFAULT_MODEL: &str = "ocppsim";
 const DEFAULT_FIRMWARE: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 30;
+const DEFAULT_OUTBOUND_QUEUE_LIMIT: usize = 1_000;
+const DEFAULT_SECURITY_EVENT_LIMIT: usize = 1_000;
 const DEFAULT_CONFIG_PATH_HINT: &str = "~/.config/ocppsim/ocppsim.toml";
 const OCPP_2_X_CP_ID_MAX_CHARS: usize = 48;
 const CLI_LONG_ABOUT: &str =
@@ -38,6 +40,8 @@ const CLI_AFTER_HELP: &str = r#"Config file format:
   strict = false
   request-timeout-seconds = 30
   heartbeat-seconds = 0
+  outbound-queue-limit = 1000
+  security-event-limit = 1000
   security-profile = 2
   basic-auth-password = "0123456789abcdef0123456789abcdef"
   ca-cert = "./csms-root.pem"
@@ -185,6 +189,14 @@ pub struct CliArgs {
   #[arg(long)]
   pub heartbeat_seconds: Option<u64>,
 
+  /// Maximum queued outbound OCPP CALL messages (0 disables the limit)
+  #[arg(long, value_name = "COUNT")]
+  pub outbound_queue_limit: Option<usize>,
+
+  /// Maximum retained security events (0 disables the limit)
+  #[arg(long, value_name = "COUNT")]
+  pub security_event_limit: Option<usize>,
+
   /// OCPP security profile:
   /// 1 = Basic Auth over ws,
   /// 2 = Basic Auth over wss,
@@ -249,6 +261,8 @@ pub struct ResolvedCliArgs {
   pub strict: bool,
   pub request_timeout_seconds: u64,
   pub heartbeat_seconds: Option<u64>,
+  pub outbound_queue_limit: usize,
+  pub security_event_limit: usize,
   pub security_profile: Option<u8>,
   pub basic_auth_password: Option<String>,
   pub ca_cert_path: Option<PathBuf>,
@@ -285,6 +299,8 @@ impl CliArgs {
         model: DEFAULT_MODEL.to_string(),
         firmware: DEFAULT_FIRMWARE.to_string(),
         request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        outbound_queue_limit: DEFAULT_OUTBOUND_QUEUE_LIMIT,
+        security_event_limit: DEFAULT_SECURITY_EVENT_LIMIT,
       };
       let profile = resolve_profile(&config_path, profile_name, &defaults)?;
       ResolvedCliArgs {
@@ -303,6 +319,8 @@ impl CliArgs {
         strict: profile.strict,
         request_timeout_seconds: profile.request_timeout_seconds,
         heartbeat_seconds: profile.heartbeat_seconds,
+        outbound_queue_limit: profile.outbound_queue_limit,
+        security_event_limit: profile.security_event_limit,
         security_profile: profile.security_profile,
         basic_auth_password: profile.basic_auth_password,
         ca_cert_path: profile.ca_cert_path.map(|path| expand_tilde_path(&path)),
@@ -417,6 +435,8 @@ fn resolve_with_direct_args(cli: &CliArgs) -> Result<ResolvedCliArgs> {
     strict: false,
     request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
     heartbeat_seconds: None,
+    outbound_queue_limit: DEFAULT_OUTBOUND_QUEUE_LIMIT,
+    security_event_limit: DEFAULT_SECURITY_EVENT_LIMIT,
     security_profile: None,
     basic_auth_password: None,
     ca_cert_path: None,
@@ -468,6 +488,12 @@ fn apply_cli_overrides(
   }
   if let Some(seconds) = cli.heartbeat_seconds {
     resolved.heartbeat_seconds = normalize_heartbeat_seconds(Some(seconds));
+  }
+  if let Some(limit) = cli.outbound_queue_limit {
+    resolved.outbound_queue_limit = limit;
+  }
+  if let Some(limit) = cli.security_event_limit {
+    resolved.security_event_limit = limit;
   }
   if let Some(profile) = cli.security_profile {
     validate_security_profile(profile)?;
@@ -653,6 +679,8 @@ mod tests {
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      outbound_queue_limit: None,
+      security_event_limit: None,
       security_profile: None,
       basic_auth_password: None,
       ca_cert: None,
@@ -685,6 +713,8 @@ mod tests {
       trace_frames: true,
       request_timeout_seconds: Some(20),
       heartbeat_seconds: Some(5),
+      outbound_queue_limit: Some(12),
+      security_event_limit: Some(34),
       ..base_args()
     };
     let resolved = args.resolve().expect("resolution should succeed");
@@ -696,6 +726,8 @@ mod tests {
     assert!(resolved.trace_frames);
     assert_eq!(resolved.request_timeout_seconds, 20);
     assert_eq!(resolved.heartbeat_seconds, Some(5));
+    assert_eq!(resolved.outbound_queue_limit, 12);
+    assert_eq!(resolved.security_event_limit, 34);
   }
 
   #[test]
@@ -899,6 +931,8 @@ trace-frames = true
 strict = true
 request-timeout-seconds = 42
 heartbeat-seconds = 12
+outbound-queue-limit = 123
+security-event-limit = 456
 
 [charge-points.demo]
 ws-url = "wss://example.com/ocpp"
@@ -922,6 +956,8 @@ id = "CP-DEMO"
     assert!(resolved.strict);
     assert_eq!(resolved.request_timeout_seconds, 42);
     assert_eq!(resolved.heartbeat_seconds, Some(12));
+    assert_eq!(resolved.outbound_queue_limit, 123);
+    assert_eq!(resolved.security_event_limit, 456);
 
     let _ = fs::remove_file(path);
   }
@@ -940,6 +976,8 @@ trace-frames = true
 strict = true
 request-timeout-seconds = 60
 heartbeat-seconds = 20
+outbound-queue-limit = 123
+security-event-limit = 456
 
 [charge-points.demo]
 ws-url = "wss://example.com/ocpp"
@@ -953,6 +991,8 @@ trace-frames = false
 strict = false
 request-timeout-seconds = 15
 heartbeat-seconds = 0
+outbound-queue-limit = 12
+security-event-limit = 34
 "#,
     );
 
@@ -972,6 +1012,8 @@ heartbeat-seconds = 0
     assert!(!resolved.strict);
     assert_eq!(resolved.request_timeout_seconds, 15);
     assert_eq!(resolved.heartbeat_seconds, None);
+    assert_eq!(resolved.outbound_queue_limit, 12);
+    assert_eq!(resolved.security_event_limit, 34);
 
     let _ = fs::remove_file(path);
   }
@@ -989,6 +1031,8 @@ log-path = "./global.log"
 trace-frames = false
 request-timeout-seconds = 60
 heartbeat-seconds = 20
+outbound-queue-limit = 123
+security-event-limit = 456
 
 [charge-points.demo]
 ws-url = "wss://example.com/ocpp"
@@ -1001,6 +1045,8 @@ log-path = "./profile.log"
 trace-frames = false
 request-timeout-seconds = 15
 heartbeat-seconds = 12
+outbound-queue-limit = 12
+security-event-limit = 34
 "#,
     );
 
@@ -1016,6 +1062,8 @@ heartbeat-seconds = 12
       strict: true,
       request_timeout_seconds: Some(99),
       heartbeat_seconds: Some(0),
+      outbound_queue_limit: Some(10),
+      security_event_limit: Some(20),
       ..base_args()
     };
 
@@ -1029,6 +1077,8 @@ heartbeat-seconds = 12
     assert!(resolved.strict);
     assert_eq!(resolved.request_timeout_seconds, 99);
     assert_eq!(resolved.heartbeat_seconds, None);
+    assert_eq!(resolved.outbound_queue_limit, 10);
+    assert_eq!(resolved.security_event_limit, 20);
 
     let _ = fs::remove_file(path);
   }
@@ -1380,6 +1430,14 @@ append-cp-id = true
     assert!(!resolved.trace_frames);
     assert_eq!(resolved.request_timeout_seconds, 30);
     assert_eq!(resolved.heartbeat_seconds, None);
+    assert_eq!(
+      resolved.outbound_queue_limit,
+      super::DEFAULT_OUTBOUND_QUEUE_LIMIT
+    );
+    assert_eq!(
+      resolved.security_event_limit,
+      super::DEFAULT_SECURITY_EVENT_LIMIT
+    );
   }
 
   #[test]

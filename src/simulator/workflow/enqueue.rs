@@ -16,8 +16,6 @@ use super::super::{
   anyhow, now_timestamp,
 };
 
-const QUEUE_DEPTH_WARN_THRESHOLD: usize = 1_000;
-
 impl Simulator {
   /// Enqueues a CALL with its payload and post-response context.
   pub(in crate::simulator) fn enqueue_call(
@@ -25,22 +23,36 @@ impl Simulator {
     action: &str,
     payload: Value,
     context: PendingContext,
-  ) {
+  ) -> bool {
+    let limit = self.config.outbound_queue_limit;
+    if limit != 0 && self.queue.len() >= limit {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "Outbound OCPP queue limit {limit} reached; dropping {action} \
+          request."
+        ),
+      );
+      self.emit_runtime_state();
+      return false;
+    }
+
     self.queue.push_back(QueuedCall {
       action: action.to_string(),
       payload,
       context,
     });
-    if self.queue.len() == QUEUE_DEPTH_WARN_THRESHOLD {
+    if limit != 0 && self.queue.len() == limit {
       self.log(
         UiLogLevel::Warn,
         format!(
-          "Outbound OCPP queue reached {QUEUE_DEPTH_WARN_THRESHOLD} messages; \
-          check CSMS responses or reduce command rate."
+          "Outbound OCPP queue reached limit {limit}; later messages will be \
+          dropped until the CSMS responds."
         ),
       );
     }
     self.emit_runtime_state();
+    true
   }
 
   /// Enqueues a protocol-version-specific `BootNotification` request.

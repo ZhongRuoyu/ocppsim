@@ -17,6 +17,8 @@ pub struct ProfileDefaults {
   pub model: String,
   pub firmware: String,
   pub request_timeout_seconds: u64,
+  pub outbound_queue_limit: usize,
+  pub security_event_limit: usize,
 }
 
 /// Final profile settings after merging defaults, global config, and profile.
@@ -35,6 +37,8 @@ pub struct ResolvedProfileConfig {
   pub strict: bool,
   pub request_timeout_seconds: u64,
   pub heartbeat_seconds: Option<u64>,
+  pub outbound_queue_limit: usize,
+  pub security_event_limit: usize,
   pub security_profile: Option<u8>,
   pub basic_auth_password: Option<String>,
   pub ca_cert_path: Option<PathBuf>,
@@ -57,6 +61,10 @@ struct ConfigFile {
   request_timeout_seconds: Option<u64>,
   #[serde(rename = "heartbeat-seconds")]
   heartbeat_seconds: Option<u64>,
+  #[serde(rename = "outbound-queue-limit")]
+  outbound_queue_limit: Option<usize>,
+  #[serde(rename = "security-event-limit")]
+  security_event_limit: Option<usize>,
   #[serde(rename = "security-profile")]
   security_profile: Option<u8>,
   #[serde(rename = "basic-auth-password")]
@@ -92,6 +100,10 @@ struct ProfileConfig {
   request_timeout_seconds: Option<u64>,
   #[serde(rename = "heartbeat-seconds")]
   heartbeat_seconds: Option<u64>,
+  #[serde(rename = "outbound-queue-limit")]
+  outbound_queue_limit: Option<usize>,
+  #[serde(rename = "security-event-limit")]
+  security_event_limit: Option<usize>,
   #[serde(rename = "security-profile")]
   security_profile: Option<u8>,
   #[serde(rename = "basic-auth-password")]
@@ -115,6 +127,8 @@ struct GlobalConfig {
   strict: Option<bool>,
   request_timeout_seconds: Option<u64>,
   heartbeat_seconds: Option<u64>,
+  outbound_queue_limit: Option<usize>,
+  security_event_limit: Option<usize>,
   security_profile: Option<u8>,
   basic_auth_password: Option<String>,
   ca_cert_path: Option<PathBuf>,
@@ -141,20 +155,14 @@ pub fn resolve_profile(
   let profile = selection.profile;
   let global = selection.global;
 
-  let ws_url = profile.ws_url.ok_or_else(|| {
-    anyhow!(
-      "Profile `{}` is missing `ws-url` in {}.",
-      profile_name,
-      config_path.display()
-    )
-  })?;
-  let cp_id = profile.id.ok_or_else(|| {
-    anyhow!(
-      "Profile `{}` is missing `id` in {}.",
-      profile_name,
-      config_path.display()
-    )
-  })?;
+  let ws_url = required_profile_value(
+    profile.ws_url,
+    profile_name,
+    config_path,
+    "ws-url",
+  )?;
+  let cp_id =
+    required_profile_value(profile.id, profile_name, config_path, "id")?;
 
   let connectors = profile.connectors.unwrap_or(defaults.connectors);
   if connectors == 0 {
@@ -211,18 +219,13 @@ pub fn resolve_profile(
     append_cp_id: profile.append_cp_id.unwrap_or(true),
     connectors,
     protocol,
-    vendor: profile
-      .vendor
-      .or(global.vendor)
-      .unwrap_or_else(|| defaults.vendor.clone()),
-    model: profile
-      .model
-      .or(global.model)
-      .unwrap_or_else(|| defaults.model.clone()),
-    firmware: profile
-      .firmware
-      .or(global.firmware)
-      .unwrap_or_else(|| defaults.firmware.clone()),
+    vendor: merged_string(profile.vendor, global.vendor, &defaults.vendor),
+    model: merged_string(profile.model, global.model, &defaults.model),
+    firmware: merged_string(
+      profile.firmware,
+      global.firmware,
+      &defaults.firmware,
+    ),
     log_path: profile.log_path.or(global.log_path),
     trace_frames: profile
       .trace_frames
@@ -236,11 +239,43 @@ pub fn resolve_profile(
     heartbeat_seconds: normalize_heartbeat_seconds(
       profile.heartbeat_seconds.or(global.heartbeat_seconds),
     ),
+    outbound_queue_limit: profile
+      .outbound_queue_limit
+      .or(global.outbound_queue_limit)
+      .unwrap_or(defaults.outbound_queue_limit),
+    security_event_limit: profile
+      .security_event_limit
+      .or(global.security_event_limit)
+      .unwrap_or(defaults.security_event_limit),
     security_profile,
     basic_auth_password,
     ca_cert_path: profile.ca_cert_path.or(global.ca_cert_path),
     client_cert_path: profile.client_cert_path.or(global.client_cert_path),
     client_key_path: profile.client_key_path.or(global.client_key_path),
+  })
+}
+
+fn merged_string(
+  profile: Option<String>,
+  global: Option<String>,
+  default: &str,
+) -> String {
+  profile.or(global).unwrap_or_else(|| default.to_string())
+}
+
+fn required_profile_value(
+  value: Option<String>,
+  profile_name: &str,
+  config_path: &Path,
+  key: &str,
+) -> Result<String> {
+  value.ok_or_else(|| {
+    anyhow!(
+      "Profile `{}` is missing `{}` in {}.",
+      profile_name,
+      key,
+      config_path.display()
+    )
   })
 }
 
@@ -281,6 +316,8 @@ fn load_profile(path: &Path, profile_name: &str) -> Result<ProfileSelection> {
     strict: config.strict,
     request_timeout_seconds: config.request_timeout_seconds,
     heartbeat_seconds: config.heartbeat_seconds,
+    outbound_queue_limit: config.outbound_queue_limit,
+    security_event_limit: config.security_event_limit,
     security_profile: config.security_profile,
     basic_auth_password: config.basic_auth_password,
     ca_cert_path: config.ca_cert_path,
@@ -384,6 +421,8 @@ vendor = "ocppsim"
       model: "ocppsim".to_string(),
       firmware: "test".to_string(),
       request_timeout_seconds: 30,
+      outbound_queue_limit: 1000,
+      security_event_limit: 1000,
     };
 
     let error = super::resolve_profile(&path, "test", &defaults)
@@ -415,6 +454,8 @@ basic-auth-password = "not-a-hex-password"
       model: "ocppsim".to_string(),
       firmware: "test".to_string(),
       request_timeout_seconds: 30,
+      outbound_queue_limit: 1000,
+      security_event_limit: 1000,
     };
 
     let error = super::resolve_profile(&path, "demo", &defaults)
@@ -448,6 +489,8 @@ basic-auth-password = "not-a-hex-passwd"
       model: "ocppsim".to_string(),
       firmware: "test".to_string(),
       request_timeout_seconds: 30,
+      outbound_queue_limit: 1000,
+      security_event_limit: 1000,
     };
 
     let resolved =

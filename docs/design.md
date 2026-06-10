@@ -21,6 +21,7 @@ after reconnect until the CSMS acknowledges them.
 
 When connected, the loop sends the next queued CALL only when there is no
 pending request.
+The outbound queue is capped by `outbound-queue-limit` unless that value is `0`.
 The pending context records what response is expected and how to update local
 state when a CALLRESULT or CALLERROR arrives.
 Request timeouts clear stale pending state so later queued messages can move.
@@ -145,6 +146,8 @@ Security events remain pending until their `SecurityEventNotification` receives
 a CALLRESULT.
 Disconnect and security reconnect paths reset queued but unacknowledged events
 so they are sent again after the next successful connection.
+Retained security events are capped by `security-event-limit`; sent events are
+discarded before unsent events when trimming is needed.
 Certificate-management actions maintain deterministic synthetic certificate
 hashes in memory so install, list, and delete flows are stable across tests
 without adding full certificate parsing to simulator state.

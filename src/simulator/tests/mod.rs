@@ -38,6 +38,8 @@ fn simulator_test_config(protocol: OcppVersion) -> SimulatorConfig {
     client_key_path: None,
     request_timeout: Duration::from_secs(30),
     heartbeat_seconds: Some(10),
+    outbound_queue_limit: 1_000,
+    security_event_limit: 1_000,
   }
 }
 

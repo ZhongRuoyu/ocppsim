@@ -45,6 +45,8 @@ Some other useful flags include:
 - `--strict`
 - `--request-timeout-seconds <seconds>`
 - `--heartbeat-seconds <seconds>`
+- `--outbound-queue-limit <count>`
+- `--security-event-limit <count>`
 - `--security-profile <1|2|3>`
 - `--basic-auth-password <password>`
 - `--ca-cert <path>`
@@ -83,6 +85,8 @@ trace-frames = false
 strict = false
 request-timeout-seconds = 30
 heartbeat-seconds = 0
+outbound-queue-limit = 1000
+security-event-limit = 1000
 security-profile = 2
 basic-auth-password = "0123456789abcdef0123456789abcdef"
 ca-cert = "./csms-root.pem"
@@ -111,6 +115,8 @@ connectors = 1
 log-path = "./lab-ocppsim.log"
 trace-frames = true
 strict = true
+outbound-queue-limit = 0
+security-event-limit = 5000
 ```
 
 CLI flags override profile values where both are provided.
@@ -224,6 +230,23 @@ heartbeats using the CSMS-provided `interval` value.
 Use `heartbeat stop` after boot when you want to suppress periodic heartbeats
 for a manual test.
 
+## Resource Limits
+
+`--outbound-queue-limit` and profile `outbound-queue-limit` cap the number of
+outbound OCPP CALL messages waiting behind the active pending request.
+The default is `1000`.
+When the limit is reached, later outbound messages are dropped with a warning
+until the CSMS responds and queue space becomes available.
+Set the value to `0` to disable this cap for deliberate stress tests.
+
+`--security-event-limit` and profile `security-event-limit` cap retained
+security events used for `SecurityEventNotification` replay.
+The default is `1000`.
+When trimming is required, sent events are discarded before unsent events.
+Set the value to `0` to retain events without a simulator-imposed cap.
+
+## Tracing And Strict Validation
+
 Use `--trace-frames` when debugging interoperability.
 It logs complete JSON CALL, CALLRESULT, and CALLERROR frames in addition to the
 normal summary lines.
@@ -301,6 +324,7 @@ suspends the connector.
 
 If the terminal output grows noisy during stress tests, lower the message rate
 or increase the CSMS response speed.
-The simulator warns when the outbound queue grows past the built-in warning
-threshold, but the queue is intentionally not capped so scripted tests do not
-drop messages silently.
+The simulator drops new outbound messages once `outbound-queue-limit` is
+reached.
+Set `outbound-queue-limit = 0` for scripted tests that intentionally need an
+unbounded queue.

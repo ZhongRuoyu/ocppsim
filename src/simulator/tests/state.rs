@@ -132,6 +132,27 @@ fn trace_frame_redacts_token_aliases() {
 }
 
 #[test]
+fn outbound_queue_limit_drops_new_calls() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.config.outbound_queue_limit = 1;
+
+  simulator.enqueue_heartbeat();
+  simulator.enqueue_authorize("TOKEN".to_string());
+
+  assert_eq!(simulator.queue.len(), 1);
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("Heartbeat")
+  );
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(messages.iter().any(|message| {
+    message.contains("Outbound OCPP queue limit 1 reached")
+      && message.contains("Authorize")
+  }));
+}
+
+#[test]
 fn trace_frame_redacts_network_profile_secrets() {
   let frame = json!([
     2,

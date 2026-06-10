@@ -198,7 +198,54 @@ impl Simulator {
       tech_info,
       notification_state: SecurityEventNotificationState::Pending,
     });
+    self.enforce_security_event_limit();
     self.enqueue_pending_security_event_notifications();
+  }
+
+  pub(in crate::simulator) fn enforce_security_event_limit(&mut self) {
+    let limit = self.config.security_event_limit;
+    if limit == 0 {
+      return;
+    }
+
+    let mut dropped_unsent = 0;
+    while self.security.events.len() > limit {
+      let Some(index) = self
+        .security
+        .events
+        .iter()
+        .position(|event| {
+          event.notification_state == SecurityEventNotificationState::Sent
+        })
+        .or_else(|| {
+          self.security.events.iter().position(|event| {
+            event.notification_state == SecurityEventNotificationState::Queued
+          })
+        })
+        .or_else(|| {
+          self.security.events.iter().position(|event| {
+            event.notification_state == SecurityEventNotificationState::Pending
+          })
+        })
+      else {
+        break;
+      };
+
+      let event = self.security.events.remove(index);
+      if event.notification_state != SecurityEventNotificationState::Sent {
+        dropped_unsent += 1;
+      }
+    }
+
+    if dropped_unsent > 0 {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "Security event limit {limit} reached; dropped {dropped_unsent} \
+          unsent event(s)."
+        ),
+      );
+    }
   }
 
   pub(in crate::simulator) fn enqueue_pending_security_event_notifications(
@@ -281,12 +328,11 @@ impl Simulator {
       timestamp: &timestamp,
       tech_info: tech_info.as_deref(),
     });
-    self.enqueue_call(
+    if self.enqueue_call(
       OutgoingAction::SecurityEventNotification.as_str(),
       payload,
       PendingContext::SecurityEventNotification { event_id },
-    );
-    if let Some(event) = self
+    ) && let Some(event) = self
       .security
       .events
       .iter_mut()

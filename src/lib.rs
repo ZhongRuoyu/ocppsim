@@ -588,6 +588,8 @@ mod tests {
       strict: false,
       request_timeout_seconds: None,
       heartbeat_seconds: None,
+      outbound_queue_limit: None,
+      security_event_limit: None,
       security_profile: None,
       basic_auth_password: None,
       ca_cert: None,

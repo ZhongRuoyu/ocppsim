@@ -567,6 +567,8 @@ impl Simulator {
     self.config.trace_frames = config.trace_frames;
     self.config.strict = config.strict;
     self.config.request_timeout = config.request_timeout;
+    self.config.outbound_queue_limit = config.outbound_queue_limit;
+    self.config.security_event_limit = config.security_event_limit;
     self.config.security_profile = config.security_profile;
     self.config.basic_auth_password = config.basic_auth_password;
     self.config.ca_cert_path = config.ca_cert_path;
@@ -574,6 +576,7 @@ impl Simulator {
     self.config.client_key_path = config.client_key_path;
     self.security.security_profile = self.config.security_profile;
     self.security.basic_auth_password = self.config.basic_auth_password.clone();
+    self.enforce_security_event_limit();
     self.resize_connectors(config.connectors);
     self.apply_heartbeat_config(config.heartbeat_seconds);
     self.refresh_runtime_configuration_entries();
@@ -763,6 +766,7 @@ impl Simulator {
     let Some(call) = self.queue.pop_front() else {
       return Ok(());
     };
+    self.enqueue_pending_security_event_notifications();
 
     let message_id = self.next_message_id();
     let payload = build_call(&message_id, &call.action, &call.payload);

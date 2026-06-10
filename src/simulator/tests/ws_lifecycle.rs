@@ -432,6 +432,35 @@ async fn outbound_trace_logs_redacted_frame_but_sends_real_frame() {
 }
 
 #[tokio::test]
+async fn pending_security_events_enqueue_when_queue_space_opens() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.connected = true;
+  simulator.config.outbound_queue_limit = 1;
+
+  simulator.enqueue_heartbeat();
+  simulator.record_security_event("InvalidFirmwareSignature", None);
+  assert_eq!(simulator.queue.len(), 1);
+
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send heartbeat");
+
+  let OcppFrame::Call { action, .. } = read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALL frame");
+  };
+  assert_eq!(action, "Heartbeat");
+  assert_eq!(simulator.queue.len(), 1);
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("SecurityEventNotification")
+  );
+}
+
+#[tokio::test]
 async fn boot_response_starts_heartbeat_from_interval() {
   let mut simulator = simulator_for_tests();
   simulator

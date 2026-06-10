@@ -455,6 +455,43 @@ fn queued_security_events_replay_after_disconnect_queue_clear() {
 }
 
 #[test]
+fn security_event_limit_drops_sent_events_first() {
+  let mut simulator = simulator_for_tests();
+  simulator.config.security_event_limit = 2;
+
+  simulator.record_security_event("First", Some("sent".to_string()));
+  simulator.record_security_event("Second", Some("pending".to_string()));
+  simulator.mark_security_event_notification_sent(1);
+  simulator.record_security_event("Third", Some("new".to_string()));
+
+  let events = simulator
+    .security
+    .events
+    .iter()
+    .map(|event| event.event_type.as_str())
+    .collect::<Vec<_>>();
+  assert_eq!(events, vec!["Second", "Third"]);
+}
+
+#[test]
+fn security_event_limit_drops_oldest_unsent_event_when_full() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  simulator.config.security_event_limit = 1;
+
+  simulator.record_security_event("First", Some("old".to_string()));
+  simulator.record_security_event("Second", Some("new".to_string()));
+
+  assert_eq!(simulator.security.events.len(), 1);
+  assert_eq!(simulator.security.events[0].event_type, "Second");
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(messages.iter().any(|message| {
+    message.contains("Security event limit 1 reached")
+      && message.contains("dropped 1 unsent")
+  }));
+}
+
+#[test]
 fn security_configuration_changes_request_reconnect_when_connected() {
   let mut simulator = simulator_for_tests();
   simulator.connected = true;
@@ -899,6 +936,8 @@ fn connection_config_for_protocol(
     strict: false,
     request_timeout: std::time::Duration::from_secs(30),
     heartbeat_seconds: Some(10),
+    outbound_queue_limit: 1_000,
+    security_event_limit: 1_000,
     security_profile: None,
     basic_auth_password: None,
     ca_cert_path: None,
