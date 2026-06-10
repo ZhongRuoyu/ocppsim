@@ -28,7 +28,7 @@ connect ws://csms.example.com/ocpp CP-001
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
 ```
 
-By default, direct mode appends the charge point id to the WebSocket URL path.
+By default, direct mode appends the charge point ID to the WebSocket URL path.
 Use `--no-append-cp-id` when the CSMS endpoint already includes the final path.
 Charge point ids must be non-empty.
 For OCPP 2.0.1 and 2.1, ids are limited to 48 characters and cannot contain

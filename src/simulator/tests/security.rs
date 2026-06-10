@@ -812,7 +812,7 @@ fn certificate_signed_v2_1_accepts_optional_request_id() {
       .certificate_signed_v2_x(&json!({
         "certificateChain": TEST_CERTIFICATE
       }))
-      .expect("missing request id"),
+      .expect("missing request ID"),
     ResponseStatus::Accepted
   );
 
@@ -824,7 +824,7 @@ fn certificate_signed_v2_1_accepts_optional_request_id() {
         "requestId": request_id + 1,
         "certificateChain": TEST_CERTIFICATE
       }))
-      .expect("unknown request id"),
+      .expect("unknown request ID"),
     ResponseStatus::Rejected
   );
   assert_eq!(
@@ -833,7 +833,7 @@ fn certificate_signed_v2_1_accepts_optional_request_id() {
         "requestId": request_id,
         "certificateChain": TEST_CERTIFICATE
       }))
-      .expect("matching request id"),
+      .expect("matching request ID"),
     ResponseStatus::Accepted
   );
   assert_eq!(
@@ -842,7 +842,7 @@ fn certificate_signed_v2_1_accepts_optional_request_id() {
         "requestId": request_id,
         "certificateChain": TEST_CERTIFICATE
       }))
-      .expect("duplicate request id"),
+      .expect("duplicate request ID"),
     ResponseStatus::Rejected
   );
 }

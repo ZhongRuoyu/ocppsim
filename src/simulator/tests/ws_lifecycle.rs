@@ -421,7 +421,7 @@ async fn outbound_trace_logs_redacted_frame_but_sends_real_frame() {
     messages
       .iter()
       .all(|message| !message.contains("SECRET-TOKEN")),
-    "id token appeared in logs: {messages:?}"
+    "ID token appeared in logs: {messages:?}"
   );
   assert!(
     messages
@@ -543,7 +543,7 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
       .iter()
       .filter(|call| call.action == "StatusNotification")
       .map(|call| {
-        call.payload["connectorId"].as_u64().expect("connector id")
+        call.payload["connectorId"].as_u64().expect("connector ID")
       })
       .collect::<Vec<_>>(),
     vec![0, 1, 2]

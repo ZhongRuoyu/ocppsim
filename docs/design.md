@@ -118,7 +118,7 @@ composite schedules.
 A missing profile is represented separately from a zero limit: no profile makes
 composite schedule requests return `Rejected`, while a zero limit is accepted
 and suspends an active connector.
-`ClearChargingProfile` honors connector/EVSE, profile id, purpose, and stack
+`ClearChargingProfile` honors connector/EVSE, profile ID, purpose, and stack
 level filters against that simplified store, but it does not model full
 profile stacking, recurrency, validity windows, sales tariff data, phase
 constraints, or time-window precedence.
@@ -164,7 +164,7 @@ The original OCPP 1.6 `UpdateFirmware` action returns CALLERROR
 `NotSupported`; OCPP 1.6 security firmware testing uses
 `SignedUpdateFirmware`.
 Trace-frame logging runs through parsed-frame redaction before emitting logs,
-so known password, id token, and URL-contained credential values are not
+so known password, ID token, and URL-contained credential values are not
 printed in frame traces.
 
 ## Terminal UI

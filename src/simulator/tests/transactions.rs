@@ -18,7 +18,7 @@ fn local_start_logs_redacted_id_token() {
     messages
       .iter()
       .all(|message| !message.contains("SECRET-TOKEN")),
-    "id token appeared in logs: {messages:?}"
+    "ID token appeared in logs: {messages:?}"
   );
   assert!(
     messages
@@ -54,7 +54,7 @@ fn authorize_result_logs_redacted_id_token() {
     messages
       .iter()
       .all(|message| !message.contains("SECRET-TOKEN")),
-    "id token appeared in logs: {messages:?}"
+    "ID token appeared in logs: {messages:?}"
   );
   assert!(
     messages

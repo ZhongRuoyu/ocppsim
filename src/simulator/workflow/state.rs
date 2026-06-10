@@ -411,7 +411,7 @@ impl Simulator {
     Ok(())
   }
 
-  /// Stores the transaction id returned by OCPP 1.6 `StartTransaction`.
+  /// Stores the transaction ID returned by OCPP 1.6 `StartTransaction`.
   pub(in crate::simulator) fn set_v1_6_transaction_id(
     &mut self,
     connector: u16,
@@ -503,7 +503,7 @@ impl Simulator {
     Ok(())
   }
 
-  /// Finds a connector by OCPP 1.6 transaction id or local fallback id.
+  /// Finds a connector by OCPP 1.6 transaction ID or local fallback ID.
   pub(in crate::simulator) fn find_v1_6_transaction(
     &self,
     transaction_id: i64,
@@ -521,7 +521,7 @@ impl Simulator {
     })
   }
 
-  /// Returns the active OCPP 2.x transaction id for one connector.
+  /// Returns the active OCPP 2.x transaction ID for one connector.
   pub(in crate::simulator) fn active_transaction_uid(
     &self,
     connector: u16,
@@ -534,7 +534,7 @@ impl Simulator {
     })
   }
 
-  /// Finds a connector by OCPP 2.x transaction id.
+  /// Finds a connector by OCPP 2.x transaction ID.
   pub(in crate::simulator) fn find_transaction_by_uid(
     &self,
     transaction_uid: &str,

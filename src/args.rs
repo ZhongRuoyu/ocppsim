@@ -552,20 +552,20 @@ fn validate_charge_point_identity(
     return Ok(());
   };
   if cp_id.is_empty() {
-    bail!("charge point id must not be empty.");
+    bail!("charge point ID must not be empty.");
   }
 
   let is_v2_x = matches!(protocol, OcppVersion::V2_0_1 | OcppVersion::V2_1);
   let uses_basic_auth = matches!(security_profile, Some(1 | 2));
   if cp_id.contains(':') && (is_v2_x || uses_basic_auth) {
     bail!(
-      "charge point id must not contain `:` for OCPP 2.x or Basic Auth \
+      "charge point ID must not contain `:` for OCPP 2.x or Basic Auth \
       profiles."
     );
   }
   if is_v2_x && cp_id.chars().count() > OCPP_2_X_CP_ID_MAX_CHARS {
     bail!(
-      "charge point id must be at most {OCPP_2_X_CP_ID_MAX_CHARS} \
+      "charge point ID must be at most {OCPP_2_X_CP_ID_MAX_CHARS} \
       characters for OCPP {}.",
       protocol.label()
     );
@@ -1169,7 +1169,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let error = args.resolve().expect_err("should reject cp id");
+    let error = args.resolve().expect_err("should reject colon");
     assert!(
       error.to_string().contains("must not contain `:`"),
       "unexpected error: {error}"

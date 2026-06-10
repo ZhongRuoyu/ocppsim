@@ -69,7 +69,7 @@ impl Simulator {
     );
   }
 
-  /// Enqueues an `Authorize` request for the provided id token.
+  /// Enqueues an `Authorize` request for the provided ID token.
   pub(in crate::simulator) fn enqueue_authorize(&mut self, id_token: String) {
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => Self::authorize_v1_6_payload(&id_token),
@@ -305,7 +305,7 @@ impl Simulator {
 
   /// Enqueues an OCPP 2.x `TransactionEvent` request.
   ///
-  /// Inputs describe event semantics plus optional id token and stop reason.
+  /// Inputs describe event semantics plus optional ID token and stop reason.
   pub(in crate::simulator) fn enqueue_transaction_event(
     &mut self,
     request: &TransactionEventRequest,

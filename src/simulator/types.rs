@@ -92,7 +92,7 @@ impl SimulatorConnectionConfig {
   /// Converts resolved arguments into a connection target.
   ///
   /// Returns `None` for offline-only arguments without a WebSocket URL or
-  /// charge point id.
+  /// charge point ID.
   pub fn from_resolved(args: &ResolvedCliArgs) -> Option<Self> {
     let ws_url = args.ws_url.clone()?;
     let cp_id = args.cp_id.clone()?;

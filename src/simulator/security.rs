@@ -104,12 +104,12 @@ impl Simulator {
   ) -> Result<&str> {
     let Some(cp_id) = self.config.cp_id.as_deref() else {
       return Err(anyhow!(
-        "Security profile {profile} requires a charge point id."
+        "Security profile {profile} requires a charge point ID."
       ));
     };
     if cp_id.contains(':') {
       return Err(anyhow!(
-        "Security profile {profile} requires a charge point id without `:` \
+        "Security profile {profile} requires a charge point ID without `:` \
         for HTTP Basic authentication."
       ));
     }

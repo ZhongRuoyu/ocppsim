@@ -727,7 +727,7 @@ impl Simulator {
     Ok(Connection { write, read })
   }
 
-  /// Builds the final WebSocket URL, appending charge point id when enabled.
+  /// Builds the final WebSocket URL, appending charge point ID when enabled.
   fn connection_url(&self) -> Result<Url> {
     let ws_url = self
       .config
@@ -738,7 +738,7 @@ impl Simulator {
       .config
       .cp_id
       .as_deref()
-      .ok_or_else(|| anyhow!("No charge point id configured."))?;
+      .ok_or_else(|| anyhow!("No charge point ID configured."))?;
     let mut url = Url::parse(ws_url)?;
     if self.config.append_cp_id {
       let mut segments = url

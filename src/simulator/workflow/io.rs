@@ -118,7 +118,7 @@ impl Simulator {
     Ok(())
   }
 
-  /// Allocates the next monotonic local OCPP message id.
+  /// Allocates the next monotonic local OCPP message ID.
   pub(in crate::simulator) fn next_message_id(&mut self) -> String {
     let message_id = format!("m{}", self.next_message_id);
     self.next_message_id = self.next_message_id.saturating_add(1);

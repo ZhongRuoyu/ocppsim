@@ -43,7 +43,7 @@ Certificate-management and signed-firmware actions keep an in-memory synthetic
 certificate store and obvious invalid-value detection, but they do not perform
 full PKI validation, OCSP/CRL checks, real CSR generation, firmware binary
 verification, or file transfer.
-Known password, id token, and URL-contained credential values are redacted from
+Known password, ID token, and URL-contained credential values are redacted from
 trace-frame logs in both directions.
 The original OCPP 1.6 `UpdateFirmware` request is rejected with CALLERROR
 `NotSupported`; whitepaper firmware tests should use `SignedUpdateFirmware`.
@@ -337,7 +337,7 @@ has an active transaction.
 The scheduled `Unavailable` state is applied after the stop or transaction-end
 event is acknowledged.
 
-Reservations are keyed by reservation id and duplicate ids are rejected.
+Reservations are keyed by reservation ID and duplicate IDs are rejected.
 The local authorization list version is stored, but local authorization list
 contents are not used to make authorization decisions.
 
@@ -351,7 +351,7 @@ OCPP 1.6 `GetCompositeSchedule` rejects invalid `chargingRateUnit` values with
 CALLERROR `PropertyConstraintViolation`.
 A stored limit of `0` is different from no profile: it is accepted and drives
 the connector into a suspended state while the transaction remains active.
-`ClearChargingProfile` honors connector or EVSE, profile id, purpose, and stack
+`ClearChargingProfile` honors connector or EVSE, profile ID, purpose, and stack
 level filters against that simplified store.
 It does not model profile stacking, recurrency, validity windows, phase
 constraints, sales tariff data, or time-based schedule precedence.

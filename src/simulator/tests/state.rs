@@ -524,7 +524,7 @@ fn queued_status_connector_ids(simulator: &Simulator) -> Vec<u64> {
     .queue
     .iter()
     .filter(|call| call.action == "StatusNotification")
-    .map(|call| call.payload["connectorId"].as_u64().expect("connector id"))
+    .map(|call| call.payload["connectorId"].as_u64().expect("connector ID"))
     .collect()
 }
 
@@ -533,7 +533,7 @@ fn queued_status_evse_ids(simulator: &Simulator) -> Vec<u64> {
     .queue
     .iter()
     .filter(|call| call.action == "StatusNotification")
-    .map(|call| call.payload["evseId"].as_u64().expect("evse id"))
+    .map(|call| call.payload["evseId"].as_u64().expect("evse ID"))
     .collect()
 }
 

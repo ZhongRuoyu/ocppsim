@@ -2242,7 +2242,7 @@ mod tests {
     let oversized = "m".repeat(37);
     let frame = format!(r#"[2,"{oversized}","Heartbeat",{{}}]"#);
 
-    let error = parse_frame(&frame).expect_err("oversized id should fail");
+    let error = parse_frame(&frame).expect_err("oversized ID should fail");
 
     assert!(error.contains("MessageId must be at most 36 characters"));
   }
