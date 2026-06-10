@@ -606,6 +606,33 @@ async fn remote_start_v1_6_authorizes_before_start_when_configured() {
 }
 
 #[tokio::test]
+async fn remote_start_v1_6_rejects_unstartable_connectors() {
+  for connector_id in [0, 999] {
+    let (frame, simulator) = capture_inbound_call_response(
+      OcppVersion::V1_6,
+      "RemoteStartTransaction",
+      json!({
+        "connectorId": connector_id,
+        "idTag": "TOKEN"
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallResult { payload, .. } = frame else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+    assert!(simulator.queue.is_empty());
+    assert!(
+      simulator
+        .connectors
+        .values()
+        .all(|connector| connector.transaction.is_none())
+    );
+  }
+}
+
+#[tokio::test]
 async fn malformed_request_start_v2_x_returns_call_error() {
   let malformed_payloads = [
     json!({ "idToken": { "idToken": "TOKEN" } }),

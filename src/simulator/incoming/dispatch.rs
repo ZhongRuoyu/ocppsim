@@ -52,6 +52,29 @@ impl Simulator {
     }
   }
 
+  /// Resolves a connector and rejects requests for non-startable connectors.
+  pub(in crate::simulator) async fn resolve_startable_connector_or_reject(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+    requested_connector: Option<u16>,
+  ) -> Result<Option<u16>> {
+    let Some(connector) = self
+      .resolve_start_connector_or_reject(write, message_id, requested_connector)
+      .await?
+    else {
+      return Ok(None);
+    };
+    if self.validate_start_connector(connector).is_ok() {
+      Ok(Some(connector))
+    } else {
+      self
+        .send_status_response(write, message_id, ResponseStatus::Rejected)
+        .await?;
+      Ok(None)
+    }
+  }
+
   /// Logs and acknowledges a reset request without mutating simulator state.
   pub(in crate::simulator) async fn handle_reset_only_call(
     &mut self,

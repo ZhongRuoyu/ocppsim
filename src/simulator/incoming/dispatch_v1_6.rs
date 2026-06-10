@@ -260,7 +260,11 @@ impl Simulator {
       }
     };
     let Some(connector) = self
-      .resolve_start_connector_or_reject(write, message_id, request.connector)
+      .resolve_startable_connector_or_reject(
+        write,
+        message_id,
+        request.connector,
+      )
       .await?
     else {
       return Ok(());
