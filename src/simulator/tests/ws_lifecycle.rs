@@ -308,6 +308,43 @@ async fn trace_frames_redacts_send_payload() {
 }
 
 #[tokio::test]
+async fn older_protocol_rejects_call_result_error_message_type() {
+  let frame =
+    json!([5, "unsupported-message", "GenericError", "failed", {}]).to_string();
+
+  let (response, _, events) =
+    capture_ws_text_response_with_events(OcppVersion::V2_0_1, frame).await;
+
+  let OcppFrame::CallError {
+    message_id, code, ..
+  } = response
+  else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(message_id, "unsupported-message");
+  assert_eq!(code, "MessageTypeNotSupported");
+  assert_log_contains(&events, "Unsupported message type 5.");
+}
+
+#[tokio::test]
+async fn older_protocol_rejects_send_message_type() {
+  let frame = json!([6, "unsupported-message", "SetVariables", {}]).to_string();
+
+  let (response, _, events) =
+    capture_ws_text_response_with_events(OcppVersion::V1_6, frame).await;
+
+  let OcppFrame::CallError {
+    message_id, code, ..
+  } = response
+  else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(message_id, "unsupported-message");
+  assert_eq!(code, "MessageTypeNotSupported");
+  assert_log_contains(&events, "Unsupported message type 6.");
+}
+
+#[tokio::test]
 async fn trace_frames_redacts_set_variables_basic_auth_password() {
   let password = "0123456789abcdef0123456789abcdef";
   let frame = build_call(

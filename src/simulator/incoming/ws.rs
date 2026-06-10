@@ -1,3 +1,5 @@
+use crate::ocpp::OcppMessageTypeId;
+
 use super::super::{
   Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
   UiLogLevel, Value, WsWrite, anyhow, build_call_error, json, parse_frame,
@@ -44,6 +46,7 @@ impl Simulator {
   ) -> Result<()> {
     match parse_frame(&text) {
       Ok(frame) => {
+        let frame = frame_supported_for_protocol(self.config.protocol, frame);
         if self.config.trace_frames {
           self.log(UiLogLevel::Rx, sanitized_trace_frame(&frame));
         }
@@ -291,5 +294,26 @@ impl Simulator {
     }
 
     Err(anyhow!(errors.join("; ")))
+  }
+}
+
+fn frame_supported_for_protocol(
+  protocol: OcppVersion,
+  frame: OcppFrame,
+) -> OcppFrame {
+  if protocol == OcppVersion::V2_1 {
+    return frame;
+  }
+
+  match frame {
+    OcppFrame::CallResultError { message_id, .. } => OcppFrame::Unsupported {
+      message_type: OcppMessageTypeId::CallResultError.value(),
+      message_id: Some(message_id),
+    },
+    OcppFrame::Send { message_id, .. } => OcppFrame::Unsupported {
+      message_type: OcppMessageTypeId::Send.value(),
+      message_id: Some(message_id),
+    },
+    _ => frame,
   }
 }
