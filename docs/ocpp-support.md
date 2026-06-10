@@ -309,8 +309,10 @@ conformance before any URI scheme is considered.
 
 The simulator validates required fields before mutating state for supported
 inbound flows.
-Malformed payloads receive `FormationViolation` CALLERROR responses instead of
-falling back to connector zero, empty strings, or silent no-op behavior.
+Malformed CALL payloads for supported actions receive `FormationViolation`
+CALLERROR responses instead of falling back to connector zero, empty strings,
+or silent no-op behavior.
+Malformed OCPP frames that cannot be parsed receive `ProtocolError`.
 
 For OCPP 2.x, station-initiated OCPP messages are held until
 `BootNotification` is accepted.
