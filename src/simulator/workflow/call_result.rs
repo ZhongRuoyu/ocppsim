@@ -1,6 +1,7 @@
 use super::super::{
-  ConfigurationKey, PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus,
-  Result, Simulator, TxEventType, UiLogLevel, Value, authorize_status,
+  ConfigurationKey, ConnectorStatus, PendingContext, REDACTED_SENSITIVE_VALUE,
+  ResponseStatus, Result, Simulator, StopReason, TransactionEventRequest,
+  TransactionTriggerReason, TxEventType, UiLogLevel, Value, authorize_status,
 };
 
 impl Simulator {
@@ -77,6 +78,7 @@ impl Simulator {
           *connector,
           *local_tx_id,
           *event_type,
+          payload,
         )?;
       }
     }
@@ -266,7 +268,16 @@ impl Simulator {
     connector: u16,
     local_tx_id: u64,
     event_type: TxEventType,
+    payload: &Value,
   ) -> Result<()> {
+    if self.apply_transaction_event_authorization_status(
+      connector,
+      local_tx_id,
+      event_type,
+      payload,
+    )? {
+      return Ok(());
+    }
     match event_type {
       TxEventType::Started => {
         self.enqueue_status_notification(connector)?;
@@ -284,6 +295,65 @@ impl Simulator {
         connector={connector} localTx={local_tx_id}"
       ),
     );
+    Ok(())
+  }
+
+  fn apply_transaction_event_authorization_status(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+    event_type: TxEventType,
+    payload: &Value,
+  ) -> Result<bool> {
+    let Some(status) = parse_v2_x_id_token_status(payload) else {
+      return Ok(false);
+    };
+    if status == ResponseStatus::Accepted {
+      return Ok(false);
+    }
+
+    self.log(
+      UiLogLevel::Warn,
+      format!(
+        "TransactionEvent {event_type:?} authorization status={} \
+        connector={connector} localTx={local_tx_id}; stopping transaction.",
+        status.as_str()
+      ),
+    );
+    if matches!(event_type, TxEventType::Started | TxEventType::Updated) {
+      self.enqueue_deauthorized_transaction_end(connector, local_tx_id)?;
+      return Ok(true);
+    }
+    Ok(false)
+  }
+
+  fn enqueue_deauthorized_transaction_end(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+  ) -> Result<()> {
+    let Some(remote_start_id) = self
+      .connectors
+      .get(&connector)
+      .and_then(|state| state.transaction.as_ref())
+      .filter(|transaction| transaction.local_id == local_tx_id)
+      .map(|transaction| transaction.remote_start_id)
+    else {
+      return Ok(());
+    };
+
+    self.bump_seq_no(connector, local_tx_id)?;
+    self.enqueue_transaction_event(&TransactionEventRequest {
+      connector,
+      local_tx_id,
+      event_type: TxEventType::Ended,
+      trigger_reason: TransactionTriggerReason::Deauthorized,
+      id_token: None,
+      remote_start_id,
+      stopped_reason: Some(StopReason::DeAuthorized),
+    })?;
+    self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
+    self.emit_runtime_state();
     Ok(())
   }
 
@@ -314,4 +384,15 @@ fn parse_v1_6_id_tag_status(payload: &Value) -> ResponseStatus {
     .and_then(Value::as_str)
     .and_then(ResponseStatus::parse)
     .unwrap_or(ResponseStatus::Unknown)
+}
+
+fn parse_v2_x_id_token_status(payload: &Value) -> Option<ResponseStatus> {
+  let info = payload.get("idTokenInfo")?.as_object()?;
+  Some(
+    info
+      .get("status")
+      .and_then(Value::as_str)
+      .and_then(ResponseStatus::parse)
+      .unwrap_or(ResponseStatus::Unknown),
+  )
 }

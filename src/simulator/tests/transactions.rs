@@ -495,6 +495,60 @@ fn transaction_event_start_error_rolls_back_v2_x_local_state() {
 }
 
 #[test]
+fn transaction_event_rejection_deauthorizes_v2_x_transaction() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("start should enqueue");
+    let start_call = simulator
+      .queue
+      .iter()
+      .find(|call| {
+        matches!(
+          call.context,
+          PendingContext::TxEvent {
+            event_type: TxEventType::Started,
+            ..
+          }
+        )
+      })
+      .expect("queued start event")
+      .clone();
+    simulator.queue.clear();
+    simulator.pending = Some(PendingCall {
+      message_id: "event-rejected".to_string(),
+      sent_at: Instant::now(),
+      call: start_call,
+    });
+
+    simulator
+      .handle_call_result(
+        "event-rejected",
+        &json!({
+          "idTokenInfo": { "status": "Blocked" }
+        }),
+      )
+      .expect("start rejection should deauthorize");
+
+    assert!(simulator.pending.is_none());
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|state| state.status.display()),
+      Some("Finishing")
+    );
+    let payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(payload["eventType"], json!("Ended"));
+    assert_eq!(payload["triggerReason"], json!("Deauthorized"));
+    assert_eq!(
+      payload["transactionInfo"]["stoppedReason"],
+      json!("DeAuthorized")
+    );
+  });
+}
+
+#[test]
 fn v2_x_multi_connector_transactions_progress_independently() {
   for_each_v2_x_simulator(|_, mut simulator| {
     simulator
