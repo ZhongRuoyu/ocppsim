@@ -576,57 +576,66 @@ fn whitepaper_read_only_keys_reject_v1_6_configuration_writes() {
 }
 
 #[test]
-fn protocol_switch_refreshes_security_read_only_keys() {
+fn protocol_switch_refreshes_security_variable_mutability() {
   let mut simulator = simulator_for_tests();
-  for key in protocol_specific_security_keys() {
+  for key in always_read_only_security_keys() {
     assert!(configuration_is_read_only(&simulator, key));
   }
+  assert!(!configuration_is_read_only(
+    &simulator,
+    ConfigurationKey::SecurityProfile
+  ));
 
   simulator.apply_connection_config(connection_config_for_protocol(
     OcppVersion::V2_0_1,
   ));
-  for key in protocol_specific_security_keys() {
-    assert!(!configuration_is_read_only(&simulator, key));
+  for key in always_read_only_security_keys() {
+    assert!(configuration_is_read_only(&simulator, key));
   }
+  assert!(configuration_is_read_only(
+    &simulator,
+    ConfigurationKey::SecurityProfile
+  ));
 
   let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_0_1);
-  for key in protocol_specific_security_keys() {
-    assert!(!configuration_is_read_only(&simulator, key));
+  for key in always_read_only_security_keys() {
+    assert!(configuration_is_read_only(&simulator, key));
   }
+  assert!(configuration_is_read_only(
+    &simulator,
+    ConfigurationKey::SecurityProfile
+  ));
 
   simulator
     .apply_connection_config(connection_config_for_protocol(OcppVersion::V1_6));
-  for key in protocol_specific_security_keys() {
+  for key in always_read_only_security_keys() {
     assert!(configuration_is_read_only(&simulator, key));
   }
+  assert!(!configuration_is_read_only(
+    &simulator,
+    ConfigurationKey::SecurityProfile
+  ));
 }
 
 #[test]
-fn certificate_chain_size_rejects_values_over_whitepaper_maximum() {
+fn v2_x_security_ctrlr_read_only_variables_reject_writes() {
   for_each_v2_x_simulator(|_, mut simulator| {
-    let rejected = simulator
+    let response = simulator
       .set_variables_v2_x(&json!({
         "setVariableData": [
-          set_variable_data("MaxCertificateChainSize", "10001")
+          set_variable_data("SecurityProfile", "2"),
+          set_variable_data("AdditionalRootCertificateCheck", "true"),
+          set_variable_data("CertificateSignedMaxChainSize", "5600"),
+          set_variable_data("MaxCertificateChainSize", "5600")
         ]
       }))
       .expect("set variables");
-    assert_eq!(
-      rejected["setVariableResult"][0]["attributeStatus"],
-      ResponseStatus::Rejected.as_str()
-    );
-
-    let accepted = simulator
-      .set_variables_v2_x(&json!({
-        "setVariableData": [
-          set_variable_data("MaxCertificateChainSize", "10000")
-        ]
-      }))
-      .expect("set variables");
-    assert_eq!(
-      accepted["setVariableResult"][0]["attributeStatus"],
-      ResponseStatus::Accepted.as_str()
-    );
+    let results = response["setVariableResult"]
+      .as_array()
+      .expect("set variable results");
+    assert!(results.iter().all(|result| {
+      result["attributeStatus"] == ResponseStatus::Rejected.as_str()
+    }));
   });
 }
 
@@ -901,10 +910,11 @@ fn write_temp_security_file(content: &str) -> PathBuf {
   path
 }
 
-fn protocol_specific_security_keys() -> [ConfigurationKey; 2] {
+fn always_read_only_security_keys() -> [ConfigurationKey; 3] {
   [
     ConfigurationKey::AdditionalRootCertificateCheck,
     ConfigurationKey::CertificateSignedMaxChainSize,
+    ConfigurationKey::MaxCertificateChainSize,
   ]
 }
 

@@ -278,26 +278,26 @@ Unknown components return `UnknownComponent`, and unknown variables return
 `UnknownVariable`.
 Read-only variables reject writes.
 
-| Key                              | Writable | Notes                                                |
-| -------------------------------- | -------- | ---------------------------------------------------- |
-| `AdditionalRootCertificateCheck` | 2.x only | Read-only for OCPP 1.6 whitepaper behavior.          |
-| `AllowOfflineTxForUnknownId`     | Yes      | Stored as configuration only.                        |
-| `AllowSecurityProfileDowngrade`  | Yes      | OCPP 1.6 still rejects profile downgrades.           |
-| `AuthorizeRemoteTxRequests`      | Yes      | Controls OCPP 1.6 remote-start authorization.        |
-| `AuthorizationKey`               | Yes      | Write-only 1.6 Basic Auth password.                  |
-| `BasicAuthPassword`              | Yes      | Write-only 2.x Basic Auth password.                  |
-| `CertificateSignedMaxChainSize`  | 2.x only | Read-only for OCPP 1.6; maximum 10000 characters.    |
-| `CertificateStoreMaxLength`      | No       | Maximum in-memory certificate entries.               |
-| `CpoName`                        | Yes      | Stored security organization name.                   |
-| `HeartbeatInterval`              | Yes      | Boot/config changes can restart heartbeats.          |
-| `MaxCertificateChainSize`        | Yes      | Alias for certificate chain size limit, max 10000.   |
-| `MeterValueSampleInterval`       | Yes      | Stored as configuration only.                        |
-| `NumberOfConnectors`             | No       | Derived from startup configuration.                  |
-| `OrganizationName`               | Yes      | Alias for stored security organization name.         |
-| `SecurityProfile`                | Yes      | Controls transport profile validation and reconnect. |
-| `SupportedFeatureProfiles`       | No       | Advertises implemented feature families.             |
-| `SupportedFileTransferProtocols` | Yes      | Controls file-transfer URI schemes.                  |
-| `WebSocketPingInterval`          | Yes      | Stored as configuration only.                        |
+| Key                              | Writable | Notes                                              |
+| -------------------------------- | -------- | -------------------------------------------------- |
+| `AdditionalRootCertificateCheck` | No       | Read-only SecurityCtrlr capability flag.           |
+| `AllowOfflineTxForUnknownId`     | Yes      | Stored as configuration only.                      |
+| `AllowSecurityProfileDowngrade`  | Yes      | OCPP 1.6 still rejects profile downgrades.         |
+| `AuthorizeRemoteTxRequests`      | Yes      | Controls OCPP 1.6 remote-start authorization.      |
+| `AuthorizationKey`               | Yes      | Write-only 1.6 Basic Auth password.                |
+| `BasicAuthPassword`              | Yes      | Write-only 2.x Basic Auth password.                |
+| `CertificateSignedMaxChainSize`  | No       | Read-only compatibility alias.                     |
+| `CertificateStoreMaxLength`      | No       | Maximum in-memory certificate entries.             |
+| `CpoName`                        | Yes      | Stored security organization name.                 |
+| `HeartbeatInterval`              | Yes      | Boot/config changes can restart heartbeats.        |
+| `MaxCertificateChainSize`        | No       | Read-only certificate chain size limit, max 10000. |
+| `MeterValueSampleInterval`       | Yes      | Stored as configuration only.                      |
+| `NumberOfConnectors`             | No       | Derived from startup configuration.                |
+| `OrganizationName`               | Yes      | Alias for stored security organization name.       |
+| `SecurityProfile`                | 1.6 only | 2.x reports active profile as read-only.           |
+| `SupportedFeatureProfiles`       | No       | Advertises implemented feature families.           |
+| `SupportedFileTransferProtocols` | Yes      | Controls file-transfer URI schemes.                |
+| `WebSocketPingInterval`          | Yes      | Stored as configuration only.                      |
 
 `SupportedFileTransferProtocols` is enforced for OCPP 1.6 diagnostics,
 OCPP 1.6 `GetLog`, OCPP 1.6 `SignedUpdateFirmware`, OCPP 2.x `GetLog`, and

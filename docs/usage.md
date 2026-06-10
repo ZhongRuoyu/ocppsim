@@ -220,8 +220,8 @@ Security-profile passwords are not included in frame logs or configuration
 readback.
 
 When a connected CSMS changes `AuthorizationKey`, `BasicAuthPassword`, or an
-accepted higher `SecurityProfile`, the simulator closes the current connection
-and reconnects using the new security settings.
+accepted higher OCPP 1.6 `SecurityProfile`, the simulator closes the current
+connection and reconnects using the new security settings.
 If a profile-upgrade reconnect fails, the simulator restores the previous
 profile and attempts one fallback reconnect.
 

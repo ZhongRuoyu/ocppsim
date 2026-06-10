@@ -87,7 +87,7 @@ fn security_configuration_entries(
       ConfigurationKey::AdditionalRootCertificateCheck,
       ConfigurationEntry {
         value: "false".to_string(),
-        read_only: config.protocol == OcppVersion::V1_6,
+        read_only: true,
       },
     ),
     (
@@ -115,7 +115,7 @@ fn security_configuration_entries(
       ConfigurationKey::CertificateSignedMaxChainSize,
       ConfigurationEntry {
         value: "10000".to_string(),
-        read_only: config.protocol == OcppVersion::V1_6,
+        read_only: true,
       },
     ),
     (
@@ -150,7 +150,7 @@ fn security_configuration_entries(
       ConfigurationKey::MaxCertificateChainSize,
       ConfigurationEntry {
         value: "10000".to_string(),
-        read_only: false,
+        read_only: true,
       },
     ),
     (
@@ -164,7 +164,7 @@ fn security_configuration_entries(
       ConfigurationKey::SecurityProfile,
       ConfigurationEntry {
         value: config.security_profile.unwrap_or(0).to_string(),
-        read_only: false,
+        read_only: config.protocol != OcppVersion::V1_6,
       },
     ),
     (

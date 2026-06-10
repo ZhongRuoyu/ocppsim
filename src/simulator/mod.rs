@@ -650,14 +650,15 @@ impl Simulator {
       .get_mut(&ConfigurationKey::SecurityProfile)
     {
       entry.value = self.config.security_profile.unwrap_or(0).to_string();
+      entry.read_only = self.config.protocol != OcppVersion::V1_6;
     }
-    let read_only_for_v1_6 = self.config.protocol == OcppVersion::V1_6;
     for key in [
       ConfigurationKey::AdditionalRootCertificateCheck,
       ConfigurationKey::CertificateSignedMaxChainSize,
+      ConfigurationKey::MaxCertificateChainSize,
     ] {
       if let Some(entry) = self.configuration.get_mut(&key) {
-        entry.read_only = read_only_for_v1_6;
+        entry.read_only = true;
       }
     }
   }
