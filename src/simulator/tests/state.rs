@@ -153,6 +153,28 @@ fn outbound_queue_limit_drops_new_calls() {
 }
 
 #[test]
+fn boot_state_is_unchanged_when_queue_is_full() {
+  let mut simulator = simulator_for_tests();
+  simulator.config.outbound_queue_limit = 1;
+  simulator.boot_registration_status = BootRegistrationStatus::Accepted;
+  simulator.enqueue_heartbeat();
+
+  let error = simulator
+    .enqueue_boot_with_registration_state()
+    .expect_err("boot should not enqueue into a full queue");
+
+  assert!(error.to_string().contains("BootNotification"));
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Accepted
+  );
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("Heartbeat")
+  );
+}
+
+#[test]
 fn trace_frame_redacts_network_profile_secrets() {
   let frame = json!([
     2,

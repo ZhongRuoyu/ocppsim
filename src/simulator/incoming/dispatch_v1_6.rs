@@ -285,12 +285,18 @@ impl Simulator {
       charging_profile,
     } = request;
     let status = if self.authorize_remote_tx_requests() {
-      self.enqueue_remote_start_authorize_v1_6(
-        connector,
-        id_token,
-        charging_profile,
-      );
-      ResponseStatus::Accepted
+      if self
+        .enqueue_remote_start_authorize_v1_6(
+          connector,
+          id_token,
+          charging_profile,
+        )
+        .is_ok()
+      {
+        ResponseStatus::Accepted
+      } else {
+        ResponseStatus::Rejected
+      }
     } else if self
       .start_transaction(connector, id_token, true, None, true)
       .and_then(|()| {

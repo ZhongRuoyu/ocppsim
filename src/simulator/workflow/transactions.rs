@@ -21,6 +21,16 @@ impl Simulator {
   ) -> Result<()> {
     self.validate_start_connector(connector)?;
 
+    if is_connected {
+      let action = match self.config.protocol {
+        OcppVersion::V1_6 => OutgoingAction::StartTransaction.as_str(),
+        OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
+          OutgoingAction::TransactionEvent.as_str()
+        }
+      };
+      self.ensure_outbound_queue_capacity(action)?;
+    }
+
     let status = if self.config.protocol == OcppVersion::V1_6 {
       ConnectorStatus::Charging
     } else {
@@ -75,14 +85,21 @@ impl Simulator {
           meter_start,
           timestamp: &timestamp,
         });
-        self.enqueue_call(
+        if !self.enqueue_call(
           OutgoingAction::StartTransaction.as_str(),
           payload,
           PendingContext::StartTxV1_6 {
             connector,
             local_tx_id,
           },
-        );
+        ) {
+          self.cancel_transaction_start(connector, local_tx_id)?;
+          return Err(anyhow!(
+            "Outbound OCPP queue limit {} reached; cannot queue \
+            StartTransaction request.",
+            self.config.outbound_queue_limit
+          ));
+        }
       }
       OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
         self.bump_seq_no(connector, local_tx_id)?;
@@ -91,15 +108,20 @@ impl Simulator {
         } else {
           TransactionTriggerReason::Authorized
         };
-        self.enqueue_transaction_event(&TransactionEventRequest {
-          connector,
-          local_tx_id,
-          event_type: TxEventType::Started,
-          trigger_reason,
-          id_token: Some(id_token),
-          remote_start_id,
-          stopped_reason: None,
-        })?;
+        if let Err(error) =
+          self.enqueue_transaction_event(&TransactionEventRequest {
+            connector,
+            local_tx_id,
+            event_type: TxEventType::Started,
+            trigger_reason,
+            id_token: Some(id_token),
+            remote_start_id,
+            stopped_reason: None,
+          })
+        {
+          self.cancel_transaction_start(connector, local_tx_id)?;
+          return Err(error);
+        }
       }
     }
     Ok(())
@@ -113,108 +135,155 @@ impl Simulator {
     remote_stop: bool,
     is_connected: bool,
   ) -> Result<()> {
-    let (local_tx_id, tx_uid, v1_6_tx_id, remote_start_id, token) = {
+    let (local_tx_id, v1_6_tx_id, remote_start_id, token) = {
       let connector_state = self.connector_mut(connector)?;
       let Some(transaction) = connector_state.transaction.as_ref() else {
         return Err(anyhow!("No active transaction on connector {connector}."));
       };
       (
         transaction.local_id,
-        transaction.transaction_uid.clone(),
         transaction.v1_6_transaction_id,
         transaction.remote_start_id,
         transaction.id_token.clone(),
       )
     };
 
+    if is_connected {
+      let action = match self.config.protocol {
+        OcppVersion::V1_6 => OutgoingAction::StopTransaction.as_str(),
+        OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
+          OutgoingAction::TransactionEvent.as_str()
+        }
+      };
+      self.ensure_outbound_queue_capacity(action)?;
+    }
+
     if self.config.protocol != OcppVersion::V1_6 {
       self.bump_seq_no(connector, local_tx_id)?;
     }
 
+    if !is_connected {
+      self.stop_transaction_offline(connector, local_tx_id)?;
+      return Ok(());
+    }
+
     match self.config.protocol {
-      OcppVersion::V1_6 => {
-        self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
-
-        self.log(
-          UiLogLevel::Info,
-          format!("Transaction stopped locally on connector {connector}"),
-        );
-
-        if !is_connected {
-          self.complete_transaction_stop(connector, local_tx_id)?;
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Transaction stop is local only.",
-          );
-          self.emit_runtime_state();
-          return Ok(());
-        }
-
-        let connector_state = self.connector_ref(connector)?;
-        let tx_id = v1_6_tx_id.unwrap_or(local_tx_id.cast_signed());
-        let timestamp = now_timestamp();
-        let stop_reason = map_stop_reason_v1_6(reason, remote_stop);
-        let reason_str =
-          stop_reason.as_v1_6().unwrap_or(StopReason::Local.as_str());
-        let payload = to_value(&StopTransactionV1_6Request {
-          transaction_id: tx_id,
-          timestamp: &timestamp,
-          meter_stop: connector_state.meter_wh,
-          id_tag: &token,
-          reason: reason_str,
-        });
-        self.enqueue_call(
-          OutgoingAction::StopTransaction.as_str(),
-          payload,
-          PendingContext::StopTxV1_6 {
-            connector,
-            local_tx_id,
-          },
-        );
-        self.emit_runtime_state();
-      }
-      OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
-        let _ = tx_uid;
-        if !is_connected {
-          self.complete_transaction_stop(connector, local_tx_id)?;
-          self.log(
-            UiLogLevel::Info,
-            format!("Transaction stopped locally on connector {connector}"),
-          );
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Transaction stop is local only.",
-          );
-          self.emit_runtime_state();
-          return Ok(());
-        }
-
-        let trigger_reason = if remote_stop {
-          TransactionTriggerReason::RemoteStop
-        } else {
-          TransactionTriggerReason::StopAuthorized
-        };
-        let stopped_reason =
-          map_stop_reason_v2_x(self.config.protocol, reason, remote_stop);
-        self.enqueue_transaction_event(&TransactionEventRequest {
-          connector,
-          local_tx_id,
-          event_type: TxEventType::Ended,
-          trigger_reason,
-          id_token: None,
-          remote_start_id,
-          stopped_reason: Some(stopped_reason),
-        })?;
-
-        self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
-        self.log(
-          UiLogLevel::Info,
-          format!("Transaction stopped locally on connector {connector}"),
-        );
-        self.emit_runtime_state();
-      }
+      OcppVersion::V1_6 => self.stop_transaction_v1_6(
+        connector,
+        local_tx_id,
+        v1_6_tx_id,
+        token.as_str(),
+        reason,
+        remote_stop,
+      )?,
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => self.stop_transaction_v2_x(
+        connector,
+        local_tx_id,
+        remote_start_id,
+        reason,
+        remote_stop,
+      )?,
     }
     Ok(())
+  }
+
+  fn stop_transaction_offline(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+  ) -> Result<()> {
+    self.complete_transaction_stop(connector, local_tx_id)?;
+    self.log_transaction_stopped(connector);
+    self.log_offline_transaction_stop();
+    self.emit_runtime_state();
+    Ok(())
+  }
+
+  fn stop_transaction_v1_6(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+    v1_6_tx_id: Option<i64>,
+    token: &str,
+    reason: Option<&str>,
+    remote_stop: bool,
+  ) -> Result<()> {
+    let connector_state = self.connector_ref(connector)?;
+    let tx_id = v1_6_tx_id.unwrap_or(local_tx_id.cast_signed());
+    let timestamp = now_timestamp();
+    let stop_reason = map_stop_reason_v1_6(reason, remote_stop);
+    let reason_str =
+      stop_reason.as_v1_6().unwrap_or(StopReason::Local.as_str());
+    let payload = to_value(&StopTransactionV1_6Request {
+      transaction_id: tx_id,
+      timestamp: &timestamp,
+      meter_stop: connector_state.meter_wh,
+      id_tag: token,
+      reason: reason_str,
+    });
+    if !self.enqueue_call(
+      OutgoingAction::StopTransaction.as_str(),
+      payload,
+      PendingContext::StopTxV1_6 {
+        connector,
+        local_tx_id,
+      },
+    ) {
+      return Err(anyhow!(
+        "Outbound OCPP queue limit {} reached; cannot queue \
+        StopTransaction request.",
+        self.config.outbound_queue_limit
+      ));
+    }
+    self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
+    self.log_transaction_stopped(connector);
+    self.emit_runtime_state();
+    Ok(())
+  }
+
+  fn stop_transaction_v2_x(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+    remote_start_id: Option<i64>,
+    reason: Option<&str>,
+    remote_stop: bool,
+  ) -> Result<()> {
+    let trigger_reason = if remote_stop {
+      TransactionTriggerReason::RemoteStop
+    } else {
+      TransactionTriggerReason::StopAuthorized
+    };
+    let stopped_reason =
+      map_stop_reason_v2_x(self.config.protocol, reason, remote_stop);
+    self.enqueue_transaction_event(&TransactionEventRequest {
+      connector,
+      local_tx_id,
+      event_type: TxEventType::Ended,
+      trigger_reason,
+      id_token: None,
+      remote_start_id,
+      stopped_reason: Some(stopped_reason),
+    })?;
+
+    self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
+    self.log_transaction_stopped(connector);
+    self.emit_runtime_state();
+    Ok(())
+  }
+
+  fn log_transaction_stopped(&mut self, connector: u16) {
+    self.log(
+      UiLogLevel::Info,
+      format!("Transaction stopped locally on connector {connector}"),
+    );
+  }
+
+  fn log_offline_transaction_stop(&mut self) {
+    self.log(
+      UiLogLevel::Warn,
+      "Not connected. Transaction stop is local only.",
+    );
   }
 
   /// Sets a connector meter reading in watt-hours.

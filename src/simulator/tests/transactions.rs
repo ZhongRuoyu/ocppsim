@@ -291,6 +291,117 @@ fn stop_transaction_v2_x_remote_reason_is_preserved() {
 }
 
 #[test]
+fn start_transaction_v1_6_full_queue_does_not_mutate_state() {
+  let mut simulator = simulator_for_tests();
+  simulator.config.outbound_queue_limit = 1;
+  simulator.enqueue_heartbeat();
+  let next_tx_id = simulator.next_tx_id;
+
+  let error = simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect_err("start should fail when the queue is full");
+
+  assert!(error.to_string().contains("StartTransaction"));
+  assert_eq!(simulator.next_tx_id, next_tx_id);
+  assert!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|state| state.transaction.as_ref())
+      .is_none()
+  );
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .map(|state| state.status.display()),
+    Some("Available")
+  );
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("Heartbeat")
+  );
+}
+
+#[test]
+fn start_transaction_v2_x_full_queue_does_not_mutate_state() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator.config.outbound_queue_limit = 1;
+    simulator.enqueue_heartbeat();
+    let next_tx_id = simulator.next_tx_id;
+
+    let error = simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect_err("start should fail when the queue is full");
+
+    assert!(error.to_string().contains("TransactionEvent"));
+    assert_eq!(simulator.next_tx_id, next_tx_id);
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_none()
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|state| state.status.display()),
+      Some("Available")
+    );
+    assert_eq!(
+      simulator.queue.front().map(|call| call.action.as_str()),
+      Some("Heartbeat")
+    );
+  });
+}
+
+#[test]
+fn stop_transaction_full_queue_keeps_transaction_active() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, false)
+      .expect("offline start should mutate local state");
+    simulator.config.outbound_queue_limit = 1;
+    simulator.enqueue_heartbeat();
+
+    let error = simulator
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect_err("stop should fail when the queue is full");
+
+    assert!(
+      error
+        .to_string()
+        .contains(if protocol == OcppVersion::V1_6 {
+          "StopTransaction"
+        } else {
+          "TransactionEvent"
+        })
+    );
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_some()
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|state| state.status.display()),
+      Some(if protocol == OcppVersion::V1_6 {
+        "Charging"
+      } else {
+        "Occupied"
+      })
+    );
+  }
+}
+
+#[test]
 fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
   let mut simulator = simulator_for_tests();
   simulator
@@ -335,7 +446,9 @@ fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
 #[test]
 fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None);
+  simulator
+    .enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None)
+    .expect("authorize should enqueue");
   let authorize_call = simulator.queue.pop_front().expect("queued authorize");
   simulator.pending = Some(PendingCall {
     message_id: "auth-ack".to_string(),
@@ -371,7 +484,9 @@ fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
 #[test]
 fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None);
+  simulator
+    .enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None)
+    .expect("authorize should enqueue");
   let authorize_call = simulator.queue.pop_front().expect("queued authorize");
   simulator.pending = Some(PendingCall {
     message_id: "auth-concurrent".to_string(),

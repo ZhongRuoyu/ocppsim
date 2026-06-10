@@ -455,9 +455,13 @@ impl Simulator {
     }
   }
 
-  fn enqueue_boot_with_registration_state(&mut self) {
+  fn enqueue_boot_with_registration_state(&mut self) -> Result<()> {
+    self.ensure_outbound_queue_capacity(
+      OutgoingAction::BootNotification.as_str(),
+    )?;
     self.boot_registration_status = BootRegistrationStatus::AwaitingResponse;
     self.enqueue_boot_notification();
+    Ok(())
   }
 
   pub(in crate::simulator) fn post_boot_ocpp_requests_allowed(&self) -> bool {
@@ -526,7 +530,7 @@ impl Simulator {
         {
           return Ok(());
         }
-        self.enqueue_boot_with_registration_state();
+        self.enqueue_boot_with_registration_state()?;
       }
       SimulatorCommand::Authorize { id_token } => {
         if !self.ensure_can_send_ocpp_command(is_connected, "Authorize") {
@@ -775,7 +779,7 @@ impl Simulator {
       format!("Connected. Negotiated WebSocket subprotocol: {negotiated}"),
     );
 
-    self.enqueue_boot_with_registration_state();
+    self.enqueue_boot_with_registration_state()?;
     self.emit_snapshot();
 
     let (write, read) = stream.split();

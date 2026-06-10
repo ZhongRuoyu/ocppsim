@@ -24,19 +24,12 @@ impl Simulator {
     payload: Value,
     context: PendingContext,
   ) -> bool {
-    let limit = self.config.outbound_queue_limit;
-    if limit != 0 && self.queue.len() >= limit {
-      self.log(
-        UiLogLevel::Warn,
-        format!(
-          "Outbound OCPP queue limit {limit} reached; dropping {action} \
-          request."
-        ),
-      );
-      self.emit_runtime_state();
+    if let Some(limit) = self.outbound_queue_limit_reached() {
+      self.log_outbound_queue_limit_reached(action, limit);
       return false;
     }
 
+    let limit = self.config.outbound_queue_limit;
     self.queue.push_back(QueuedCall {
       action: action.to_string(),
       payload,
@@ -53,6 +46,51 @@ impl Simulator {
     }
     self.emit_runtime_state();
     true
+  }
+
+  pub(in crate::simulator) fn ensure_outbound_queue_capacity(
+    &mut self,
+    action: &str,
+  ) -> Result<()> {
+    if let Some(limit) = self.outbound_queue_limit_reached() {
+      self.log_outbound_queue_limit_reached(action, limit);
+      return Err(anyhow!(
+        "Outbound OCPP queue limit {limit} reached; cannot queue {action} \
+        request."
+      ));
+    }
+    Ok(())
+  }
+
+  fn try_enqueue_call(
+    &mut self,
+    action: &str,
+    payload: Value,
+    context: PendingContext,
+  ) -> Result<()> {
+    if self.enqueue_call(action, payload, context) {
+      return Ok(());
+    }
+    Err(anyhow!(
+      "Outbound OCPP queue limit {} reached; cannot queue {action} request.",
+      self.config.outbound_queue_limit
+    ))
+  }
+
+  fn outbound_queue_limit_reached(&self) -> Option<usize> {
+    let limit = self.config.outbound_queue_limit;
+    (limit != 0 && self.queue.len() >= limit).then_some(limit)
+  }
+
+  fn log_outbound_queue_limit_reached(&mut self, action: &str, limit: usize) {
+    self.log(
+      UiLogLevel::Warn,
+      format!(
+        "Outbound OCPP queue limit {limit} reached; dropping {action} \
+        request."
+      ),
+    );
+    self.emit_runtime_state();
   }
 
   /// Enqueues a protocol-version-specific `BootNotification` request.
@@ -89,9 +127,9 @@ impl Simulator {
     connector: u16,
     id_token: String,
     charging_profile: Option<Value>,
-  ) {
+  ) -> Result<()> {
     let payload = Self::authorize_v1_6_payload(&id_token);
-    self.enqueue_call(
+    self.try_enqueue_call(
       OutgoingAction::Authorize.as_str(),
       payload,
       PendingContext::RemoteStartAuthorizeV1_6 {
@@ -99,7 +137,7 @@ impl Simulator {
         id_token,
         charging_profile,
       },
-    );
+    )
   }
 
   /// Enqueues a one-shot `Heartbeat` request.
@@ -348,7 +386,7 @@ impl Simulator {
       ),
     };
 
-    self.enqueue_call(
+    self.try_enqueue_call(
       OutgoingAction::TransactionEvent.as_str(),
       payload,
       PendingContext::TxEvent {
@@ -356,8 +394,7 @@ impl Simulator {
         local_tx_id: request.local_tx_id,
         event_type: request.event_type,
       },
-    );
-    Ok(())
+    )
   }
 
   fn boot_notification_v1_6_payload(&self) -> Value {
