@@ -251,7 +251,7 @@ impl Simulator {
   pub(in crate::simulator) fn enqueue_pending_security_event_notifications(
     &mut self,
   ) {
-    if !self.connected {
+    if !self.connected || !self.post_boot_ocpp_requests_allowed() {
       return;
     }
     let event_ids = self

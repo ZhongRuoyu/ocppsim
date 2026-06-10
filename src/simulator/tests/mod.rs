@@ -4,10 +4,11 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use super::{
-  ConfigurationKey, ConnectorStatus, OcppVersion, PendingCall, PendingContext,
-  ResponseStatus, SecurityProfileFallback, Simulator, SimulatorCommand,
-  SimulatorConfig, TxEventType, UiEvent, UiLogLevel, now_timestamp,
-  sanitized_trace_frame_text, validate_negotiated_subprotocol,
+  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, OcppVersion,
+  PendingCall, PendingContext, ResponseStatus, SecurityProfileFallback,
+  Simulator, SimulatorCommand, SimulatorConfig, TxEventType, UiEvent,
+  UiLogLevel, now_timestamp, sanitized_trace_frame_text,
+  validate_negotiated_subprotocol,
 };
 
 mod charging_profiles;

@@ -228,6 +228,11 @@ impl Simulator {
           .await;
       }
     };
+    if !self.post_boot_ocpp_requests_allowed() {
+      return self
+        .send_status_response(write, message_id, ResponseStatus::Rejected)
+        .await;
+    }
     let Some(connector) = self
       .resolve_start_connector_or_reject(write, message_id, request.connector)
       .await?
@@ -304,6 +309,11 @@ impl Simulator {
           .await;
       }
     };
+    if !self.post_boot_ocpp_requests_allowed() {
+      return self
+        .send_status_response(write, message_id, ResponseStatus::Rejected)
+        .await;
+    }
     let status = if let Some(connector) =
       self.find_transaction_by_uid(&request.transaction_id)
     {

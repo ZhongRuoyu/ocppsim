@@ -44,10 +44,10 @@ pub(in crate::simulator) use support::{
   required_u16_field, required_u64_field, validate_negotiated_subprotocol,
 };
 pub(in crate::simulator) use types::{
-  ConfigurationEntry, ConnectorState, ConnectorStatus, HeartbeatTask,
-  PendingCall, PendingContext, QueuedCall, SecurityProfileFallback,
-  SecurityState, Simulator, TransactionEventRequest, TransactionState,
-  TxEventType, normalize_identifier,
+  BootRegistrationStatus, ConfigurationEntry, ConnectorState, ConnectorStatus,
+  HeartbeatTask, PendingCall, PendingContext, QueuedCall,
+  SecurityProfileFallback, SecurityState, Simulator, TransactionEventRequest,
+  TransactionState, TxEventType, normalize_identifier,
 };
 pub use types::{
   ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
@@ -391,6 +391,7 @@ impl Simulator {
       next_tx_id: 1,
       heartbeat: None,
       connected: false,
+      boot_registration_status: BootRegistrationStatus::Accepted,
     }
   }
 
@@ -453,6 +454,68 @@ impl Simulator {
     }
   }
 
+  fn enqueue_boot_with_registration_state(&mut self) {
+    self.boot_registration_status = if self.config.protocol == OcppVersion::V1_6
+    {
+      BootRegistrationStatus::Accepted
+    } else {
+      BootRegistrationStatus::AwaitingResponse
+    };
+    self.enqueue_boot_notification();
+  }
+
+  pub(in crate::simulator) fn post_boot_ocpp_requests_allowed(&self) -> bool {
+    self.config.protocol == OcppVersion::V1_6
+      || self.boot_registration_status == BootRegistrationStatus::Accepted
+  }
+
+  fn ensure_post_boot_ocpp_requests_allowed(&mut self, action: &str) -> bool {
+    if self.post_boot_ocpp_requests_allowed() {
+      return true;
+    }
+    self.log(
+      UiLogLevel::Warn,
+      format!("BootNotification is not Accepted; not sending {action}."),
+    );
+    false
+  }
+
+  fn ensure_connected_for_command(
+    &mut self,
+    is_connected: bool,
+    action: &str,
+  ) -> bool {
+    if is_connected {
+      return true;
+    }
+    self.log(
+      UiLogLevel::Warn,
+      format!("Not connected. Connect first to send {action}."),
+    );
+    false
+  }
+
+  fn ensure_can_send_ocpp_command(
+    &mut self,
+    is_connected: bool,
+    action: &str,
+  ) -> bool {
+    self.ensure_connected_for_command(is_connected, action)
+      && self.ensure_post_boot_ocpp_requests_allowed(action)
+  }
+
+  fn ensure_can_mutate_ocpp_transaction(&mut self, is_connected: bool) -> bool {
+    !is_connected
+      || self.ensure_post_boot_ocpp_requests_allowed("TransactionEvent")
+  }
+
+  fn should_enqueue_heartbeat_tick(&self, is_connected: bool) -> bool {
+    is_connected
+      && self.post_boot_ocpp_requests_allowed()
+      && self.pending.is_none()
+      && self.queue.is_empty()
+  }
+
   /// Handles commands that are valid in both online and offline states.
   fn handle_common_command(
     &mut self,
@@ -464,21 +527,14 @@ impl Simulator {
         self.emit_snapshot();
       }
       SimulatorCommand::Boot => {
-        if !is_connected {
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Connect first to send BootNotification.",
-          );
+        if !self.ensure_connected_for_command(is_connected, "BootNotification")
+        {
           return Ok(());
         }
-        self.enqueue_boot_notification();
+        self.enqueue_boot_with_registration_state();
       }
       SimulatorCommand::Authorize { id_token } => {
-        if !is_connected {
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Connect first to send Authorize.",
-          );
+        if !self.ensure_can_send_ocpp_command(is_connected, "Authorize") {
           return Ok(());
         }
         self.enqueue_authorize(id_token);
@@ -488,11 +544,7 @@ impl Simulator {
         message_id,
         data,
       } => {
-        if !is_connected {
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Connect first to send DataTransfer.",
-          );
+        if !self.ensure_can_send_ocpp_command(is_connected, "DataTransfer") {
           return Ok(());
         }
         self.enqueue_data_transfer(
@@ -505,6 +557,9 @@ impl Simulator {
         connector,
         id_token,
       } => {
+        if !self.ensure_can_mutate_ocpp_transaction(is_connected) {
+          return Ok(());
+        }
         self.start_transaction(
           connector,
           id_token,
@@ -514,6 +569,9 @@ impl Simulator {
         )?;
       }
       SimulatorCommand::StopTransaction { connector, reason } => {
+        if !self.ensure_can_mutate_ocpp_transaction(is_connected) {
+          return Ok(());
+        }
         self.stop_transaction(
           connector,
           reason.as_deref(),
@@ -528,14 +586,15 @@ impl Simulator {
         self.set_meter(connector, value_wh)?;
       }
       SimulatorCommand::SendMeter { connector } => {
+        if is_connected
+          && !self.ensure_post_boot_ocpp_requests_allowed("MeterValues")
+        {
+          return Ok(());
+        }
         self.send_meter(connector, is_connected)?;
       }
       SimulatorCommand::Heartbeat => {
-        if !is_connected {
-          self.log(
-            UiLogLevel::Warn,
-            "Not connected. Connect first to send Heartbeat.",
-          );
+        if !self.ensure_can_send_ocpp_command(is_connected, "Heartbeat") {
           return Ok(());
         }
         self.enqueue_heartbeat();
@@ -547,10 +606,11 @@ impl Simulator {
         self.stop_heartbeat();
       }
       SimulatorCommand::SetConnectorStatus { connector, status } => {
-        self.set_connector_status(connector, &status, is_connected)?;
+        let notify = is_connected && self.post_boot_ocpp_requests_allowed();
+        self.set_connector_status(connector, &status, notify)?;
       }
       SimulatorCommand::HeartbeatTick => {
-        if is_connected && self.pending.is_none() && self.queue.is_empty() {
+        if self.should_enqueue_heartbeat_tick(is_connected) {
           self.enqueue_heartbeat();
         }
       }
@@ -720,7 +780,7 @@ impl Simulator {
       format!("Connected. Negotiated WebSocket subprotocol: {negotiated}"),
     );
 
-    self.enqueue_boot_notification();
+    self.enqueue_boot_with_registration_state();
     self.emit_snapshot();
 
     let (write, read) = stream.split();
@@ -775,6 +835,12 @@ impl Simulator {
     let Some(call) = self.queue.pop_front() else {
       return Ok(());
     };
+    if !self.post_boot_ocpp_requests_allowed()
+      && call.action != OutgoingAction::BootNotification.as_str()
+    {
+      self.queue.push_front(call);
+      return Ok(());
+    }
     self.enqueue_pending_security_event_notifications();
 
     let message_id = self.next_message_id();

@@ -312,6 +312,11 @@ inbound flows.
 Malformed payloads receive `FormationViolation` CALLERROR responses instead of
 falling back to connector zero, empty strings, or silent no-op behavior.
 
+For OCPP 2.x, station-initiated OCPP messages are held until
+`BootNotification` is accepted.
+Inbound `RequestStartTransaction` and `RequestStopTransaction` requests are
+rejected while boot registration is pending, rejected, or awaiting a response.
+
 Transaction starts are accepted only on known, startable connectors.
 Unavailable, faulted, reserved, occupied, and finishing connectors reject
 starts.

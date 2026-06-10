@@ -739,6 +739,74 @@ async fn malformed_request_start_v2_x_returns_call_error() {
 }
 
 #[tokio::test]
+async fn request_start_stop_v2_x_rejected_until_boot_accepted() {
+  for protocol in v2_x_protocols() {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.boot_registration_status = BootRegistrationStatus::Pending;
+
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "start-before-boot",
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 12,
+          "idToken": { "idToken": "TOKEN" },
+          "evseId": 1
+        }),
+      )
+      .await
+      .expect("handle request start");
+
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+    assert!(
+      simulator
+        .connectors
+        .values()
+        .all(|connector| connector.transaction.is_none())
+    );
+
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, false)
+      .expect("local transaction");
+    let transaction_id = simulator
+      .active_transaction_uid(1)
+      .expect("active transaction uid");
+
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "stop-before-boot",
+        "RequestStopTransaction",
+        json!({ "transactionId": transaction_id }),
+      )
+      .await
+      .expect("handle request stop");
+
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_some()
+    );
+  }
+}
+
+#[tokio::test]
 async fn request_start_v2_x_applies_charging_profile() {
   for protocol in v2_x_protocols() {
     let profile = json!({

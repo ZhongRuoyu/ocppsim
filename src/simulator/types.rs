@@ -382,6 +382,14 @@ pub(in crate::simulator) enum PendingContext {
   },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum BootRegistrationStatus {
+  Accepted,
+  AwaitingResponse,
+  Pending,
+  Rejected,
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct SecurityState {
   pub(in crate::simulator) security_profile: Option<u8>,
@@ -531,6 +539,7 @@ pub(in crate::simulator) struct Simulator {
   pub(in crate::simulator) next_tx_id: u64,
   pub(in crate::simulator) heartbeat: Option<HeartbeatTask>,
   pub(in crate::simulator) connected: bool,
+  pub(in crate::simulator) boot_registration_status: BootRegistrationStatus,
 }
 
 /// Normalizes free-form identifier text for case-insensitive matching.

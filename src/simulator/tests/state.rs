@@ -498,6 +498,67 @@ fn accepted_boot_result_enqueues_v2_x_connector_statuses_only() {
 }
 
 #[test]
+fn v2_x_commands_wait_for_boot_acceptance() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator.connected = true;
+    simulator.boot_registration_status = BootRegistrationStatus::Pending;
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::StartTransaction {
+          connector: 1,
+          id_token: "TOKEN".to_string(),
+        },
+        true,
+      )
+      .expect("start command should be handled");
+
+    assert!(simulator.queue.is_empty());
+    assert!(
+      simulator
+        .connectors
+        .values()
+        .all(|connector| connector.transaction.is_none())
+    );
+
+    simulator
+      .apply_call_result_context(
+        &PendingContext::Boot,
+        &json!({
+          "status": "Accepted",
+          "currentTime": now_timestamp()
+        }),
+      )
+      .expect("boot result");
+    simulator.queue.clear();
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::StartTransaction {
+          connector: 1,
+          id_token: "TOKEN".to_string(),
+        },
+        true,
+      )
+      .expect("start command should be handled after boot");
+
+    assert!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|state| state.transaction.as_ref())
+        .is_some()
+    );
+    assert!(
+      simulator
+        .queue
+        .iter()
+        .any(|call| call.action == "TransactionEvent")
+    );
+  });
+}
+
+#[test]
 fn change_availability_v2_x_updates_target_evse() {
   for_each_v2_x_simulator(|_, mut simulator| {
     let payload = json!({
