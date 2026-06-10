@@ -95,6 +95,9 @@ OCPP 1.6 exposes that map through `GetConfiguration` and
 OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
 `GetVariables` and `SetVariables` for component `ChargingStation` or
 `SecurityCtrlr`.
+The OCPP 2.1 `NetworkConfiguration` component is intentionally outside the
+current simulator model; OCPP 2.1 Basic Auth changes use the legacy-compatible
+`SecurityCtrlr` variable path.
 Security password values are write-only: they can be changed, but
 `GetConfiguration` and `GetVariables` do not return the secret value.
 

@@ -34,6 +34,9 @@ characters.
 OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
 `passwordString` characters, and OCPP 2.1 `BasicAuthPassword` values must be
 16 to 64 UTF-8 `passwordString` characters.
+For OCPP 2.1 this is compatibility support through `SecurityCtrlr`.
+The simulator does not implement the full 2.1 `NetworkConfiguration`
+component, `ActiveNetworkProfile`, or `SetNetworkProfile` behavior.
 Security password values are write-only on readback and trigger reconnect when
 changed on an active connection.
 Certificate-management and signed-firmware actions keep an in-memory synthetic
@@ -264,6 +267,8 @@ for version-specific values.
 OCPP 1.6 configuration keys are stored in one backing map.
 For OCPP 2.0.1 and OCPP 2.1, `GetVariables` and `SetVariables` expose that map
 as component `ChargingStation` or `SecurityCtrlr` variables.
+OCPP 2.1 `NetworkConfiguration` variables are not implemented; Basic Auth
+password changes use the backwards-compatible `SecurityCtrlr` mapping.
 
 Supported variable attribute types are `Actual` and `Target`.
 `MinSet` and `MaxSet` return `NotSupportedAttributeType`.

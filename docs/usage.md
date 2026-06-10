@@ -181,6 +181,7 @@ Security profile settings validate the transport before connecting.
 Profile 1 requires `ws://` plus HTTP Basic authentication.
 Profile 2 requires `wss://` plus HTTP Basic authentication.
 Profile 3 requires `wss://` plus `--client-cert` and `--client-key`.
+
 Basic Auth password validation follows the selected OCPP version.
 OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
 characters.
@@ -188,12 +189,18 @@ OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
 `passwordString` characters.
 OCPP 2.1 `BasicAuthPassword` values must be 16 to 64 UTF-8 `passwordString`
 characters.
+For OCPP 2.1 this is a compatibility variable exposed through
+`SecurityCtrlr`.
+The simulator does not implement the full 2.1 `NetworkConfiguration`
+component or network-profile model.
+
 Profile 1 sends Basic Auth over an unencrypted WebSocket; the password is only
 Base64 encoded on the wire.
 Use profile 1 only on trusted lab networks, tunnels, or VPNs.
 Prefer storing them in a protected profile file over passing them on the
 command line, because shell history and process listings can expose CLI
 arguments.
+
 When certificate paths are configured, the simulator builds a rustls connector
 using the WebPKI root store, the optional `--ca-cert`, and the optional client
 certificate and key.
@@ -202,6 +209,7 @@ Central System root prerequisite and configured client certificate/key paths
 count as the profile 3 Charge Point certificate material.
 Security-profile passwords are not included in frame logs or configuration
 readback.
+
 When a connected CSMS changes `AuthorizationKey`, `BasicAuthPassword`, or an
 accepted higher `SecurityProfile`, the simulator closes the current connection
 and reconnects using the new security settings.
@@ -216,6 +224,7 @@ for a manual test.
 Use `--trace-frames` when debugging interoperability.
 It logs complete JSON CALL, CALLRESULT, and CALLERROR frames in addition to the
 normal summary lines.
+
 Known sensitive fields are redacted before frames are logged in either
 direction, including OCPP 1.6 `AuthorizationKey` changes, OCPP 2.x
 `BasicAuthPassword` variable writes, OCPP `idTag` or `idToken` values, and
@@ -225,6 +234,7 @@ Use `--strict` or profile `strict = true` when you want inbound CSMS requests
 validated against the checked-in JSON schemas before simulator dispatch.
 Strict mode returns `FormationViolation` for schema-invalid inbound CALL
 payloads.
+
 Without strict mode, the simulator validates only the fields needed by its
 implemented behavior and ignores optional fields outside that behavior.
 
@@ -232,11 +242,13 @@ Certificate management, signing, signed firmware, log retrieval, and security
 event workflows are simulator-level implementations.
 They validate protocol structure, maintain an in-memory synthetic certificate
 store, emit expected status notifications, and record obvious security events.
+
 Recorded security events are queued for `SecurityEventNotification` delivery
 until acknowledged, including events recorded while offline or immediately
 before a security reconnect.
 They do not perform full PKI validation, OCSP/CRL checks, real CSR generation,
 firmware binary verification, or file transfer.
+
 Use the string `invalid` in simulated certificates or signatures when you want
 to drive the invalid-certificate or invalid-signature paths.
 For OCPP 1.6 Security Whitepaper firmware flows, use
