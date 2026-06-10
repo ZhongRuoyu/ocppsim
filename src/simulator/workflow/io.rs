@@ -5,7 +5,7 @@ use super::super::{
   Value, WsMessageSink, build_call_error, build_call_result, json,
   sanitized_trace_frame_text,
 };
-use crate::sensitive::{redact_text_secrets, redact_url_secrets};
+use crate::sensitive::{redact_url_secrets, sanitize_log_text};
 
 impl Simulator {
   /// Starts or restarts periodic heartbeat scheduling.
@@ -218,7 +218,7 @@ impl Simulator {
     let message = message.into();
     let _ = self.ui_tx.send(UiEvent::Log {
       level,
-      message: redact_text_secrets(&message),
+      message: sanitize_log_text(&message),
     });
   }
 }

@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use url::{Url, form_urlencoded};
 
 pub(crate) const REDACTED_VALUE: &str = "<redacted>";
@@ -25,6 +27,12 @@ pub(crate) fn redact_text_secrets(value: &str) -> String {
   redacted.push_str(&redacted_token);
 
   if changed { redacted } else { value.to_string() }
+}
+
+/// Returns log-safe text with secrets redacted and control chars escaped.
+pub(crate) fn sanitize_log_text(value: &str) -> String {
+  let redacted = redact_text_secrets(value);
+  escape_control_characters(&redacted)
 }
 
 /// Returns a display-safe URL with userinfo and sensitive query values masked.
@@ -86,6 +94,22 @@ fn split_url_suffix(value: &str) -> (&str, &str) {
     end -= ch.len_utf8();
   }
   (&value[..end], &value[end..])
+}
+
+fn escape_control_characters(value: &str) -> String {
+  let mut escaped = String::with_capacity(value.len());
+  let mut changed = false;
+
+  for character in value.chars() {
+    if character.is_control() {
+      changed = true;
+      let _ = write!(escaped, "\\u{:04x}", u32::from(character));
+    } else {
+      escaped.push(character);
+    }
+  }
+
+  if changed { escaped } else { value.to_string() }
 }
 
 fn redact_sensitive_query(query: Option<&str>) -> Option<String> {
@@ -166,7 +190,7 @@ fn replace_url_userinfo(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-  use super::{redact_text_secrets, redact_url_secrets};
+  use super::{redact_text_secrets, redact_url_secrets, sanitize_log_text};
 
   #[test]
   fn redacts_url_userinfo() {
@@ -198,6 +222,24 @@ mod tests {
     assert_eq!(
       redacted,
       "Connecting to wss://<redacted>@example.test/ocpp?token=<redacted>."
+    );
+  }
+
+  #[test]
+  fn sanitize_log_text_escapes_control_characters() {
+    let sanitized = sanitize_log_text("bad\u{1b}[31m\nline\rend");
+
+    assert_eq!(sanitized, "bad\\u001b[31m\\u000aline\\u000dend");
+  }
+
+  #[test]
+  fn sanitize_log_text_keeps_secret_redaction() {
+    let sanitized =
+      sanitize_log_text("wss://user:secret@example.test/ocpp?token=SECRET");
+
+    assert_eq!(
+      sanitized,
+      "wss://<redacted>@example.test/ocpp?token=<redacted>"
     );
   }
 }

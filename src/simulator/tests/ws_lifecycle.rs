@@ -5,7 +5,9 @@ use tokio::io::{DuplexStream, duplex};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::{Message, Role};
 
-use crate::ocpp::{OcppFrame, build_call, build_call_result, parse_frame};
+use crate::ocpp::{
+  OcppFrame, build_call, build_call_error, build_call_result, parse_frame,
+};
 
 use super::*;
 
@@ -1463,4 +1465,51 @@ async fn malformed_ws_text_returns_protocol_error() {
     panic!("expected CALLERROR frame");
   };
   assert_eq!(code, "ProtocolError");
+}
+
+#[tokio::test]
+async fn call_error_logs_escape_control_characters() {
+  let events = capture_ws_text_events(
+    OcppVersion::V2_1,
+    build_call_error(
+      "m1",
+      "InternalError",
+      "bad\u{1b}[31m\nline\rend",
+      &json!({}),
+    ),
+  )
+  .await;
+
+  let log_messages = events
+    .iter()
+    .filter_map(|event| {
+      if let UiEvent::Log { message, .. } = event {
+        Some(message)
+      } else {
+        None
+      }
+    })
+    .collect::<Vec<_>>();
+
+  assert!(
+    log_messages
+      .iter()
+      .all(|message| !message.contains('\u{1b}'))
+  );
+  assert!(log_messages.iter().all(|message| !message.contains('\r')));
+  assert!(
+    log_messages
+      .iter()
+      .any(|message| message.contains("\\u001b"))
+  );
+  assert!(
+    log_messages
+      .iter()
+      .any(|message| message.contains("\\u000a"))
+  );
+  assert!(
+    log_messages
+      .iter()
+      .any(|message| message.contains("\\u000d"))
+  );
 }
