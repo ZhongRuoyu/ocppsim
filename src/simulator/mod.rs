@@ -641,6 +641,15 @@ impl Simulator {
     {
       entry.value = self.config.security_profile.unwrap_or(0).to_string();
     }
+    let read_only_for_v1_6 = self.config.protocol == OcppVersion::V1_6;
+    for key in [
+      ConfigurationKey::AdditionalRootCertificateCheck,
+      ConfigurationKey::CertificateSignedMaxChainSize,
+    ] {
+      if let Some(entry) = self.configuration.get_mut(&key) {
+        entry.read_only = read_only_for_v1_6;
+      }
+    }
   }
 
   /// Opens the WebSocket connection and performs initial boot/status enqueue.

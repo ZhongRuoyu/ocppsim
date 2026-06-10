@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
+use crate::simulator::SimulatorConnectionConfig;
+
 use super::*;
 
 static TEMP_SECURITY_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -537,6 +539,32 @@ fn whitepaper_read_only_keys_reject_v1_6_configuration_writes() {
 }
 
 #[test]
+fn protocol_switch_refreshes_security_read_only_keys() {
+  let mut simulator = simulator_for_tests();
+  for key in protocol_specific_security_keys() {
+    assert!(configuration_is_read_only(&simulator, key));
+  }
+
+  simulator.apply_connection_config(connection_config_for_protocol(
+    OcppVersion::V2_0_1,
+  ));
+  for key in protocol_specific_security_keys() {
+    assert!(!configuration_is_read_only(&simulator, key));
+  }
+
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_0_1);
+  for key in protocol_specific_security_keys() {
+    assert!(!configuration_is_read_only(&simulator, key));
+  }
+
+  simulator
+    .apply_connection_config(connection_config_for_protocol(OcppVersion::V1_6));
+  for key in protocol_specific_security_keys() {
+    assert!(configuration_is_read_only(&simulator, key));
+  }
+}
+
+#[test]
 fn certificate_chain_size_rejects_values_over_whitepaper_maximum() {
   for_each_v2_x_simulator(|_, mut simulator| {
     let rejected = simulator
@@ -834,4 +862,47 @@ fn write_temp_security_file(content: &str) -> PathBuf {
   ));
   fs::write(&path, content).expect("write temp file");
   path
+}
+
+fn protocol_specific_security_keys() -> [ConfigurationKey; 2] {
+  [
+    ConfigurationKey::AdditionalRootCertificateCheck,
+    ConfigurationKey::CertificateSignedMaxChainSize,
+  ]
+}
+
+fn configuration_is_read_only(
+  simulator: &Simulator,
+  key: ConfigurationKey,
+) -> bool {
+  simulator
+    .configuration
+    .get(&key)
+    .expect("configuration entry")
+    .read_only
+}
+
+fn connection_config_for_protocol(
+  protocol: OcppVersion,
+) -> SimulatorConnectionConfig {
+  SimulatorConnectionConfig {
+    profile: None,
+    ws_url: "ws://localhost:9000/ocpp".to_string(),
+    cp_id: "CP-TEST".to_string(),
+    append_cp_id: false,
+    connectors: 2,
+    protocol,
+    vendor: "ocppsim".to_string(),
+    model: "test".to_string(),
+    firmware: "0.0.0".to_string(),
+    trace_frames: false,
+    strict: false,
+    request_timeout: std::time::Duration::from_secs(30),
+    heartbeat_seconds: Some(10),
+    security_profile: None,
+    basic_auth_password: None,
+    ca_cert_path: None,
+    client_cert_path: None,
+    client_key_path: None,
+  }
 }
