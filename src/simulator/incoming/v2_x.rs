@@ -6,11 +6,12 @@ use super::super::payloads::{
 };
 use super::super::{
   ChargingRateUnit, ResponseStatus, Result, Simulator, UiLogLevel, Value,
-  VariableAttributeType, anyhow, json, normalize_identifier, now_timestamp,
+  VariableAttributeType, anyhow, normalize_identifier, now_timestamp,
 };
 use super::request::{
-  AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequest_V2_X,
-  ReserveNowRequest_V2_X, SendLocalListRequest_V2_X,
+  AvailabilityRequest, CancelReservationRequest,
+  ClearChargingProfileRequest_V2_X, CompositeScheduleRequest_V2_X,
+  DataTransferRequest_V2_X, ReserveNowRequest_V2_X, SendLocalListRequest_V2_X,
   SetChargingProfileRequest_V2_X, UnlockConnectorRequest_V2_X,
   UpdateFirmwareRequest_V2_X,
 };
@@ -26,18 +27,14 @@ impl Simulator {
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 2.x.
-  pub(in crate::simulator) fn data_transfer_v2_x(payload: &Value) -> Value {
-    if payload.get("vendorId").and_then(Value::as_str).is_none() {
-      return to_value(&DataTransferResponse {
-        status: ResponseStatus::UnknownVendorId.as_str(),
-        data: None,
-      });
-    }
-    let data = payload.get("data").cloned();
-    to_value(&DataTransferResponse {
+  pub(in crate::simulator) fn data_transfer_v2_x(
+    payload: &Value,
+  ) -> Result<Value> {
+    let request = DataTransferRequest_V2_X::parse(payload)?;
+    Ok(to_value(&DataTransferResponse {
       status: ResponseStatus::Accepted.as_str(),
-      data,
-    })
+      data: request.data,
+    }))
   }
 
   /// Handles `GetLog.req` by logging and returning a synthetic filename.
@@ -215,27 +212,21 @@ impl Simulator {
   pub(in crate::simulator) fn clear_charging_profile_v2_x(
     &mut self,
     payload: &Value,
-  ) -> ResponseStatus {
-    let profile_id = payload.get("chargingProfileId").and_then(Value::as_i64);
-    let criteria = payload
-      .get("chargingProfileCriteria")
-      .and_then(Value::as_object);
-    let targets = if let Some(criteria_payload) = criteria {
-      self.clear_profile_targets(&json!(criteria_payload), "evseId")
-    } else {
-      Some(self.connectors.keys().copied().collect())
+  ) -> Result<ResponseStatus> {
+    let request = ClearChargingProfileRequest_V2_X::parse(payload)?;
+    let connector = request.criteria.as_ref().and_then(|item| item.connector);
+    let Some(targets) = self.clear_profile_targets(connector) else {
+      return Ok(ResponseStatus::Unknown);
     };
-    let Some(targets) = targets else {
-      return ResponseStatus::Unknown;
-    };
-    let purpose = criteria
-      .and_then(|value| value.get("chargingProfilePurpose"))
-      .and_then(Value::as_str);
-    let stack_level = criteria
-      .and_then(|value| value.get("stackLevel"))
-      .and_then(Value::as_i64);
+    let profile_id = request.profile_id;
+    let purpose = request
+      .criteria
+      .as_ref()
+      .and_then(|item| item.purpose.as_deref());
+    let stack_level =
+      request.criteria.as_ref().and_then(|item| item.stack_level);
 
-    self.clear_charging_profiles_matching(targets, |profile| {
+    Ok(self.clear_charging_profiles_matching(targets, |profile| {
       profile_id.is_none_or(|value| {
         profile.get("id").and_then(Value::as_i64) == Some(value)
       }) && purpose.is_none_or(|value| {
@@ -246,7 +237,7 @@ impl Simulator {
       }) && stack_level.is_none_or(|value| {
         profile.get("stackLevel").and_then(Value::as_i64) == Some(value)
       })
-    })
+    }))
   }
 
   /// Handles `GetCompositeSchedule.req` for OCPP 2.x.

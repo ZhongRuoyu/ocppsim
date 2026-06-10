@@ -119,7 +119,8 @@ fn v1_6_dynamic_inbound_response_cases(
       Simulator::data_transfer_v1_6(&json!({
         "vendorId": "ocppsim",
         "data": "hello"
-      })),
+      }))
+      .expect("data transfer response"),
     ),
     (
       "GetCompositeScheduleResponse.json",
@@ -226,7 +227,8 @@ fn v2_x_dynamic_inbound_response_cases(
       Simulator::data_transfer_v2_x(&json!({
         "vendorId": "ocppsim",
         "data": "hello"
-      })),
+      }))
+      .expect("data transfer response"),
     ),
     (
       "GetCompositeScheduleResponse.json",

@@ -150,22 +150,18 @@ fn assert_set_variables_updates_configuration(
 }
 
 #[test]
-fn data_transfer_v1_6_reports_missing_vendor() {
-  let response = Simulator::data_transfer_v1_6(&json!({}));
-  assert_eq!(
-    response["status"],
-    json!(ResponseStatus::UnknownVendorId.as_str())
-  );
+fn data_transfer_v1_6_rejects_missing_vendor() {
+  let error = Simulator::data_transfer_v1_6(&json!({}))
+    .expect_err("missing vendorId should fail");
+  assert!(error.to_string().contains("vendorId is required"));
 }
 
 #[test]
-fn data_transfer_v2_x_reports_missing_vendor() {
+fn data_transfer_v2_x_rejects_missing_vendor() {
   for _protocol in v2_x_protocols() {
-    let response = Simulator::data_transfer_v2_x(&json!({}));
-    assert_eq!(
-      response["status"],
-      json!(ResponseStatus::UnknownVendorId.as_str())
-    );
+    let error = Simulator::data_transfer_v2_x(&json!({}))
+      .expect_err("missing vendorId should fail");
+    assert!(error.to_string().contains("vendorId is required"));
   }
 }
 

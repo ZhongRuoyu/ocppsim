@@ -237,6 +237,88 @@ impl SetChargingProfileRequest_V2_X {
 }
 
 #[derive(Debug, Clone)]
+pub(in crate::simulator) struct ClearChargingProfileRequestV1_6 {
+  pub connector: Option<u16>,
+  pub profile_id: Option<i64>,
+  pub purpose: Option<String>,
+  pub stack_level: Option<i64>,
+}
+
+impl ClearChargingProfileRequestV1_6 {
+  pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+    Ok(Self {
+      connector: optional_u16_field(payload, "connectorId")?,
+      profile_id: optional_i64_field(payload, "id")?,
+      purpose: optional_string_field(payload, "chargingProfilePurpose")?,
+      stack_level: optional_i64_field(payload, "stackLevel")?,
+    })
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct ClearChargingProfileCriteria_V2_X {
+  pub connector: Option<u16>,
+  pub purpose: Option<String>,
+  pub stack_level: Option<i64>,
+}
+
+impl ClearChargingProfileCriteria_V2_X {
+  fn parse(payload: &Value) -> Result<Self> {
+    Ok(Self {
+      connector: optional_u16_field(payload, "evseId")?,
+      purpose: optional_string_field(payload, "chargingProfilePurpose")?,
+      stack_level: optional_i64_field(payload, "stackLevel")?,
+    })
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct ClearChargingProfileRequest_V2_X {
+  pub profile_id: Option<i64>,
+  pub criteria: Option<ClearChargingProfileCriteria_V2_X>,
+}
+
+impl ClearChargingProfileRequest_V2_X {
+  pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+    let criteria = optional_object_field(payload, "chargingProfileCriteria")?
+      .map(|value| ClearChargingProfileCriteria_V2_X::parse(&value))
+      .transpose()?;
+    Ok(Self {
+      profile_id: optional_i64_field(payload, "chargingProfileId")?,
+      criteria,
+    })
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct DataTransferRequestV1_6 {
+  pub data: Option<String>,
+}
+
+impl DataTransferRequestV1_6 {
+  pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+    let _ = required_string_field(payload, "vendorId")?;
+    Ok(Self {
+      data: optional_string_field(payload, "data")?,
+    })
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::simulator) struct DataTransferRequest_V2_X {
+  pub data: Option<Value>,
+}
+
+impl DataTransferRequest_V2_X {
+  pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+    let _ = required_string_field(payload, "vendorId")?;
+    Ok(Self {
+      data: payload.get("data").cloned(),
+    })
+  }
+}
+
+#[derive(Debug, Clone)]
 pub(in crate::simulator) struct CompositeScheduleRequestV1_6 {
   pub connector: u16,
   pub duration: u64,
@@ -366,6 +448,16 @@ fn optional_string_field(
     .as_str()
     .map(|item| Some(item.to_string()))
     .ok_or_else(|| anyhow!("{field} must be a string."))
+}
+
+fn optional_i64_field(payload: &Value, field: &str) -> Result<Option<i64>> {
+  let Some(value) = payload.get(field) else {
+    return Ok(None);
+  };
+  value
+    .as_i64()
+    .map(Some)
+    .ok_or_else(|| anyhow!("{field} must be an integer."))
 }
 
 fn required_object_field(payload: &Value, field: &str) -> Result<Value> {

@@ -1,6 +1,5 @@
 use super::super::{
   ConnectorStatus, ResponseStatus, Result, Simulator, Value, anyhow,
-  optional_u16_field,
 };
 use super::request::AvailabilityRequest;
 
@@ -194,19 +193,14 @@ impl Simulator {
   /// Builds target connectors for a charging-profile clear request.
   pub(in crate::simulator) fn clear_profile_targets(
     &self,
-    payload: &Value,
-    field: &str,
+    connector: Option<u16>,
   ) -> Option<Vec<u16>> {
-    match optional_u16_field(payload, field) {
-      Ok(Some(0) | None) => Some(self.connectors.keys().copied().collect()),
-      Ok(Some(connector)) => {
-        if self.connectors.contains_key(&connector) {
-          Some(vec![connector])
-        } else {
-          None
-        }
-      }
-      Err(_) => None,
+    match connector {
+      Some(0) | None => Some(self.connectors.keys().copied().collect()),
+      Some(connector) => self
+        .connectors
+        .contains_key(&connector)
+        .then_some(vec![connector]),
     }
   }
 

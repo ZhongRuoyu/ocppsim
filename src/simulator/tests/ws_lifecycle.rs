@@ -1308,6 +1308,99 @@ async fn invalid_composite_schedule_unit_returns_property_constraint() {
 }
 
 #[tokio::test]
+async fn non_strict_mode_rejects_data_transfer_without_vendor_id() {
+  let protocols = [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1];
+
+  for protocol in protocols {
+    let (frame, simulator) =
+      capture_inbound_call_response(protocol, "DataTransfer", json!({})).await;
+
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "FormationViolation");
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[tokio::test]
+async fn non_strict_mode_rejects_non_string_data_transfer_data_v1_6() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "DataTransfer",
+    json!({
+      "vendorId": "ocppsim",
+      "data": { "not": "a string" }
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallError { code, .. } = frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+  assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
+async fn non_strict_mode_rejects_malformed_clear_charging_profile_v1_6() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "ClearChargingProfile",
+    json!({ "connectorId": "1" }),
+  )
+  .await;
+
+  let OcppFrame::CallError { code, .. } = frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+  assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
+async fn non_strict_mode_rejects_malformed_clear_charging_profile_v2_x() {
+  for protocol in v2_x_protocols() {
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "ClearChargingProfile",
+      json!({
+        "chargingProfileCriteria": {
+          "evseId": "1"
+        }
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "FormationViolation");
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[tokio::test]
+async fn non_strict_mode_rejects_non_integer_clear_charging_profile_id_v2_x() {
+  for protocol in v2_x_protocols() {
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "ClearChargingProfile",
+      json!({
+        "chargingProfileId": "123"
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "FormationViolation");
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[tokio::test]
 async fn non_strict_mode_keeps_pragmatic_v2_x_request_handling() {
   for protocol in v2_x_protocols() {
     let (frame, _) =

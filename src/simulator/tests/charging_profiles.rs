@@ -201,7 +201,9 @@ fn clear_charging_profile_v1_6_honors_connector_filter() {
   );
 
   assert_eq!(
-    simulator.clear_charging_profile_v1_6(&json!({ "connectorId": 1 })),
+    simulator
+      .clear_charging_profile_v1_6(&json!({ "connectorId": 1 }))
+      .expect("clear request should parse"),
     ResponseStatus::Accepted
   );
   assert!(!simulator.charging_profiles.contains_key(&1));
@@ -231,19 +233,23 @@ fn clear_charging_profile_v1_6_honors_purpose_and_stack_filters() {
   );
 
   assert_eq!(
-    simulator.clear_charging_profile_v1_6(&json!({
-      "chargingProfilePurpose": "ChargePointMaxProfile",
-      "stackLevel": 2
-    })),
+    simulator
+      .clear_charging_profile_v1_6(&json!({
+        "chargingProfilePurpose": "ChargePointMaxProfile",
+        "stackLevel": 2
+      }))
+      .expect("clear request should parse"),
     ResponseStatus::Unknown
   );
   assert!(simulator.charging_profiles.contains_key(&1));
 
   assert_eq!(
-    simulator.clear_charging_profile_v1_6(&json!({
-      "chargingProfilePurpose": "TxProfile",
-      "stackLevel": 2
-    })),
+    simulator
+      .clear_charging_profile_v1_6(&json!({
+        "chargingProfilePurpose": "TxProfile",
+        "stackLevel": 2
+      }))
+      .expect("clear request should parse"),
     ResponseStatus::Accepted
   );
   assert!(!simulator.charging_profiles.contains_key(&1));
@@ -309,17 +315,21 @@ fn clear_charging_profile_v2_x_honors_profile_filter() {
       ResponseStatus::Accepted
     );
     assert_eq!(
-      simulator.clear_charging_profile_v2_x(&json!({
-        "chargingProfileId": 99
-      })),
+      simulator
+        .clear_charging_profile_v2_x(&json!({
+          "chargingProfileId": 99
+        }))
+        .expect("clear request should parse"),
       ResponseStatus::Unknown
     );
     assert!(simulator.charging_profiles.contains_key(&1));
 
     assert_eq!(
-      simulator.clear_charging_profile_v2_x(&json!({
-        "chargingProfileId": 10
-      })),
+      simulator
+        .clear_charging_profile_v2_x(&json!({
+          "chargingProfileId": 10
+        }))
+        .expect("clear request should parse"),
       ResponseStatus::Accepted
     );
     assert!(!simulator.charging_profiles.contains_key(&1));
@@ -351,25 +361,29 @@ fn clear_charging_profile_v2_x_honors_criteria_filters() {
     );
 
     assert_eq!(
-      simulator.clear_charging_profile_v2_x(&json!({
-        "chargingProfileCriteria": {
-          "evseId": 1,
-          "chargingProfilePurpose": "TxProfile",
-          "stackLevel": 3
-        }
-      })),
+      simulator
+        .clear_charging_profile_v2_x(&json!({
+          "chargingProfileCriteria": {
+            "evseId": 1,
+            "chargingProfilePurpose": "TxProfile",
+            "stackLevel": 3
+          }
+        }))
+        .expect("clear request should parse"),
       ResponseStatus::Unknown
     );
     assert!(simulator.charging_profiles.contains_key(&2));
 
     assert_eq!(
-      simulator.clear_charging_profile_v2_x(&json!({
-        "chargingProfileCriteria": {
-          "evseId": 2,
-          "chargingProfilePurpose": "TxProfile",
-          "stackLevel": 3
-        }
-      })),
+      simulator
+        .clear_charging_profile_v2_x(&json!({
+          "chargingProfileCriteria": {
+            "evseId": 2,
+            "chargingProfilePurpose": "TxProfile",
+            "stackLevel": 3
+          }
+        }))
+        .expect("clear request should parse"),
       ResponseStatus::Accepted
     );
     assert!(!simulator.charging_profiles.contains_key(&2));

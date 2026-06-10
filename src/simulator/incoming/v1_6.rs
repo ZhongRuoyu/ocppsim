@@ -8,8 +8,9 @@ use super::super::{
   UiLogLevel, Value, anyhow, now_timestamp,
 };
 use super::request::{
-  AvailabilityRequest, CancelReservationRequest, CompositeScheduleRequestV1_6,
-  ReserveNowRequestV1_6, SendLocalListRequestV1_6,
+  AvailabilityRequest, CancelReservationRequest,
+  ClearChargingProfileRequestV1_6, CompositeScheduleRequestV1_6,
+  DataTransferRequestV1_6, ReserveNowRequestV1_6, SendLocalListRequestV1_6,
   SetChargingProfileRequestV1_6, UnlockConnectorRequestV1_6,
 };
 use crate::sensitive::redact_url_secrets;
@@ -91,21 +92,15 @@ impl Simulator {
   }
 
   /// Handles `DataTransfer.req` response logic for OCPP 1.6.
-  pub(in crate::simulator) fn data_transfer_v1_6(payload: &Value) -> Value {
-    if payload.get("vendorId").and_then(Value::as_str).is_none() {
-      return to_value(&DataTransferResponse {
-        status: ResponseStatus::UnknownVendorId.as_str(),
-        data: None,
-      });
-    }
-    let data = payload
-      .get("data")
-      .and_then(Value::as_str)
-      .map(|d| Value::String(d.to_owned()));
-    to_value(&DataTransferResponse {
+  pub(in crate::simulator) fn data_transfer_v1_6(
+    payload: &Value,
+  ) -> Result<Value> {
+    let request = DataTransferRequestV1_6::parse(payload)?;
+    let data = request.data.map(Value::String);
+    Ok(to_value(&DataTransferResponse {
       status: ResponseStatus::Accepted.as_str(),
       data,
-    })
+    }))
   }
 
   /// Handles `GetDiagnostics.req` by logging and returning a fake filename.
@@ -196,18 +191,16 @@ impl Simulator {
   pub(in crate::simulator) fn clear_charging_profile_v1_6(
     &mut self,
     payload: &Value,
-  ) -> ResponseStatus {
-    let Some(targets) = self.clear_profile_targets(payload, "connectorId")
-    else {
-      return ResponseStatus::Unknown;
+  ) -> Result<ResponseStatus> {
+    let request = ClearChargingProfileRequestV1_6::parse(payload)?;
+    let Some(targets) = self.clear_profile_targets(request.connector) else {
+      return Ok(ResponseStatus::Unknown);
     };
-    let profile_id = payload.get("id").and_then(Value::as_i64);
-    let purpose = payload
-      .get("chargingProfilePurpose")
-      .and_then(Value::as_str);
-    let stack_level = payload.get("stackLevel").and_then(Value::as_i64);
+    let profile_id = request.profile_id;
+    let purpose = request.purpose.as_deref();
+    let stack_level = request.stack_level;
 
-    self.clear_charging_profiles_matching(targets, |profile| {
+    Ok(self.clear_charging_profiles_matching(targets, |profile| {
       profile_id.is_none_or(|value| {
         profile.get("chargingProfileId").and_then(Value::as_i64) == Some(value)
       }) && purpose.is_none_or(|value| {
@@ -218,7 +211,7 @@ impl Simulator {
       }) && stack_level.is_none_or(|value| {
         profile.get("stackLevel").and_then(Value::as_i64) == Some(value)
       })
-    })
+    }))
   }
 
   /// Handles `GetCompositeSchedule.req` for OCPP 1.6.

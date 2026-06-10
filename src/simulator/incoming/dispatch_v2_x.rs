@@ -54,15 +54,12 @@ impl Simulator {
           .send_status_response(write, message_id, ResponseStatus::Accepted)
           .await?;
       }
-      IncomingAction_V2_X::DataTransfer => {
-        self
-          .send_call_result(
-            write,
-            message_id,
-            Self::data_transfer_v2_x(payload),
-          )
-          .await?;
-      }
+      IncomingAction_V2_X::DataTransfer => dispatch_response!(
+        self,
+        write,
+        message_id,
+        Self::data_transfer_v2_x(payload)
+      ),
       IncomingAction_V2_X::CertificateSigned => dispatch_status!(
         self,
         write,
@@ -168,10 +165,12 @@ impl Simulator {
         message_id,
         self.set_variables_v2_x(payload)
       ),
-      IncomingAction_V2_X::ClearChargingProfile => {
-        let status = self.clear_charging_profile_v2_x(payload);
-        self.send_status_response(write, message_id, status).await?;
-      }
+      IncomingAction_V2_X::ClearChargingProfile => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.clear_charging_profile_v2_x(payload)
+      ),
       IncomingAction_V2_X::GetCompositeSchedule => dispatch_response!(
         self,
         write,

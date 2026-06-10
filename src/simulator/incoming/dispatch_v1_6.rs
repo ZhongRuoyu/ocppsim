@@ -63,15 +63,12 @@ impl Simulator {
         message_id,
         self.change_availability_v1_6(payload)
       ),
-      IncomingAction_V1_6::DataTransfer => {
-        self
-          .send_call_result(
-            write,
-            message_id,
-            Self::data_transfer_v1_6(payload),
-          )
-          .await?;
-      }
+      IncomingAction_V1_6::DataTransfer => dispatch_response!(
+        self,
+        write,
+        message_id,
+        Self::data_transfer_v1_6(payload)
+      ),
       IncomingAction_V1_6::GetDiagnostics => dispatch_response!(
         self,
         write,
@@ -187,10 +184,12 @@ impl Simulator {
         message_id,
         self.set_charging_profile_v1_6(payload)
       ),
-      IncomingAction_V1_6::ClearChargingProfile => {
-        let status = self.clear_charging_profile_v1_6(payload);
-        self.send_status_response(write, message_id, status).await?;
-      }
+      IncomingAction_V1_6::ClearChargingProfile => dispatch_status!(
+        self,
+        write,
+        message_id,
+        self.clear_charging_profile_v1_6(payload)
+      ),
       IncomingAction_V1_6::GetCompositeSchedule => dispatch_response!(
         self,
         write,
@@ -208,20 +207,8 @@ impl Simulator {
           .await?;
       }
       IncomingAction_V1_6::SignedUpdateFirmware => {
-        let status = match self.signed_update_firmware_v1_6(payload) {
-          Ok(status) => status,
-          Err(error) => {
-            return self
-              .send_formation_violation(write, message_id, &error.to_string())
-              .await;
-          }
-        };
         self
-          .send_call_result(
-            write,
-            message_id,
-            Self::signed_update_firmware_response(status),
-          )
+          .handle_signed_update_firmware_call_v1_6(write, message_id, payload)
           .await?;
       }
       IncomingAction_V1_6::Reset => {
@@ -243,6 +230,29 @@ impl Simulator {
       | IncomingAction_V1_6::RemoteStopTransaction => unreachable!(),
     }
     Ok(())
+  }
+
+  async fn handle_signed_update_firmware_call_v1_6(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    let status = match self.signed_update_firmware_v1_6(payload) {
+      Ok(status) => status,
+      Err(error) => {
+        return self
+          .send_formation_violation(write, message_id, &error.to_string())
+          .await;
+      }
+    };
+    self
+      .send_call_result(
+        write,
+        message_id,
+        Self::signed_update_firmware_response(status),
+      )
+      .await
   }
 
   async fn handle_remote_start_transaction_call_v1_6(
