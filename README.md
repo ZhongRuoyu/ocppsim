@@ -59,6 +59,9 @@ Or start `ocppsim` directly against a CSMS endpoint:
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
 ```
 
+OCPP 2.x charge point ids must be at most 48 characters and cannot contain
+`:`.
+
 Or use a named profile from a [TOML config file](docs/usage.md#configuration)
 in `~/.config/ocppsim/ocppsim.toml` or a custom path:
 

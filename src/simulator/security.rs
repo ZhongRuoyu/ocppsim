@@ -62,6 +62,7 @@ impl Simulator {
             "Security profile {profile} requires a basic auth password."
           ));
         }
+        self.validated_basic_auth_identity(profile)?;
       }
       3 => {
         if self.config.client_cert_path.is_none()
@@ -89,16 +90,30 @@ impl Simulator {
     let Some(password) = self.security.basic_auth_password.as_deref() else {
       return Ok(None);
     };
-    let Some(cp_id) = self.config.cp_id.as_deref() else {
-      return Err(anyhow!(
-        "Security profile {profile} requires a charge point id."
-      ));
-    };
+    let cp_id = self.validated_basic_auth_identity(profile)?;
     let credentials = format!("{cp_id}:{password}");
     let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
     HeaderValue::from_str(&format!("Basic {encoded}"))
       .map(Some)
       .map_err(|error| anyhow!("Invalid Authorization header: {error}"))
+  }
+
+  pub(in crate::simulator) fn validated_basic_auth_identity(
+    &self,
+    profile: u8,
+  ) -> Result<&str> {
+    let Some(cp_id) = self.config.cp_id.as_deref() else {
+      return Err(anyhow!(
+        "Security profile {profile} requires a charge point id."
+      ));
+    };
+    if cp_id.contains(':') {
+      return Err(anyhow!(
+        "Security profile {profile} requires a charge point id without `:` \
+        for HTTP Basic authentication."
+      ));
+    }
+    Ok(cp_id)
   }
 
   pub(in crate::simulator) fn tls_connector(

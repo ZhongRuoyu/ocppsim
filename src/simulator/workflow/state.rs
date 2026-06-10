@@ -121,7 +121,7 @@ impl Simulator {
     {
       return ResponseStatus::Rejected;
     }
-    if profile > current && !self.security_profile_prerequisites_met(profile) {
+    if profile != 0 && !self.security_profile_prerequisites_met(profile) {
       return ResponseStatus::Rejected;
     }
     let previous_profile = self.security.security_profile;
@@ -139,16 +139,20 @@ impl Simulator {
   }
 
   fn security_profile_prerequisites_met(&self, profile: u8) -> bool {
-    if matches!(profile, 1 | 2)
-      && !self
+    if matches!(profile, 1 | 2) {
+      if self.validated_basic_auth_identity(profile).is_err() {
+        return false;
+      }
+      if !self
         .security
         .basic_auth_password
         .as_deref()
         .is_some_and(|password| {
           is_valid_basic_auth_password(self.config.protocol, password)
         })
-    {
-      return false;
+      {
+        return false;
+      }
     }
     if matches!(profile, 2 | 3) && !self.has_central_system_root_certificate() {
       return false;

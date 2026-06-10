@@ -20,6 +20,7 @@ const DEFAULT_MODEL: &str = "ocppsim";
 const DEFAULT_FIRMWARE: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 30;
 const DEFAULT_CONFIG_PATH_HINT: &str = "~/.config/ocppsim/ocppsim.toml";
+const OCPP_2_X_CP_ID_MAX_CHARS: usize = 48;
 const CLI_LONG_ABOUT: &str =
   "Command-line OCPP charge point simulator for OCPP-J.
 Run without a remote target for local simulation,
@@ -322,6 +323,11 @@ impl CliArgs {
       resolved.basic_auth_password.as_deref(),
       "basic auth password",
     )?;
+    validate_charge_point_identity(
+      resolved.protocol,
+      resolved.cp_id.as_deref(),
+      resolved.security_profile,
+    )?;
     Ok(resolved)
   }
 
@@ -511,6 +517,37 @@ fn validate_basic_auth_password(
   }
 }
 
+fn validate_charge_point_identity(
+  protocol: OcppVersion,
+  cp_id: Option<&str>,
+  security_profile: Option<u8>,
+) -> Result<()> {
+  let Some(cp_id) = cp_id else {
+    return Ok(());
+  };
+  if cp_id.is_empty() {
+    bail!("charge point id must not be empty.");
+  }
+
+  let is_v2_x = matches!(protocol, OcppVersion::V2_0_1 | OcppVersion::V2_1);
+  let uses_basic_auth = matches!(security_profile, Some(1 | 2));
+  if cp_id.contains(':') && (is_v2_x || uses_basic_auth) {
+    bail!(
+      "charge point id must not contain `:` for OCPP 2.x or Basic Auth \
+      profiles."
+    );
+  }
+  if is_v2_x && cp_id.chars().count() > OCPP_2_X_CP_ID_MAX_CHARS {
+    bail!(
+      "charge point id must be at most {OCPP_2_X_CP_ID_MAX_CHARS} \
+      characters for OCPP {}.",
+      protocol.label()
+    );
+  }
+
+  Ok(())
+}
+
 /// Converts heartbeat seconds into an optional interval.
 ///
 /// A value of `0` disables periodic heartbeats and becomes `None`.
@@ -605,6 +642,32 @@ mod tests {
       config_path: None,
       ws_url: None,
       cp_id: None,
+      no_append_cp_id: false,
+      connectors: None,
+      protocol: None,
+      vendor: None,
+      model: None,
+      firmware: None,
+      log_path: None,
+      trace_frames: false,
+      strict: false,
+      request_timeout_seconds: None,
+      heartbeat_seconds: None,
+      security_profile: None,
+      basic_auth_password: None,
+      ca_cert: None,
+      client_cert: None,
+      client_key: None,
+    }
+  }
+
+  /// Builds baseline direct-mode args used by test cases.
+  fn base_direct_args() -> CliArgs {
+    CliArgs {
+      profile: None,
+      config_path: None,
+      ws_url: Some("ws://localhost:9000/ocpp".to_string()),
+      cp_id: Some("CP-TEST".to_string()),
       no_append_cp_id: false,
       connectors: None,
       protocol: None,
@@ -1282,6 +1345,44 @@ id = "CP-DEMO"
     assert_eq!(
       resolved.basic_auth_password.as_deref(),
       Some("not-a-hex-passwd")
+    );
+  }
+
+  #[test]
+  /// Verifies Basic Auth profiles reject ambiguous identity separators.
+  fn basic_auth_rejects_colon_in_charge_point_id() {
+    let mut args = base_direct_args();
+    args.cp_id = Some("CP:TEST".to_string());
+    args.security_profile = Some(1);
+    args.basic_auth_password =
+      Some("0123456789abcdef0123456789abcdef".to_string());
+
+    let error = args.resolve().expect_err("should reject cp id");
+    assert!(
+      error.to_string().contains("must not contain `:`"),
+      "unexpected error: {error}"
+    );
+  }
+
+  #[test]
+  /// Verifies OCPP 2.x charge point identity limits are enforced.
+  fn ocpp_2_x_rejects_invalid_charge_point_id() {
+    let mut colon_args = base_direct_args();
+    colon_args.protocol = Some(super::ProtocolArg::V2_1);
+    colon_args.cp_id = Some("CP:TEST".to_string());
+    let error = colon_args.resolve().expect_err("should reject colon");
+    assert!(
+      error.to_string().contains("must not contain `:`"),
+      "unexpected error: {error}"
+    );
+
+    let mut long_args = base_direct_args();
+    long_args.protocol = Some(super::ProtocolArg::V2_0_1);
+    long_args.cp_id = Some("C".repeat(49));
+    let error = long_args.resolve().expect_err("should reject length");
+    assert!(
+      error.to_string().contains("at most 48"),
+      "unexpected error: {error}"
     );
   }
 

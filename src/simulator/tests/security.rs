@@ -343,6 +343,40 @@ fn security_profile_v1_6_enforces_upgrade_prerequisites() {
 }
 
 #[test]
+fn security_profile_rejects_ambiguous_basic_auth_identity() {
+  let mut config = simulator_test_config(OcppVersion::V1_6);
+  config.cp_id = Some("CP:TEST".to_string());
+  let (ui_tx, _ui_rx) = tokio::sync::mpsc::unbounded_channel();
+  let (cmd_tx, _cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+  let mut simulator = Simulator::new(config, ui_tx, cmd_tx);
+
+  assert_eq!(
+    simulator.change_configuration_v1_6(&json!({
+      "key": "AuthorizationKey",
+      "value": "0123456789abcdef0123456789abcdef"
+    })),
+    ResponseStatus::Accepted
+  );
+  assert_eq!(
+    simulator.change_configuration_v1_6(&json!({
+      "key": "SecurityProfile",
+      "value": "1"
+    })),
+    ResponseStatus::Rejected
+  );
+  assert_eq!(simulator.security.security_profile, None);
+
+  simulator.security.security_profile = Some(1);
+  assert!(
+    simulator
+      .validate_connection_security(
+        &url::Url::parse("ws://localhost:9000/ocpp").expect("ws url"),
+      )
+      .is_err()
+  );
+}
+
+#[test]
 fn offline_security_events_replay_when_connection_becomes_available() {
   let mut simulator = simulator_for_tests();
 
