@@ -71,8 +71,12 @@ OCPP 1.6 uses `StartTransaction` and `StopTransaction`; OCPP 2.0.1 and OCPP
 2.1 use `TransactionEvent`.
 Transaction starts are accepted only for known connectors that are currently
 startable.
-Reserved, unavailable, faulted, occupied, finishing, or already-active
-connectors reject new starts.
+Reserved, unavailable, faulted, occupied, or finishing connectors reject new
+starts.
+Already-active connectors reject local starts and OCPP 1.6 remote starts.
+For OCPP 2.x `RequestStartTransaction`, an already-active requested EVSE is
+accepted with the existing `transactionId`, matching the schema intent for a
+transaction that began before the request arrived.
 When a remote start omits a connector or EVSE, the simulator chooses the first
 startable connector.
 

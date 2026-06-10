@@ -311,8 +311,12 @@ Malformed payloads receive `FormationViolation` CALLERROR responses instead of
 falling back to connector zero, empty strings, or silent no-op behavior.
 
 Transaction starts are accepted only on known, startable connectors.
-Unavailable, faulted, reserved, occupied, finishing, and already-active
-connectors reject starts.
+Unavailable, faulted, reserved, occupied, and finishing connectors reject
+starts.
+Already-active connectors reject local starts and OCPP 1.6 remote starts.
+For OCPP 2.x `RequestStartTransaction`, an already-active requested EVSE is
+accepted with the existing `transactionId`, matching the schema intent for a
+transaction that began before the request arrived.
 When a remote start omits a connector or EVSE, the first startable connector is
 chosen.
 
