@@ -30,9 +30,13 @@ impl Simulator {
         .get(&connector)
         .and_then(|item| item.transaction.as_ref())
         .is_some();
-      if has_active_tx && target_status == ConnectorStatus::Unavailable {
-        self.schedule_availability_status(connector, target_status)?;
-        scheduled = true;
+      if has_active_tx {
+        if target_status == ConnectorStatus::Unavailable {
+          self.schedule_availability_status(connector, target_status)?;
+          scheduled = true;
+          continue;
+        }
+        self.connector_mut(connector)?.scheduled_availability = None;
         continue;
       }
 

@@ -296,6 +296,69 @@ fn scheduled_availability_applies_after_stop() {
 }
 
 #[test]
+fn operative_availability_preserves_active_transaction_status() {
+  let mut simulator = simulator_for_tests();
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, false)
+    .expect("start should succeed");
+  simulator.queue.clear();
+
+  let status = simulator
+    .change_availability_v1_6(&json!({
+      "connectorId": 1,
+      "type": "Operative"
+    }))
+    .expect("change availability");
+
+  assert_eq!(status, ResponseStatus::Accepted);
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .map(|item| item.status.display()),
+    Some("Charging")
+  );
+  assert!(simulator.queue.is_empty());
+}
+
+#[test]
+fn operative_availability_cancels_scheduled_inoperative_change() {
+  let mut simulator = simulator_for_tests();
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, false)
+    .expect("start should succeed");
+  assert_eq!(
+    simulator
+      .change_availability_v1_6(&json!({
+        "connectorId": 1,
+        "type": "Inoperative"
+      }))
+      .expect("schedule availability"),
+    ResponseStatus::Scheduled
+  );
+
+  assert_eq!(
+    simulator
+      .change_availability_v1_6(&json!({
+        "connectorId": 1,
+        "type": "Operative"
+      }))
+      .expect("cancel scheduled availability"),
+    ResponseStatus::Accepted
+  );
+  simulator
+    .stop_transaction(1, Some("Local"), false, false)
+    .expect("stop should succeed");
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .map(|item| item.status.display()),
+    Some("Finishing")
+  );
+}
+
+#[test]
 fn change_availability_v1_6_connector_zero_updates_all_connectors() {
   let mut simulator = simulator_for_tests();
   let status = simulator
