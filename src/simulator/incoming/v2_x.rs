@@ -313,7 +313,7 @@ impl Simulator {
         || key == super::super::ConfigurationKey::AuthorizationKey
       {
         return Ok(VariableResult_V2_X {
-          attribute_status: ResponseStatus::WriteOnly.as_str(),
+          attribute_status: ResponseStatus::Rejected.as_str(),
           ..base
         });
       }

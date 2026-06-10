@@ -166,7 +166,7 @@ fn basic_auth_password_is_write_only() {
       .expect("get variables");
     assert_eq!(
       response["getVariableResult"][0]["attributeStatus"],
-      ResponseStatus::WriteOnly.as_str()
+      ResponseStatus::Rejected.as_str()
     );
     assert!(
       response["getVariableResult"][0]

@@ -185,6 +185,13 @@ fn v2_x_dynamic_inbound_response_cases(
       ]
     }))
     .expect("get variables response");
+  let get_write_only_variables_response = simulator
+    .get_variables_v2_x(&json!({
+      "getVariableData": [
+        get_variable_data("BasicAuthPassword")
+      ]
+    }))
+    .expect("get write-only variables response");
   let set_variables_response = simulator
     .set_variables_v2_x(&json!({
       "setVariableData": [
@@ -242,6 +249,10 @@ fn v2_x_dynamic_inbound_response_cases(
       certificate_ids_response,
     ),
     ("GetVariablesResponse.json", get_variables_response),
+    (
+      "GetVariablesResponse.json",
+      get_write_only_variables_response,
+    ),
     ("SetVariablesResponse.json", set_variables_response),
     status_case("UnlockConnectorResponse.json", unlock_status),
   ]
