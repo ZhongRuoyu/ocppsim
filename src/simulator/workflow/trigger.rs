@@ -167,6 +167,7 @@ impl Simulator {
       else {
         continue;
       };
+      self.bump_seq_no(connector_id, local_tx_id)?;
       self.enqueue_transaction_event(&TransactionEventRequest {
         connector: connector_id,
         local_tx_id,

@@ -1371,6 +1371,18 @@ fn trigger_message_v2_x_can_trigger_active_transaction_event() {
     let payload = queued_payload(&simulator, "TransactionEvent");
     assert_eq!(payload["triggerReason"], "Trigger");
     assert_eq!(payload["eventType"], "Updated");
+    assert_eq!(payload["seqNo"], 2);
+
+    simulator.queue.clear();
+    let status = simulator
+      .trigger_message_v2_x(
+        crate::ocpp::TriggerMessage_V2_X::TransactionEvent,
+        Some(1),
+      )
+      .expect("trigger transaction event again");
+    assert_eq!(status, ResponseStatus::Accepted);
+    let payload = queued_payload(&simulator, "TransactionEvent");
+    assert_eq!(payload["seqNo"], 3);
   }
 }
 
