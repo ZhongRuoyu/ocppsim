@@ -98,9 +98,10 @@ impl Simulator {
       if state.transaction.is_some() {
         return Ok(ResponseStatus::Occupied);
       }
-      if state.status == ConnectorStatus::Unavailable
-        || state.status == ConnectorStatus::Faulted
-      {
+      if state.status == ConnectorStatus::Faulted {
+        return Ok(ResponseStatus::Faulted);
+      }
+      if state.status == ConnectorStatus::Unavailable {
         return Ok(ResponseStatus::Unavailable);
       }
       state.status = ConnectorStatus::Reserved;

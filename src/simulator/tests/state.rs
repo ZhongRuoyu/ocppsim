@@ -270,6 +270,45 @@ fn duplicate_reservation_id_is_rejected() {
 }
 
 #[test]
+fn reserve_now_reports_faulted_connector_status() {
+  let mut simulator = simulator_for_tests();
+  simulator.connector_mut(1).expect("connector").status =
+    ConnectorStatus::Faulted;
+  assert_eq!(
+    simulator
+      .reserve_now_v1_6(&json!({
+        "connectorId": 1,
+        "expiryDate": now_timestamp(),
+        "idTag": "TOKEN",
+        "reservationId": 42
+      }))
+      .expect("reserve faulted connector"),
+    ResponseStatus::Faulted
+  );
+  assert!(simulator.queue.is_empty());
+
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator.connector_mut(1).expect("connector").status =
+      ConnectorStatus::Faulted;
+    assert_eq!(
+      simulator
+        .reserve_now_v2_x(&json!({
+          "evseId": 1,
+          "expiryDateTime": now_timestamp(),
+          "id": 42,
+          "idToken": {
+            "idToken": "TOKEN",
+            "type": "Central"
+          }
+        }))
+        .expect("reserve faulted evse"),
+      ResponseStatus::Faulted
+    );
+    assert!(simulator.queue.is_empty());
+  });
+}
+
+#[test]
 fn scheduled_availability_applies_after_stop() {
   let mut simulator = simulator_for_tests();
   simulator
