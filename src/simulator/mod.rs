@@ -50,7 +50,8 @@ pub(in crate::simulator) use types::{
 };
 pub use types::{
   ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
-  SimulatorConnectionConfig, SimulatorSnapshot, UiEvent, UiLogLevel,
+  SimulatorConnectionConfig, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
+  UiLogLevel,
 };
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -290,6 +291,7 @@ async fn reconnect_after_security_change(
   connection: &mut Connection,
 ) -> Option<Connection> {
   let plan = simulator.security.pending_reconnect.take()?;
+  simulator.emit_runtime_state();
   simulator.close_connection(&mut connection.write).await;
   simulator.handle_disconnect("Reconnecting after security parameter change.");
 
@@ -756,6 +758,7 @@ impl Simulator {
       sent_at: Instant::now(),
       call,
     });
+    self.emit_runtime_state();
     Ok(())
   }
 
@@ -780,6 +783,7 @@ impl Simulator {
     );
     self.handle_pending_timeout_context(&context);
     self.pending = None;
+    self.emit_runtime_state();
   }
 
   /// Restores local state for pending calls that timed out before a response.

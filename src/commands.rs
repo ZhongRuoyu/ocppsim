@@ -328,7 +328,7 @@ pub fn help_text() -> &'static str {
   help | h | ?
     Show this help.
   exit | quit
-    Exit the simulator.
+    Exit the simulator. Requires confirmation when CSMS state is active.
 "
 }
 

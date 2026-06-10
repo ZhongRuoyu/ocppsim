@@ -1,8 +1,9 @@
 use super::super::{
   ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
   OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
-  SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel, Value, WsWrite,
-  build_call_error, build_call_result, json, sanitized_trace_frame_text,
+  SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel,
+  Value, WsWrite, build_call_error, build_call_result, json,
+  sanitized_trace_frame_text,
 };
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 
@@ -150,9 +151,7 @@ impl Simulator {
       })
       .collect();
 
-    let pending_action = self.pending.as_ref().map(|pending| {
-      format!("{} ({})", pending.call.action, pending.message_id)
-    });
+    let pending_action = self.pending_action_text();
 
     let connection_url = self.connection_url().map_or_else(
       |_| {
@@ -178,6 +177,36 @@ impl Simulator {
       connectors,
     };
     let _ = self.ui_tx.send(UiEvent::Snapshot(snapshot));
+    self.emit_runtime_state();
+  }
+
+  /// Emits current connection and in-flight work state without snapshot logs.
+  pub(in crate::simulator) fn emit_runtime_state(&self) {
+    let _ = self.ui_tx.send(UiEvent::RuntimeState(self.runtime_state()));
+  }
+
+  fn runtime_state(&self) -> SimulatorRuntimeState {
+    SimulatorRuntimeState {
+      connected: self.connected,
+      queue_depth: self.queue.len(),
+      pending_action: self.pending_action_text(),
+      active_transactions: self.active_transaction_count(),
+      pending_reconnect: self.security.pending_reconnect.is_some(),
+    }
+  }
+
+  fn active_transaction_count(&self) -> usize {
+    self
+      .connectors
+      .values()
+      .filter(|state| state.transaction.is_some())
+      .count()
+  }
+
+  fn pending_action_text(&self) -> Option<String> {
+    self.pending.as_ref().map(|pending| {
+      format!("{} ({})", pending.call.action, pending.message_id)
+    })
   }
 
   /// Emits one log event to the UI channel.

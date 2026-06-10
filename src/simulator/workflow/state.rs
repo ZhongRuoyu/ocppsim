@@ -219,6 +219,7 @@ impl Simulator {
       self.security.pending_reconnect = Some(SecurityReconnectPlan {
         fallback_security_profile,
       });
+      self.emit_runtime_state();
     }
   }
 

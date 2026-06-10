@@ -29,6 +29,7 @@ impl Simulator {
 
     let pending = self.pending.take().expect("pending exists");
     self.apply_call_result_context(&pending.call.context, payload)?;
+    self.emit_runtime_state();
     Ok(())
   }
 
@@ -105,6 +106,7 @@ impl Simulator {
         self.retry_security_event_notification(event_id);
       }
     }
+    self.emit_runtime_state();
     Ok(())
   }
 }

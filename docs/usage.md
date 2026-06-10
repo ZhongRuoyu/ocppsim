@@ -148,7 +148,10 @@ the mouse and remain available after `ocppsim` exits.
 - `heartbeat stop`: stop periodic heartbeats.
 - `standards`: show the active protocol summary.
 - `help`: show command help.
-- `exit`: exit the simulator.
+- `exit`: exit the simulator. If active transactions, pending OCPP messages,
+  or other active CSMS state exists, the input line asks for `[y/N]`
+  confirmation. Press `y` or `Y` to exit; any other non-control key cancels.
+  Ctrl-C and Ctrl-D leave the confirmation active.
 
 Commands that send OCPP messages require an active connection.
 Local state commands can still update simulator state while disconnected.

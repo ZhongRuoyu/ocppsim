@@ -138,7 +138,17 @@ impl UiLogLevel {
 #[derive(Debug, Clone)]
 pub enum UiEvent {
   Log { level: UiLogLevel, message: String },
+  RuntimeState(SimulatorRuntimeState),
   Snapshot(SimulatorSnapshot),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SimulatorRuntimeState {
+  pub connected: bool,
+  pub queue_depth: usize,
+  pub pending_action: Option<String>,
+  pub active_transactions: usize,
+  pub pending_reconnect: bool,
 }
 
 #[derive(Debug, Clone)]

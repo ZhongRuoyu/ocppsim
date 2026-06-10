@@ -46,7 +46,7 @@ fn emit_snapshot_redacts_connection_url_secrets() {
   let snapshot = loop {
     match ui_rx.try_recv().expect("snapshot event should be emitted") {
       UiEvent::Snapshot(snapshot) => break snapshot,
-      UiEvent::Log { .. } => {}
+      UiEvent::RuntimeState(_) | UiEvent::Log { .. } => {}
     }
   };
   assert_eq!(

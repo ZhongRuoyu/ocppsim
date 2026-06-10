@@ -40,6 +40,7 @@ impl Simulator {
         ),
       );
     }
+    self.emit_runtime_state();
   }
 
   /// Enqueues a protocol-version-specific `BootNotification` request.

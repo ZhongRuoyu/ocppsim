@@ -93,7 +93,7 @@ pub async fn run() -> Result<()> {
     match TerminalSession::poll_input(&mut app)? {
       InputAction::None => {}
       InputAction::ExitRequested => {
-        should_exit = true;
+        should_exit = app.request_exit();
       }
       InputAction::Submitted(line) => {
         if line.is_empty() {
@@ -193,6 +193,10 @@ fn handle_user_command(
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
   app: &mut TerminalApp,
 ) -> bool {
+  if !matches!(&command, UserCommand::Exit) {
+    app.cancel_exit_confirmation();
+  }
+
   match command {
     UserCommand::Status => send_command(cmd_tx, SimulatorCommand::Status, app),
     UserCommand::Connect { target } => {
@@ -286,7 +290,7 @@ fn handle_user_command(
       app.push_info(help_text());
       false
     }
-    UserCommand::Exit => true,
+    UserCommand::Exit => app.request_exit(),
   }
 }
 
@@ -507,6 +511,35 @@ mod tests {
     assert!(cmd_rx.try_recv().is_err());
 
     assert!(dispatch("exit", &cli_args, &cmd_tx, &mut app));
+    assert!(cmd_rx.try_recv().is_err());
+  }
+
+  #[test]
+  /// Verifies risky process exit requires a repeated confirmation.
+  fn risky_exit_requires_confirmation_and_non_exit_cancels_it() {
+    let protocol = ocpp::OcppVersion::V2_1;
+    let cli_args = base_cli_args();
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+    let mut app = TerminalApp::new(protocol);
+    app.apply(simulator::UiEvent::RuntimeState(
+      simulator::SimulatorRuntimeState {
+        active_transactions: 1,
+        ..simulator::SimulatorRuntimeState::default()
+      },
+    ));
+
+    assert!(!dispatch("exit", &cli_args, &cmd_tx, &mut app));
+    assert!(cmd_rx.try_recv().is_err());
+
+    assert!(!dispatch("status", &cli_args, &cmd_tx, &mut app));
+    assert!(matches!(
+      next_command(&mut cmd_rx),
+      SimulatorCommand::Status
+    ));
+
+    assert!(!dispatch("exit", &cli_args, &cmd_tx, &mut app));
+    assert!(cmd_rx.try_recv().is_err());
+    assert!(!dispatch("quit", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
   }
 

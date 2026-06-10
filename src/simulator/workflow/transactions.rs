@@ -51,6 +51,7 @@ impl Simulator {
         idToken {REDACTED_SENSITIVE_VALUE}"
       ),
     );
+    self.emit_runtime_state();
 
     if !is_connected {
       self.log(
@@ -144,6 +145,7 @@ impl Simulator {
             UiLogLevel::Warn,
             "Not connected. Transaction stop is local only.",
           );
+          self.emit_runtime_state();
           return Ok(());
         }
 
@@ -168,6 +170,7 @@ impl Simulator {
             local_tx_id,
           },
         );
+        self.emit_runtime_state();
       }
       OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
         let _ = tx_uid;
@@ -181,6 +184,7 @@ impl Simulator {
             UiLogLevel::Warn,
             "Not connected. Transaction stop is local only.",
           );
+          self.emit_runtime_state();
           return Ok(());
         }
 
@@ -206,6 +210,7 @@ impl Simulator {
           UiLogLevel::Info,
           format!("Transaction stopped locally on connector {connector}"),
         );
+        self.emit_runtime_state();
       }
     }
     Ok(())

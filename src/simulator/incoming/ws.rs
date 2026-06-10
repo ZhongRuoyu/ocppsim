@@ -51,6 +51,7 @@ impl Simulator {
           self.log(UiLogLevel::Rx, sanitized_trace_frame(&frame));
         }
         self.handle_parsed_ws_frame(frame, write).await?;
+        self.emit_runtime_state();
       }
       Err(error) => {
         if self.config.trace_frames {

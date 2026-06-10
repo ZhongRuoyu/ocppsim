@@ -25,7 +25,8 @@ use ratatui::text::Line;
 use crate::ocpp::OcppVersion;
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 use crate::simulator::{
-  ConnectorSnapshot, SimulatorSnapshot, UiEvent, UiLogLevel,
+  ConnectorSnapshot, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
+  UiLogLevel,
 };
 
 mod completion;
@@ -36,6 +37,8 @@ use history::CommandHistory;
 
 const MAX_LOG_LINES: usize = 10_000;
 const PROMPT_PREFIX_WIDTH: usize = 2;
+const EXIT_CONFIRMATION_PROMPT: &str =
+  "Active CSMS state may remain unfinished. Confirm exit? [y/N]";
 
 /// Number of terminal lines occupied by the live prompt block.
 const PROMPT_BLOCK_LINES: u16 = 4;
@@ -131,7 +134,15 @@ impl TerminalSession {
   ) -> io::Result<()> {
     let content_width = width.saturating_sub(1);
     let input_width = content_width.saturating_sub(PROMPT_PREFIX_WIDTH);
-    let view = visible_input_view(app.input(), app.cursor(), input_width);
+    let prompt_shadow = app.prompt_shadow();
+    let (view, show_placeholder) = if let Some(shadow) = prompt_shadow {
+      (visible_input_view(shadow, shadow.len(), input_width), false)
+    } else {
+      (
+        visible_input_view(app.input(), app.cursor(), input_width),
+        app.input().is_empty(),
+      )
+    };
 
     queue!(
       self.stdout,
@@ -146,7 +157,14 @@ impl TerminalSession {
       Print(" ")
     )?;
 
-    if app.input().is_empty() {
+    if prompt_shadow.is_some() {
+      queue!(
+        self.stdout,
+        SetForegroundColor(Color::Yellow),
+        Print(view.text),
+        ResetColor
+      )?;
+    } else if show_placeholder {
       queue!(
         self.stdout,
         SetAttribute(Attribute::Dim),
@@ -264,6 +282,8 @@ struct PromptSnapshot {
   ws_url: String,
   /// Connection state shown in the taskbar.
   connected: bool,
+  /// Shadow text shown over the input line for modal prompts.
+  prompt_shadow: Option<String>,
 }
 
 impl PromptSnapshot {
@@ -275,6 +295,7 @@ impl PromptSnapshot {
       profile_name: app.profile_name.clone(),
       ws_url: app.ws_url.clone(),
       connected: app.connected,
+      prompt_shadow: app.prompt_shadow().map(str::to_string),
     }
   }
 }
@@ -413,6 +434,12 @@ pub enum InputAction {
   ExitRequested,
 }
 
+#[derive(Debug, Clone)]
+struct ExitConfirmation {
+  signature: SimulatorRuntimeState,
+  confirmed: bool,
+}
+
 pub struct TerminalApp {
   protocol: OcppVersion,
   /// Profile name displayed in the inline taskbar, when profile mode is used.
@@ -430,6 +457,8 @@ pub struct TerminalApp {
   completion: Option<CompletionState>,
   log_sink: Option<FileLogSink>,
   screen_clear_requested: bool,
+  runtime_state: SimulatorRuntimeState,
+  exit_confirmation: Option<ExitConfirmation>,
 }
 
 impl TerminalApp {
@@ -449,6 +478,8 @@ impl TerminalApp {
       completion: None,
       log_sink: None,
       screen_clear_requested: false,
+      runtime_state: SimulatorRuntimeState::default(),
+      exit_confirmation: None,
     }
   }
 
@@ -484,6 +515,7 @@ impl TerminalApp {
   pub fn apply(&mut self, event: UiEvent) {
     match event {
       UiEvent::Log { level, message } => self.push_log(level, message),
+      UiEvent::RuntimeState(state) => self.apply_runtime_state(state),
       UiEvent::Snapshot(snapshot) => self.push_snapshot(snapshot),
     }
   }
@@ -511,8 +543,37 @@ impl TerminalApp {
     self.screen_clear_requested = true;
   }
 
+  /// Requests process exit, requiring confirmation when runtime state is
+  /// active enough that shutdown may leave the CSMS in an unfinished state.
+  pub fn request_exit(&mut self) -> bool {
+    if !exit_requires_confirmation(&self.runtime_state) {
+      self.exit_confirmation = None;
+      return true;
+    }
+
+    if self.exit_confirmation_confirmed_for_current_state() {
+      self.exit_confirmation = None;
+      return true;
+    }
+
+    self.exit_confirmation = Some(ExitConfirmation {
+      signature: self.runtime_state.clone(),
+      confirmed: false,
+    });
+    false
+  }
+
+  /// Cancels any pending exit confirmation.
+  pub fn cancel_exit_confirmation(&mut self) {
+    self.exit_confirmation = None;
+  }
+
   /// Handles keyboard input for editing, history, completion, and submit.
   pub fn handle_key_event(&mut self, key: KeyEvent) -> InputAction {
+    if let Some(action) = self.handle_exit_confirmation_key(key) {
+      return action;
+    }
+
     if key.modifiers.contains(KeyModifiers::CONTROL) {
       return self.handle_ctrl_key(key);
     }
@@ -522,6 +583,27 @@ impl TerminalApp {
     }
 
     self.handle_plain_key_event(key)
+  }
+
+  fn handle_exit_confirmation_key(
+    &mut self,
+    key: KeyEvent,
+  ) -> Option<InputAction> {
+    self.exit_confirmation.as_ref()?;
+
+    if is_exit_confirmation_yes(key) {
+      if let Some(confirmation) = self.exit_confirmation.as_mut() {
+        confirmation.confirmed = true;
+      }
+      Some(InputAction::ExitRequested)
+    } else if key.modifiers.contains(KeyModifiers::CONTROL)
+      && matches!(key.code, KeyCode::Char('c' | 'd'))
+    {
+      Some(InputAction::None)
+    } else {
+      self.exit_confirmation = None;
+      Some(InputAction::None)
+    }
   }
 
   fn handle_plain_key_event(&mut self, key: KeyEvent) -> InputAction {
@@ -831,6 +913,31 @@ impl TerminalApp {
     self.completion = None;
   }
 
+  fn prompt_shadow(&self) -> Option<&str> {
+    self
+      .exit_confirmation
+      .as_ref()
+      .map(|_| EXIT_CONFIRMATION_PROMPT)
+  }
+
+  fn apply_runtime_state(&mut self, state: SimulatorRuntimeState) {
+    if self
+      .exit_confirmation
+      .as_ref()
+      .is_some_and(|confirmation| confirmation.signature != state)
+    {
+      self.exit_confirmation = None;
+    }
+    self.connected = state.connected;
+    self.runtime_state = state;
+  }
+
+  fn exit_confirmation_confirmed_for_current_state(&self) -> bool {
+    self.exit_confirmation.as_ref().is_some_and(|confirmation| {
+      confirmation.confirmed && confirmation.signature == self.runtime_state
+    })
+  }
+
   fn input(&self) -> &str {
     &self.input
   }
@@ -909,6 +1016,19 @@ impl TerminalApp {
 
   /// Applies a simulator snapshot by logging summary and connector details.
   fn push_snapshot(&mut self, snapshot: SimulatorSnapshot) {
+    let active_transactions = snapshot
+      .connectors
+      .iter()
+      .filter(|item| item.transaction.is_some())
+      .count();
+    self.apply_runtime_state(SimulatorRuntimeState {
+      connected: snapshot.connected,
+      queue_depth: snapshot.queue_depth,
+      pending_action: snapshot.pending_action.clone(),
+      active_transactions,
+      pending_reconnect: self.runtime_state.pending_reconnect,
+    });
+
     self.known_connectors =
       snapshot.connectors.iter().map(|item| item.id).collect();
     self.profile_name.clone_from(&snapshot.profile);
@@ -954,6 +1074,19 @@ fn display_heartbeat(value: Option<u64>) -> String {
   value.map_or_else(|| "-".to_string(), |seconds| format!("{seconds}s"))
 }
 
+fn exit_requires_confirmation(state: &SimulatorRuntimeState) -> bool {
+  state.active_transactions > 0
+    || state.pending_reconnect
+    || (state.connected
+      && (state.queue_depth > 0 || state.pending_action.is_some()))
+}
+
+fn is_exit_confirmation_yes(key: KeyEvent) -> bool {
+  matches!(key.code, KeyCode::Char('y' | 'Y'))
+    && (key.modifiers == KeyModifiers::NONE
+      || key.modifiers == KeyModifiers::SHIFT)
+}
+
 /// Returns the local timestamp string used in log entries.
 fn log_timestamp_now() -> String {
   Local::now().format("%Y-%m-%d %H:%M:%S%.6f").to_string()
@@ -984,6 +1117,7 @@ mod tests {
   use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
   use crate::ocpp::OcppVersion;
+  use crate::simulator::{SimulatorRuntimeState, UiEvent};
 
   use super::{InputAction, TerminalApp, visible_input_view};
 
@@ -1028,6 +1162,137 @@ mod tests {
     assert_eq!(logs[1].level.label(), "ERROR");
     assert_eq!(logs[1].message, "oops");
     assert!(app.drain_pending_logs().is_empty());
+  }
+
+  #[test]
+  /// Verifies safe exits do not ask for confirmation.
+  fn safe_exit_requests_complete_immediately() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+
+    assert!(app.request_exit());
+    assert!(app.prompt_shadow().is_none());
+  }
+
+  #[test]
+  /// Verifies risky exits shadow the input line and preserve draft text.
+  fn risky_exit_request_confirms_on_y_without_enter() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      active_transactions: 1,
+      ..SimulatorRuntimeState::default()
+    }));
+    for ch in "meter 1 100".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+
+    assert!(!app.request_exit());
+    assert_eq!(app.prompt_shadow(), Some(super::EXIT_CONFIRMATION_PROMPT));
+    assert_eq!(app.input, "meter 1 100");
+
+    let action = app
+      .handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(matches!(action, InputAction::ExitRequested));
+    assert!(app.request_exit());
+  }
+
+  #[test]
+  /// Verifies uppercase Y confirms exit without Enter.
+  fn risky_exit_request_confirms_on_uppercase_y_without_enter() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      active_transactions: 1,
+      ..SimulatorRuntimeState::default()
+    }));
+
+    assert!(!app.request_exit());
+    let action = app
+      .handle_key_event(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT));
+
+    assert!(matches!(action, InputAction::ExitRequested));
+    assert!(app.request_exit());
+  }
+
+  #[test]
+  /// Verifies Esc cancels an exit confirmation without clearing draft input.
+  fn escape_cancels_exit_confirmation_prompt() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      connected: true,
+      queue_depth: 1,
+      ..SimulatorRuntimeState::default()
+    }));
+    for ch in "status".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+
+    assert!(!app.request_exit());
+    press(&mut app, KeyCode::Esc);
+
+    assert!(app.prompt_shadow().is_none());
+    assert_eq!(app.input, "status");
+    assert!(!app.request_exit());
+  }
+
+  #[test]
+  /// Verifies non-yes keys cancel the prompt without editing draft input.
+  fn non_yes_key_cancels_exit_confirmation_without_editing_input() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      active_transactions: 1,
+      ..SimulatorRuntimeState::default()
+    }));
+    for ch in "status".chars() {
+      press(&mut app, KeyCode::Char(ch));
+    }
+
+    assert!(!app.request_exit());
+    press(&mut app, KeyCode::Char('s'));
+    assert!(app.prompt_shadow().is_none());
+    assert_eq!(app.input, "status");
+
+    let action =
+      app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(action, InputAction::Submitted(line) if line == "status"));
+  }
+
+  #[test]
+  /// Verifies Ctrl-C and Ctrl-D keep the confirmation prompt active.
+  fn ctrl_exit_keys_keep_exit_confirmation_prompt_active() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      active_transactions: 1,
+      ..SimulatorRuntimeState::default()
+    }));
+
+    assert!(!app.request_exit());
+    press_with_modifiers(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(app.prompt_shadow(), Some(super::EXIT_CONFIRMATION_PROMPT));
+
+    press_with_modifiers(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    assert_eq!(app.prompt_shadow(), Some(super::EXIT_CONFIRMATION_PROMPT));
+  }
+
+  #[test]
+  /// Verifies runtime-state updates are silent and reset stale confirmations.
+  fn runtime_state_updates_are_silent_and_reset_exit_confirmation() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      connected: true,
+      pending_action: Some("BootNotification (m1)".to_string()),
+      ..SimulatorRuntimeState::default()
+    }));
+
+    assert!(app.drain_pending_logs().is_empty());
+    assert_eq!(app.taskbar_line(), " url - | connected");
+    assert!(!app.request_exit());
+
+    app.apply(UiEvent::RuntimeState(SimulatorRuntimeState {
+      connected: true,
+      ..SimulatorRuntimeState::default()
+    }));
+
+    assert!(app.prompt_shadow().is_none());
+    assert!(app.request_exit());
   }
 
   #[test]
