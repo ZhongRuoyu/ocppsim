@@ -269,11 +269,26 @@ impl Simulator {
     else {
       return Ok(());
     };
+    let RemoteStartTransactionRequestV1_6 {
+      connector: _,
+      id_token,
+      charging_profile,
+    } = request;
     let status = if self.authorize_remote_tx_requests() {
-      self.enqueue_remote_start_authorize_v1_6(connector, request.id_token);
+      self.enqueue_remote_start_authorize_v1_6(
+        connector,
+        id_token,
+        charging_profile,
+      );
       ResponseStatus::Accepted
     } else if self
-      .start_transaction(connector, request.id_token, true, None, true)
+      .start_transaction(connector, id_token, true, None, true)
+      .and_then(|()| {
+        self.apply_remote_start_charging_profile(
+          connector,
+          charging_profile.as_ref(),
+        )
+      })
       .is_ok()
     {
       ResponseStatus::Accepted

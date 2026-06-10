@@ -88,6 +88,7 @@ impl Simulator {
     &mut self,
     connector: u16,
     id_token: String,
+    charging_profile: Option<Value>,
   ) {
     let payload = Self::authorize_v1_6_payload(&id_token);
     self.enqueue_call(
@@ -96,6 +97,7 @@ impl Simulator {
       PendingContext::RemoteStartAuthorizeV1_6 {
         connector,
         id_token,
+        charging_profile,
       },
     );
   }

@@ -10,6 +10,7 @@ use super::super::{
 pub(in crate::simulator) struct RemoteStartTransactionRequestV1_6 {
   pub connector: Option<u16>,
   pub id_token: String,
+  pub charging_profile: Option<Value>,
 }
 
 impl RemoteStartTransactionRequestV1_6 {
@@ -17,6 +18,7 @@ impl RemoteStartTransactionRequestV1_6 {
     Ok(Self {
       connector: optional_u16_field(payload, "connectorId")?,
       id_token: required_string_field(payload, "idTag")?.to_string(),
+      charging_profile: optional_object_field(payload, "chargingProfile")?,
     })
   }
 }
@@ -39,6 +41,7 @@ pub(in crate::simulator) struct RequestStartTransactionRequest_V2_X {
   pub connector: Option<u16>,
   pub remote_start_id: i64,
   pub id_token: String,
+  pub charging_profile: Option<Value>,
 }
 
 impl RequestStartTransactionRequest_V2_X {
@@ -48,6 +51,7 @@ impl RequestStartTransactionRequest_V2_X {
       remote_start_id: required_i64_field(payload, "remoteStartId")?,
       id_token: required_nested_string_field(payload, "idToken", "idToken")?
         .to_string(),
+      charging_profile: optional_object_field(payload, "chargingProfile")?,
     })
   }
 }
@@ -372,6 +376,19 @@ fn required_object_field(payload: &Value, field: &str) -> Result<Value> {
     return Err(anyhow!("{field} must be an object."));
   }
   Ok(value.clone())
+}
+
+fn optional_object_field(
+  payload: &Value,
+  field: &str,
+) -> Result<Option<Value>> {
+  let Some(value) = payload.get(field) else {
+    return Ok(None);
+  };
+  if !value.is_object() {
+    return Err(anyhow!("{field} must be an object."));
+  }
+  Ok(Some(value.clone()))
 }
 
 fn optional_nested_u16_field(

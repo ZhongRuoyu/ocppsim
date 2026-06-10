@@ -359,6 +359,7 @@ pub(in crate::simulator) enum PendingContext {
   RemoteStartAuthorizeV1_6 {
     connector: u16,
     id_token: String,
+    charging_profile: Option<Value>,
   },
   StatusNotification {
     connector: u16,

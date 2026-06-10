@@ -42,9 +42,13 @@ impl Simulator {
       PendingContext::RemoteStartAuthorizeV1_6 {
         connector,
         id_token,
+        charging_profile,
       } => {
         self.apply_remote_start_authorize_call_result(
-          *connector, id_token, payload,
+          *connector,
+          id_token,
+          charging_profile.as_ref(),
+          payload,
         );
       }
       PendingContext::StatusNotification { connector } => {
@@ -152,6 +156,7 @@ impl Simulator {
     &mut self,
     connector: u16,
     id_token: &str,
+    charging_profile: Option<&Value>,
     payload: &Value,
   ) {
     let status = parse_v1_6_id_tag_status(payload);
@@ -164,18 +169,18 @@ impl Simulator {
       ),
     );
     if status == ResponseStatus::Accepted {
-      if let Err(error) = self.start_transaction(
-        connector,
-        id_token.to_string(),
-        true,
-        None,
-        true,
-      ) {
+      if let Err(error) = self
+        .start_transaction(connector, id_token.to_string(), true, None, true)
+        .and_then(|()| {
+          self.apply_remote_start_charging_profile(connector, charging_profile)
+        })
+      {
         self.log(
           UiLogLevel::Warn,
           format!(
-            "RemoteStartTransaction authorization accepted but start failed \
-            on connector {connector}: {error}"
+            "RemoteStartTransaction authorization accepted but \
+            start/profile application failed on connector {connector}: \
+            {error}"
           ),
         );
       }

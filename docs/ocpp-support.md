@@ -346,6 +346,9 @@ Smart charging is an effective-limit simulation, not a full profile engine.
 One profile is stored per connector.
 The first supported limit in the stored profile drives connector suspension and
 composite schedule output.
+Charging profiles supplied with accepted `RemoteStartTransaction` and
+`RequestStartTransaction` requests are applied through the same simplified
+store.
 A connector with no stored profile returns `Rejected` for composite schedule
 requests.
 OCPP 1.6 `GetCompositeSchedule` rejects invalid `chargingRateUnit` values with

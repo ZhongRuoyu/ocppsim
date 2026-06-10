@@ -335,7 +335,7 @@ fn start_transaction_v1_6_ack_stores_remote_transaction_id() {
 #[test]
 fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string());
+  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None);
   let authorize_call = simulator.queue.pop_front().expect("queued authorize");
   simulator.pending = Some(PendingCall {
     message_id: "auth-ack".to_string(),
@@ -371,7 +371,7 @@ fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
 #[test]
 fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string());
+  simulator.enqueue_remote_start_authorize_v1_6(1, "TOKEN".to_string(), None);
   let authorize_call = simulator.queue.pop_front().expect("queued authorize");
   simulator.pending = Some(PendingCall {
     message_id: "auth-concurrent".to_string(),

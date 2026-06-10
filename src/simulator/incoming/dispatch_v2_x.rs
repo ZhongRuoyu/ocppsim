@@ -236,12 +236,25 @@ impl Simulator {
     };
 
     if let Some(existing) = self.active_transaction_uid(connector) {
-      let (status, transaction_id) =
-        if self.active_transaction_authorized(connector) {
-          (ResponseStatus::Rejected, None)
-        } else {
-          (ResponseStatus::Accepted, Some(existing.as_str()))
-        };
+      let status = if self.active_transaction_authorized(connector) {
+        ResponseStatus::Rejected
+      } else if let Err(error) = self.apply_remote_start_charging_profile(
+        connector,
+        request.charging_profile.as_ref(),
+      ) {
+        self.log(
+          UiLogLevel::Warn,
+          format!(
+            "RequestStartTransaction charging profile rejected on EVSE \
+            {connector}: {error}"
+          ),
+        );
+        ResponseStatus::Rejected
+      } else {
+        ResponseStatus::Accepted
+      };
+      let transaction_id =
+        (status == ResponseStatus::Accepted).then_some(existing.as_str());
       return self
         .send_call_result(
           write,
@@ -254,14 +267,20 @@ impl Simulator {
         .await;
     }
 
+    let RequestStartTransactionRequest_V2_X {
+      connector: _,
+      remote_start_id,
+      id_token,
+      charging_profile,
+    } = request;
     let status = if self
-      .start_transaction(
-        connector,
-        request.id_token,
-        true,
-        Some(request.remote_start_id),
-        true,
-      )
+      .start_transaction(connector, id_token, true, Some(remote_start_id), true)
+      .and_then(|()| {
+        self.apply_remote_start_charging_profile(
+          connector,
+          charging_profile.as_ref(),
+        )
+      })
       .is_ok()
     {
       ResponseStatus::Accepted

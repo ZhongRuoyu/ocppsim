@@ -601,7 +601,8 @@ async fn remote_start_v1_6_authorizes_before_start_when_configured() {
     PendingContext::RemoteStartAuthorizeV1_6 {
       connector: 1,
       id_token,
-    } if id_token == "TOKEN"
+      charging_profile,
+    } if id_token == "TOKEN" && charging_profile.is_none()
   ));
 }
 
@@ -630,6 +631,77 @@ async fn remote_start_v1_6_rejects_unstartable_connectors() {
         .all(|connector| connector.transaction.is_none())
     );
   }
+}
+
+#[tokio::test]
+async fn remote_start_v1_6_applies_charging_profile_after_authorize() {
+  let profile = json!({
+    "chargingProfileId": 1,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "chargingSchedule": {
+      "chargingRateUnit": "A",
+      "chargingSchedulePeriod": [
+        { "startPeriod": 0, "limit": 0 }
+      ]
+    }
+  });
+  let (frame, mut simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "RemoteStartTransaction",
+    json!({
+      "idTag": "TOKEN",
+      "chargingProfile": profile.clone()
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  let authorize = simulator.queue.pop_front().expect("queued authorize");
+  assert!(matches!(
+    &authorize.context,
+    PendingContext::RemoteStartAuthorizeV1_6 {
+      connector: 1,
+      id_token,
+      charging_profile: Some(queued_profile),
+    } if id_token == "TOKEN" && queued_profile == &profile
+  ));
+
+  simulator
+    .apply_call_result_context(
+      &authorize.context,
+      &json!({
+        "idTagInfo": { "status": "Accepted" }
+      }),
+    )
+    .expect("remote-start authorization should apply");
+
+  assert_eq!(simulator.charging_profiles.get(&1), Some(&profile));
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|item| item.offered_limit),
+    Some(0.0)
+  );
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .map(|item| item.status.display()),
+    Some("SuspendedEVSE")
+  );
+  assert!(
+    simulator
+      .queue
+      .iter()
+      .any(|call| call.action == "StartTransaction")
+  );
+  let status_payload = queued_payload(&simulator, "StatusNotification");
+  assert_eq!(status_payload["status"], json!("SuspendedEVSE"));
 }
 
 #[tokio::test]
@@ -663,6 +735,66 @@ async fn malformed_request_start_v2_x_returns_call_error() {
           .all(|connector| connector.transaction.is_none())
       );
     }
+  }
+}
+
+#[tokio::test]
+async fn request_start_v2_x_applies_charging_profile() {
+  for protocol in v2_x_protocols() {
+    let profile = json!({
+      "id": 1,
+      "stackLevel": 0,
+      "chargingProfilePurpose": "TxProfile",
+      "chargingProfileKind": "Absolute",
+      "chargingSchedule": [
+        {
+          "id": 1,
+          "chargingRateUnit": "A",
+          "chargingSchedulePeriod": [
+            { "startPeriod": 0, "limit": 0 }
+          ]
+        }
+      ]
+    });
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "RequestStartTransaction",
+      json!({
+        "remoteStartId": 12,
+        "idToken": { "idToken": "TOKEN" },
+        "evseId": 1,
+        "chargingProfile": profile.clone()
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallResult { payload, .. } = frame else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+    assert_eq!(simulator.charging_profiles.get(&1), Some(&profile));
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .and_then(|item| item.offered_limit),
+      Some(0.0)
+    );
+    assert_eq!(
+      simulator
+        .connectors
+        .get(&1)
+        .map(|item| item.status.display()),
+      Some("SuspendedEVSE")
+    );
+    assert!(
+      simulator
+        .queue
+        .iter()
+        .any(|call| call.action == "TransactionEvent")
+    );
+    let status_payload = queued_payload(&simulator, "StatusNotification");
+    assert_eq!(status_payload["connectorStatus"], json!("Occupied"));
   }
 }
 

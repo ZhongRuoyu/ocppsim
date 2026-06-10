@@ -1,5 +1,6 @@
 use super::super::{
-  ConnectorStatus, ResponseStatus, Result, Simulator, Value, optional_u16_field,
+  ConnectorStatus, ResponseStatus, Result, Simulator, Value, anyhow,
+  optional_u16_field,
 };
 use super::request::AvailabilityRequest;
 
@@ -168,6 +169,26 @@ impl Simulator {
       }
     }
     Ok(ResponseStatus::Accepted)
+  }
+
+  /// Applies an accepted remote-start charging profile.
+  pub(in crate::simulator) fn apply_remote_start_charging_profile(
+    &mut self,
+    connector: u16,
+    profile: Option<&Value>,
+  ) -> Result<()> {
+    let Some(profile) = profile else {
+      return Ok(());
+    };
+    let status = self.apply_set_charging_profile(connector, profile)?;
+    if status == ResponseStatus::Accepted {
+      return Ok(());
+    }
+    Err(anyhow!(
+      "Charging profile rejected on connector {} status={}",
+      connector,
+      status.as_str()
+    ))
   }
 
   /// Builds target connectors for a charging-profile clear request.
