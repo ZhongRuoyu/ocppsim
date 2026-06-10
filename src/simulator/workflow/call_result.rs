@@ -1,8 +1,8 @@
 use super::super::{
-  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, OcppVersion,
-  PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator,
-  StopReason, TransactionEventRequest, TransactionTriggerReason, TxEventType,
-  UiLogLevel, Value, authorize_status,
+  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, PendingContext,
+  REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator, StopReason,
+  TransactionEventRequest, TransactionTriggerReason, TxEventType, UiLogLevel,
+  Value, authorize_status,
 };
 
 impl Simulator {
@@ -119,10 +119,6 @@ impl Simulator {
   }
 
   fn apply_boot_registration_status(&mut self, status: ResponseStatus) {
-    if self.config.protocol == OcppVersion::V1_6 {
-      self.boot_registration_status = BootRegistrationStatus::Accepted;
-      return;
-    }
     self.boot_registration_status = match status {
       ResponseStatus::Accepted => BootRegistrationStatus::Accepted,
       ResponseStatus::Pending => BootRegistrationStatus::Pending,

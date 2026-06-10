@@ -456,18 +456,12 @@ impl Simulator {
   }
 
   fn enqueue_boot_with_registration_state(&mut self) {
-    self.boot_registration_status = if self.config.protocol == OcppVersion::V1_6
-    {
-      BootRegistrationStatus::Accepted
-    } else {
-      BootRegistrationStatus::AwaitingResponse
-    };
+    self.boot_registration_status = BootRegistrationStatus::AwaitingResponse;
     self.enqueue_boot_notification();
   }
 
   pub(in crate::simulator) fn post_boot_ocpp_requests_allowed(&self) -> bool {
-    self.config.protocol == OcppVersion::V1_6
-      || self.boot_registration_status == BootRegistrationStatus::Accepted
+    self.boot_registration_status == BootRegistrationStatus::Accepted
   }
 
   fn ensure_post_boot_ocpp_requests_allowed(&mut self, action: &str) -> bool {
@@ -839,6 +833,14 @@ impl Simulator {
     if !self.post_boot_ocpp_requests_allowed()
       && call.action != OutgoingAction::BootNotification.as_str()
     {
+      if let Some(index) = self.queue.iter().position(|queued| {
+        queued.action == OutgoingAction::BootNotification.as_str()
+      }) && let Some(boot_call) = self.queue.remove(index)
+      {
+        self.queue.push_front(call);
+        self.queue.push_front(boot_call);
+        return Ok(());
+      }
       self.queue.push_front(call);
       return Ok(());
     }

@@ -111,6 +111,8 @@ Security password values are write-only: they can be changed, but
 Accepted `BootNotification` responses update the local `HeartbeatInterval`
 configuration value and start or restart periodic heartbeats with the interval
 returned by the CSMS.
+For OCPP 1.6 and OCPP 2.x, station-initiated requests remain gated until boot
+registration is accepted.
 
 Smart charging stores one effective profile per connector.
 The simulator applies the first supported limit value to connector state and

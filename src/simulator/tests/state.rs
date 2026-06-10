@@ -459,6 +459,10 @@ fn accepted_boot_result_enqueues_v1_6_status_for_charge_point_and_connectors() {
     )
     .expect("boot result");
 
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Accepted
+  );
   assert_eq!(queued_status_connector_ids(&simulator), vec![0, 1, 2]);
 }
 
@@ -477,6 +481,32 @@ fn rejected_boot_result_does_not_enqueue_initial_status_notifications() {
     )
     .expect("boot result");
 
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Rejected
+  );
+  assert!(simulator.queue.is_empty());
+}
+
+#[test]
+fn pending_boot_result_keeps_v1_6_registration_pending() {
+  let mut simulator = simulator_for_tests();
+
+  simulator
+    .apply_call_result_context(
+      &PendingContext::Boot,
+      &json!({
+        "status": "Pending",
+        "currentTime": now_timestamp(),
+        "interval": 10
+      }),
+    )
+    .expect("boot result");
+
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Pending
+  );
   assert!(simulator.queue.is_empty());
 }
 
@@ -495,6 +525,66 @@ fn accepted_boot_result_enqueues_v2_x_connector_statuses_only() {
 
     assert_eq!(queued_status_evse_ids(&simulator), vec![1, 2]);
   });
+}
+
+#[test]
+fn v1_6_commands_wait_for_boot_acceptance() {
+  let mut simulator = simulator_for_tests();
+  simulator.connected = true;
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+
+  simulator
+    .handle_common_command(
+      SimulatorCommand::StartTransaction {
+        connector: 1,
+        id_token: "TOKEN".to_string(),
+      },
+      true,
+    )
+    .expect("start command should be handled");
+
+  assert!(simulator.queue.is_empty());
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+
+  simulator
+    .apply_call_result_context(
+      &PendingContext::Boot,
+      &json!({
+        "status": "Accepted",
+        "currentTime": now_timestamp()
+      }),
+    )
+    .expect("boot result");
+  simulator.queue.clear();
+
+  simulator
+    .handle_common_command(
+      SimulatorCommand::StartTransaction {
+        connector: 1,
+        id_token: "TOKEN".to_string(),
+      },
+      true,
+    )
+    .expect("start command should be handled after boot");
+
+  assert!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some()
+  );
+  assert!(
+    simulator
+      .queue
+      .iter()
+      .any(|call| call.action == "StartTransaction")
+  );
 }
 
 #[test]

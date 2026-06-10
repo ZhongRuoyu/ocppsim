@@ -463,6 +463,52 @@ async fn pending_security_events_enqueue_when_queue_space_opens() {
 }
 
 #[tokio::test]
+async fn boot_retry_is_prioritized_when_registration_is_not_accepted() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.connected = true;
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+
+  simulator.enqueue_heartbeat();
+  simulator
+    .handle_common_command(SimulatorCommand::Boot, true)
+    .expect("boot command");
+  assert_eq!(
+    simulator
+      .queue
+      .iter()
+      .map(|call| call.action.as_str())
+      .collect::<Vec<_>>(),
+    vec!["Heartbeat", "BootNotification"]
+  );
+
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("prioritize boot retry");
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("BootNotification")
+  );
+
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send boot retry");
+
+  let OcppFrame::Call { action, .. } = read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALL frame");
+  };
+  assert_eq!(action, "BootNotification");
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("Heartbeat")
+  );
+}
+
+#[tokio::test]
 async fn boot_response_starts_heartbeat_from_interval() {
   let mut simulator = simulator_for_tests();
   simulator
