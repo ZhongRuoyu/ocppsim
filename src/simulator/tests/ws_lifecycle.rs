@@ -285,6 +285,14 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
   let mut simulator = simulator_for_tests();
   simulator.config.ws_url = Some(format!("ws://{address}"));
   let mut connection = simulator.connect().await.expect("connect");
+  assert_eq!(
+    simulator
+      .queue
+      .iter()
+      .map(|call| call.action.as_str())
+      .collect::<Vec<_>>(),
+    vec!["BootNotification"]
+  );
   simulator
     .try_send_next(&mut connection.write)
     .await
@@ -300,6 +308,17 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
     .await
     .expect("handle response");
 
+  assert_eq!(
+    simulator
+      .queue
+      .iter()
+      .filter(|call| call.action == "StatusNotification")
+      .map(|call| {
+        call.payload["connectorId"].as_u64().expect("connector id")
+      })
+      .collect::<Vec<_>>(),
+    vec![0, 1, 2]
+  );
   assert_eq!(
     simulator.heartbeat.as_ref().map(|item| item.seconds),
     Some(9)

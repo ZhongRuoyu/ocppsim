@@ -683,11 +683,6 @@ impl Simulator {
     );
 
     self.enqueue_boot_notification();
-    let connectors: Vec<u16> = self.connectors.keys().copied().collect();
-    for connector in connectors {
-      self.enqueue_status_notification(connector)?;
-    }
-    self.enqueue_pending_security_event_notifications();
     self.emit_snapshot();
 
     let (write, read) = stream.split();

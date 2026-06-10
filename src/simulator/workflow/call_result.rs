@@ -11,7 +11,7 @@ impl Simulator {
     payload: &Value,
   ) -> Result<()> {
     match context {
-      PendingContext::Boot => self.apply_boot_call_result(payload),
+      PendingContext::Boot => self.apply_boot_call_result(payload)?,
       PendingContext::Heartbeat => self.log_heartbeat_call_result(payload),
       PendingContext::DataTransfer => {
         self.log_data_transfer_call_result(payload);
@@ -83,7 +83,7 @@ impl Simulator {
     Ok(())
   }
 
-  fn apply_boot_call_result(&mut self, payload: &Value) {
+  fn apply_boot_call_result(&mut self, payload: &Value) -> Result<()> {
     let status = payload
       .get("status")
       .and_then(Value::as_str)
@@ -103,6 +103,11 @@ impl Simulator {
     {
       self.apply_boot_heartbeat_interval(seconds);
     }
+    if status == ResponseStatus::Accepted {
+      self.enqueue_boot_status_notifications()?;
+      self.enqueue_pending_security_event_notifications();
+    }
+    Ok(())
   }
 
   fn log_heartbeat_call_result(&mut self, payload: &Value) {

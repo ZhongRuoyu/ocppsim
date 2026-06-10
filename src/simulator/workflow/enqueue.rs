@@ -188,9 +188,33 @@ impl Simulator {
     &mut self,
     connector: u16,
   ) -> Result<()> {
-    let connector_state = self.connector_ref(connector)?;
+    let status = self.connector_ref(connector)?.status;
+    self.enqueue_status_notification_with_status(connector, status);
+    Ok(())
+  }
 
-    let status = connector_state.status;
+  /// Enqueues the initial status report required after an accepted boot.
+  pub(in crate::simulator) fn enqueue_boot_status_notifications(
+    &mut self,
+  ) -> Result<()> {
+    if self.config.protocol == OcppVersion::V1_6 {
+      self.enqueue_status_notification_with_status(
+        0,
+        self.charge_point_status_v1_6(),
+      );
+    }
+    let connectors: Vec<u16> = self.connectors.keys().copied().collect();
+    for connector in connectors {
+      self.enqueue_status_notification(connector)?;
+    }
+    Ok(())
+  }
+
+  fn enqueue_status_notification_with_status(
+    &mut self,
+    connector: u16,
+    status: ConnectorStatus,
+  ) {
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => {
         Self::status_notification_v1_6_payload(connector, status)
@@ -207,7 +231,24 @@ impl Simulator {
       payload,
       PendingContext::StatusNotification { connector },
     );
-    Ok(())
+  }
+
+  fn charge_point_status_v1_6(&self) -> ConnectorStatus {
+    if self
+      .connectors
+      .values()
+      .any(|connector| connector.status == ConnectorStatus::Faulted)
+    {
+      ConnectorStatus::Faulted
+    } else if self
+      .connectors
+      .values()
+      .all(|connector| connector.status == ConnectorStatus::Unavailable)
+    {
+      ConnectorStatus::Unavailable
+    } else {
+      ConnectorStatus::Available
+    }
   }
 
   /// Enqueues a `MeterValues` request for one connector.

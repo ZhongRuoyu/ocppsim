@@ -168,6 +168,58 @@ fn change_availability_v1_6_connector_zero_updates_all_connectors() {
 }
 
 #[test]
+fn accepted_boot_result_enqueues_v1_6_status_for_charge_point_and_connectors() {
+  let mut simulator = simulator_for_tests();
+
+  simulator
+    .apply_call_result_context(
+      &PendingContext::Boot,
+      &json!({
+        "status": "Accepted",
+        "currentTime": now_timestamp()
+      }),
+    )
+    .expect("boot result");
+
+  assert_eq!(queued_status_connector_ids(&simulator), vec![0, 1, 2]);
+}
+
+#[test]
+fn rejected_boot_result_does_not_enqueue_initial_status_notifications() {
+  let mut simulator = simulator_for_tests();
+
+  simulator
+    .apply_call_result_context(
+      &PendingContext::Boot,
+      &json!({
+        "status": "Rejected",
+        "currentTime": now_timestamp(),
+        "interval": 10
+      }),
+    )
+    .expect("boot result");
+
+  assert!(simulator.queue.is_empty());
+}
+
+#[test]
+fn accepted_boot_result_enqueues_v2_x_connector_statuses_only() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    simulator
+      .apply_call_result_context(
+        &PendingContext::Boot,
+        &json!({
+          "status": "Accepted",
+          "currentTime": now_timestamp()
+        }),
+      )
+      .expect("boot result");
+
+    assert_eq!(queued_status_evse_ids(&simulator), vec![1, 2]);
+  });
+}
+
+#[test]
 fn change_availability_v2_x_updates_target_evse() {
   for_each_v2_x_simulator(|_, mut simulator| {
     let payload = json!({
@@ -187,6 +239,24 @@ fn change_availability_v2_x_updates_target_evse() {
       Some("Unavailable")
     );
   });
+}
+
+fn queued_status_connector_ids(simulator: &Simulator) -> Vec<u64> {
+  simulator
+    .queue
+    .iter()
+    .filter(|call| call.action == "StatusNotification")
+    .map(|call| call.payload["connectorId"].as_u64().expect("connector id"))
+    .collect()
+}
+
+fn queued_status_evse_ids(simulator: &Simulator) -> Vec<u64> {
+  simulator
+    .queue
+    .iter()
+    .filter(|call| call.action == "StatusNotification")
+    .map(|call| call.payload["evseId"].as_u64().expect("evse id"))
+    .collect()
 }
 
 #[test]
