@@ -847,6 +847,29 @@ fn certificate_signed_v2_1_accepts_optional_request_id() {
   );
 }
 
+#[test]
+fn sign_certificate_v2_1_ignores_dropped_queue_entries() {
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
+  simulator.config.outbound_queue_limit = 1;
+
+  simulator.enqueue_heartbeat();
+  simulator.enqueue_sign_certificate(Some("ChargingStationCertificate"));
+
+  assert_eq!(simulator.queue.len(), 1);
+  assert_eq!(simulator.security.pending_signing_request_ids.len(), 0);
+  assert_eq!(simulator.security.next_signing_request_id, 1);
+
+  simulator.queue.clear();
+  simulator.enqueue_sign_certificate(Some("ChargingStationCertificate"));
+
+  assert_eq!(simulator.security.pending_signing_request_ids, vec![1]);
+  assert_eq!(simulator.security.next_signing_request_id, 2);
+  assert_eq!(
+    queued_payload(&simulator, "SignCertificate")["requestId"],
+    1
+  );
+}
+
 #[tokio::test]
 async fn secure_connection_setup_failure_records_local_security_event() {
   let path = write_temp_security_file("not a certificate");

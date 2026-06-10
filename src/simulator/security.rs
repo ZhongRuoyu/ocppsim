@@ -346,24 +346,22 @@ impl Simulator {
     &mut self,
     certificate_type: Option<&str>,
   ) {
-    let request_id = if self.config.protocol == OcppVersion::V2_1 {
-      let id = self.security.next_signing_request_id;
-      self.security.next_signing_request_id += 1;
-      self.security.pending_signing_request_ids.push(id);
-      Some(id)
-    } else {
-      None
-    };
+    let request_id = (self.config.protocol == OcppVersion::V2_1)
+      .then_some(self.security.next_signing_request_id);
     let payload = to_value(&SignCertificateRequest {
       csr: SIMULATED_CSR,
       certificate_type,
       request_id,
     });
-    self.enqueue_call(
+    if self.enqueue_call(
       OutgoingAction::SignCertificate.as_str(),
       payload,
       PendingContext::SignCertificate,
-    );
+    ) && let Some(id) = request_id
+    {
+      self.security.next_signing_request_id += 1;
+      self.security.pending_signing_request_ids.push(id);
+    }
   }
 
   pub(in crate::simulator) fn install_certificate_from_payload(
