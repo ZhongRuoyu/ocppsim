@@ -526,6 +526,8 @@ pub(in crate::simulator) struct Simulator {
   pub(in crate::simulator) config: SimulatorConfig,
   pub(in crate::simulator) ui_tx: UnboundedSender<UiEvent>,
   pub(in crate::simulator) self_cmd_tx: UnboundedSender<SimulatorCommand>,
+  pub(in crate::simulator) incoming_request_validators:
+    BTreeMap<String, jsonschema::Validator>,
   pub(in crate::simulator) connectors: BTreeMap<u16, ConnectorState>,
   pub(in crate::simulator) configuration:
     BTreeMap<ConfigurationKey, ConfigurationEntry>,

@@ -379,6 +379,7 @@ impl Simulator {
       config,
       ui_tx,
       self_cmd_tx,
+      incoming_request_validators: BTreeMap::new(),
       connectors,
       configuration,
       reservations: BTreeMap::new(),

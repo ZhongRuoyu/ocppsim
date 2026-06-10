@@ -1169,6 +1169,50 @@ async fn strict_mode_rejects_schema_invalid_v2_x_requests() {
 }
 
 #[tokio::test]
+async fn strict_mode_caches_request_schema_validator_per_action() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
+  simulator.config.strict = true;
+
+  simulator
+    .handle_incoming_call(&mut write, "message-1", "Reset", json!({}))
+    .await
+    .expect("first strict call");
+
+  let first_frame = read_ocpp_frame(&mut server_read).await;
+  let OcppFrame::CallError { code, .. } = first_frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+
+  let cache_key = format!("{}:Reset", OcppVersion::V2_1.subprotocol());
+  assert_eq!(simulator.incoming_request_validators.len(), 1);
+  assert!(
+    simulator
+      .incoming_request_validators
+      .contains_key(&cache_key)
+  );
+
+  simulator
+    .handle_incoming_call(&mut write, "message-2", "Reset", json!({}))
+    .await
+    .expect("second strict call");
+
+  let second_frame = read_ocpp_frame(&mut server_read).await;
+  let OcppFrame::CallError { code, .. } = second_frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+  assert_eq!(simulator.incoming_request_validators.len(), 1);
+  assert!(
+    simulator
+      .incoming_request_validators
+      .contains_key(&cache_key)
+  );
+}
+
+#[tokio::test]
 async fn strict_mode_warns_when_request_schema_is_missing() {
   let (frame, simulator, events) = capture_inbound_call_response_with_events(
     OcppVersion::V1_6,

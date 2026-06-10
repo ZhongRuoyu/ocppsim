@@ -1,3 +1,5 @@
+use std::collections::btree_map::Entry;
+
 use crate::ocpp::OcppMessageTypeId;
 
 use super::super::{
@@ -320,21 +322,28 @@ impl Simulator {
 
   /// Validates an inbound CALL payload against the checked-in request schema.
   fn validate_incoming_request_schema(
-    &self,
+    &mut self,
     action: &str,
     payload: &Value,
   ) -> Result<IncomingRequestSchemaValidation> {
-    let Some(schema_text) =
-      crate::embedded_schemas::incoming_request_schema_text(
-        self.config.protocol,
-        action,
-      )
-    else {
-      return Ok(IncomingRequestSchemaValidation::MissingSchema);
+    let protocol = self.config.protocol;
+    let cache_key = incoming_request_validator_cache_key(protocol, action);
+    let validator = match self.incoming_request_validators.entry(cache_key) {
+      Entry::Occupied(entry) => entry.into_mut(),
+      Entry::Vacant(entry) => {
+        let Some(schema_text) =
+          crate::embedded_schemas::incoming_request_schema_text(
+            protocol, action,
+          )
+        else {
+          return Ok(IncomingRequestSchemaValidation::MissingSchema);
+        };
+        let schema: Value = serde_json::from_str(schema_text)?;
+        let validator = jsonschema::validator_for(&schema)?;
+        entry.insert(validator)
+      }
     };
 
-    let schema: Value = serde_json::from_str(schema_text)?;
-    let validator = jsonschema::validator_for(&schema)?;
     let errors = validator
       .iter_errors(payload)
       .take(5)
@@ -346,6 +355,13 @@ impl Simulator {
 
     Err(anyhow!(errors.join("; ")))
   }
+}
+
+fn incoming_request_validator_cache_key(
+  protocol: OcppVersion,
+  action: &str,
+) -> String {
+  format!("{}:{action}", protocol.subprotocol())
 }
 
 fn frame_supported_for_protocol(
