@@ -49,8 +49,12 @@ impl Simulator {
           .await?;
       }
       IncomingAction_V1_6::ChangeConfiguration => {
-        let status = self.change_configuration_v1_6(payload);
-        self.send_status_response(write, message_id, status).await?;
+        dispatch_status!(
+          self,
+          write,
+          message_id,
+          self.change_configuration_v1_6(payload)
+        );
       }
       IncomingAction_V1_6::ClearCache => {
         self

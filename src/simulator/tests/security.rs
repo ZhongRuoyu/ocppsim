@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::simulator::SimulatorConnectionConfig;
 
@@ -14,6 +14,33 @@ const TEST_CERTIFICATE: &str =
   "-----BEGIN CERTIFICATE-----TEST-----END CERTIFICATE-----";
 const ROOT_CERTIFICATE: &str =
   "-----BEGIN CERTIFICATE-----ROOT-----END CERTIFICATE-----";
+
+fn change_configuration_v1_6(
+  simulator: &mut Simulator,
+  payload: &Value,
+) -> ResponseStatus {
+  simulator
+    .change_configuration_v1_6(payload)
+    .expect("change configuration should parse")
+}
+
+fn assert_change_configuration_status(
+  simulator: &mut Simulator,
+  key: &str,
+  value: &str,
+  expected: ResponseStatus,
+) {
+  assert_eq!(
+    change_configuration_v1_6(
+      simulator,
+      &json!({
+        "key": key,
+        "value": value
+      }),
+    ),
+    expected
+  );
+}
 
 #[test]
 fn certificate_install_list_and_delete_v1_6() {
@@ -151,12 +178,11 @@ fn basic_auth_password_is_write_only() {
   let mut simulator = simulator_for_tests();
   let password = "0123456789abcdef0123456789abcdef";
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": password
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    password,
+    ResponseStatus::Accepted,
   );
   assert_eq!(
     simulator.security.basic_auth_password.as_deref(),
@@ -206,26 +232,23 @@ fn basic_auth_password_is_write_only() {
 fn basic_auth_password_rejects_non_hex_and_short_and_long_values() {
   let mut simulator = simulator_for_tests();
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "not-a-hex-password"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "not-a-hex-password",
+    ResponseStatus::Rejected,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "0123456789abcdef"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "0123456789abcdef",
+    ResponseStatus::Rejected,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "0123456789abcdef0123456789abcdef012345678"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "0123456789abcdef0123456789abcdef012345678",
+    ResponseStatus::Rejected,
   );
 }
 
@@ -274,42 +297,37 @@ fn basic_auth_password_v2_x_uses_password_string_rules() {
 fn security_profile_v1_6_enforces_upgrade_prerequisites() {
   let mut simulator = simulator_for_tests();
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Rejected,
   );
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "0123456789abcdef0123456789abcdef"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "0123456789abcdef0123456789abcdef",
+    ResponseStatus::Accepted,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Accepted,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Rejected,
   );
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "2"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "2",
+    ResponseStatus::Rejected,
   );
   assert_eq!(
     simulator
@@ -320,51 +338,45 @@ fn security_profile_v1_6_enforces_upgrade_prerequisites() {
       .expect("install root"),
     ResponseStatus::Accepted
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "2"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "2",
+    ResponseStatus::Accepted,
   );
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Rejected,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AllowSecurityProfileDowngrade",
-      "value": "true"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "AllowSecurityProfileDowngrade",
+    "true",
+    ResponseStatus::Accepted,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Rejected,
   );
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "3"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "3",
+    ResponseStatus::Rejected,
   );
   simulator.config.client_cert_path = Some(PathBuf::from("cp.pem"));
   simulator.config.client_key_path = Some(PathBuf::from("cp-key.pem"));
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "3"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "3",
+    ResponseStatus::Accepted,
   );
 }
 
@@ -376,19 +388,17 @@ fn security_profile_rejects_ambiguous_basic_auth_identity() {
   let (cmd_tx, _cmd_rx) = tokio::sync::mpsc::unbounded_channel();
   let mut simulator = Simulator::new(config, ui_tx, cmd_tx);
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "0123456789abcdef0123456789abcdef"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "0123456789abcdef0123456789abcdef",
+    ResponseStatus::Accepted,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "1"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "1",
+    ResponseStatus::Rejected,
   );
   assert_eq!(simulator.security.security_profile, None);
 
@@ -496,12 +506,11 @@ fn security_configuration_changes_request_reconnect_when_connected() {
   let mut simulator = simulator_for_tests();
   simulator.connected = true;
 
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AuthorizationKey",
-      "value": "0123456789abcdef0123456789abcdef"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "AuthorizationKey",
+    "0123456789abcdef0123456789abcdef",
+    ResponseStatus::Accepted,
   );
   let reconnect = simulator
     .security
@@ -524,12 +533,11 @@ fn security_configuration_changes_request_reconnect_when_connected() {
     ResponseStatus::Accepted
   );
   simulator.connected = true;
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "SecurityProfile",
-      "value": "2"
-    })),
-    ResponseStatus::Accepted
+  assert_change_configuration_status(
+    &mut simulator,
+    "SecurityProfile",
+    "2",
+    ResponseStatus::Accepted,
   );
   let reconnect = simulator
     .security
@@ -559,19 +567,17 @@ fn whitepaper_read_only_keys_reject_v1_6_configuration_writes() {
         items.iter().all(|item| item["readonly"] == json!(true))
       })
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "AdditionalRootCertificateCheck",
-      "value": "true"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "AdditionalRootCertificateCheck",
+    "true",
+    ResponseStatus::Rejected,
   );
-  assert_eq!(
-    simulator.change_configuration_v1_6(&json!({
-      "key": "CertificateSignedMaxChainSize",
-      "value": "10000"
-    })),
-    ResponseStatus::Rejected
+  assert_change_configuration_status(
+    &mut simulator,
+    "CertificateSignedMaxChainSize",
+    "10000",
+    ResponseStatus::Rejected,
   );
 }
 

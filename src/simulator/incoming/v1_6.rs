@@ -5,7 +5,7 @@ use super::super::payloads::{
 };
 use super::super::{
   ChargingRateUnit, ConfigurationKey, ResponseStatus, Result, Simulator,
-  UiLogLevel, Value, anyhow, now_timestamp,
+  UiLogLevel, Value, anyhow, now_timestamp, required_string_field,
 };
 use super::request::{
   AvailabilityRequest, CancelReservationRequest,
@@ -70,17 +70,13 @@ impl Simulator {
   pub(in crate::simulator) fn change_configuration_v1_6(
     &mut self,
     payload: &Value,
-  ) -> ResponseStatus {
-    let key = payload.get("key").and_then(Value::as_str).unwrap_or("");
-    let value = payload.get("value").and_then(Value::as_str).unwrap_or("");
-    if key.is_empty() {
-      return ResponseStatus::Rejected;
-    }
-
+  ) -> Result<ResponseStatus> {
+    let key = required_string_field(payload, "key")?;
+    let value = required_string_field(payload, "value")?;
     let Some(configuration_key) = ConfigurationKey::parse(key) else {
-      return ResponseStatus::NotSupported;
+      return Ok(ResponseStatus::NotSupported);
     };
-    self.set_configuration_value(configuration_key, value)
+    Ok(self.set_configuration_value(configuration_key, value))
   }
 
   /// Applies `ChangeAvailability.req` for one or all connectors in OCPP 1.6.

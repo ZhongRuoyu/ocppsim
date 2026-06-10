@@ -1043,6 +1043,11 @@ async fn malformed_supported_requests_return_formation_violation() {
     (OcppVersion::V1_6, "UnlockConnector", json!({})),
     (
       OcppVersion::V1_6,
+      "ChangeConfiguration",
+      json!({ "key": "MeterValueSampleInterval" }),
+    ),
+    (
+      OcppVersion::V1_6,
       "SetChargingProfile",
       json!({ "csChargingProfiles": {} }),
     ),

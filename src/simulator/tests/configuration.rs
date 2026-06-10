@@ -19,7 +19,9 @@ fn change_configuration_updates_writable_key() {
     "key": "HeartbeatInterval",
     "value": "25"
   });
-  let status = simulator.change_configuration_v1_6(&payload);
+  let status = simulator
+    .change_configuration_v1_6(&payload)
+    .expect("change configuration should parse");
 
   assert_eq!(status, ResponseStatus::Accepted);
   let entry = simulator
@@ -36,9 +38,66 @@ fn change_configuration_rejects_read_only_key() {
     "key": "NumberOfConnectors",
     "value": "8"
   });
-  let status = simulator.change_configuration_v1_6(&payload);
+  let status = simulator
+    .change_configuration_v1_6(&payload)
+    .expect("change configuration should parse");
 
   assert_eq!(status, ResponseStatus::Rejected);
+}
+
+#[test]
+fn change_configuration_rejects_missing_value_without_mutating() {
+  let mut simulator = simulator_for_tests();
+  let original = simulator
+    .configuration
+    .get(&ConfigurationKey::MeterValueSampleInterval)
+    .expect("key must exist")
+    .value
+    .clone();
+
+  let error = simulator
+    .change_configuration_v1_6(&json!({
+      "key": "MeterValueSampleInterval"
+    }))
+    .expect_err("missing value should fail");
+
+  assert!(error.to_string().contains("value is required"));
+  assert_eq!(
+    simulator
+      .configuration
+      .get(&ConfigurationKey::MeterValueSampleInterval)
+      .expect("key must exist")
+      .value,
+    original
+  );
+}
+
+#[test]
+fn change_configuration_rejects_non_string_value_without_mutating() {
+  let mut simulator = simulator_for_tests();
+  let original = simulator
+    .configuration
+    .get(&ConfigurationKey::MeterValueSampleInterval)
+    .expect("key must exist")
+    .value
+    .clone();
+
+  let error = simulator
+    .change_configuration_v1_6(&json!({
+      "key": "MeterValueSampleInterval",
+      "value": 30
+    }))
+    .expect_err("non-string value should fail");
+
+  assert!(error.to_string().contains("value is required"));
+  assert_eq!(
+    simulator
+      .configuration
+      .get(&ConfigurationKey::MeterValueSampleInterval)
+      .expect("key must exist")
+      .value,
+    original
+  );
 }
 
 #[test]
