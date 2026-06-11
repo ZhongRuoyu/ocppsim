@@ -257,9 +257,12 @@ direction, including OCPP 1.6 `AuthorizationKey` changes, OCPP 2.x
 URL-contained credentials.
 
 Use `--strict` or profile `strict = true` when you want inbound CSMS requests
-validated against the checked-in JSON schemas before simulator dispatch.
+and responses validated against the checked-in JSON schemas before simulator
+dispatch or response side effects.
 Strict mode returns `FormationViolation` for schema-invalid inbound CALL
 payloads.
+Schema-invalid CALLRESULT payloads are not applied, and OCPP 2.1 also receives
+`CALLRESULTERROR`.
 
 Without strict mode, the simulator validates only the fields needed by its
 implemented behavior and ignores optional fields outside that behavior.

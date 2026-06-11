@@ -56,8 +56,10 @@ action in non-strict mode.
 When strict mode is enabled through `--strict` or profile `strict = true`,
 inbound CALL payloads are also validated against the checked-in request schemas
 before dispatch.
-Strict schema failures return `FormationViolation` and do not mutate simulator
-state.
+Matching CSMS CALLRESULT payloads are validated against response schemas before
+their side effects are applied.
+Strict request schema failures return `FormationViolation`; strict response
+schema failures are not applied, and OCPP 2.1 receives `CALLRESULTERROR`.
 
 The 2.x dispatcher intentionally supports only the common subset that maps to
 the simulator's implemented behavior plus overlapping certificate and security
@@ -204,7 +206,8 @@ for tests.
 Representative payload tests validate outbound requests for OCPP 1.6, OCPP
 2.0.1, and OCPP 2.1.
 Supported inbound CALL response payloads are validated against a schema matrix
-for all three protocol families.
+for all three protocol families, and strict mode validates runtime CSMS
+responses before applying side effects.
 Additional regression tests cover malformed inbound remote-start and
 request-start requests, stricter supported-action payload parsing,
 subprotocol negotiation, scheduled availability, duplicate reservations,

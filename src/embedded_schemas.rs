@@ -503,6 +503,16 @@ pub(crate) fn incoming_request_schema_text(
   schema_text_for_action(incoming_request_schemas(protocol), action)
 }
 
+pub(crate) fn incoming_response_schema_text(
+  protocol: OcppVersion,
+  action: &str,
+) -> Option<&'static str> {
+  schema_text_for_action(
+    schemas(protocol, EmbeddedSchemaType::Response),
+    action,
+  )
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn schema_text(relative_path: &str) -> Option<&'static str> {
   ALL_SCHEMA_SETS.iter().find_map(|schemas| {

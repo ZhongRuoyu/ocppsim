@@ -388,6 +388,10 @@ When enabled, inbound CALL payloads are validated against the checked-in
 request schema before simulator dispatch.
 Schema-invalid requests return `FormationViolation` without mutating simulator
 state.
+Matching inbound CALLRESULT payloads are validated against the checked-in
+response schema before response side effects are applied.
+Schema-invalid responses are not applied; OCPP 2.1 also sends
+`CALLRESULTERROR` with `FormationViolation`.
 
 Without strict mode, supported inbound actions still validate the fields needed
 by implemented behavior, but optional fields outside that behavior may be

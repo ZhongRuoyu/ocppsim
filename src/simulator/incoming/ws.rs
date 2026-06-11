@@ -16,6 +16,12 @@ enum IncomingRequestSchemaValidation {
   MissingSchema,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncomingResponseSchemaValidation {
+  Valid,
+  MissingSchema,
+}
+
 impl Simulator {
   /// Handles one inbound WebSocket frame and routes it by WS frame type.
   pub(in crate::simulator) async fn handle_ws_message(
@@ -88,8 +94,9 @@ impl Simulator {
         message_id,
         payload,
       } => {
-        self.log(UiLogLevel::Rx, format!("CALLRESULT {message_id}"));
-        self.handle_call_result(&message_id, &payload)?;
+        self
+          .handle_call_result_frame(write, &message_id, &payload)
+          .await?;
       }
       OcppFrame::CallError {
         message_id,
@@ -165,6 +172,39 @@ impl Simulator {
       );
     }
     self.handle_call_error(message_id, code, description)
+  }
+
+  async fn handle_call_result_frame(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+    payload: &Value,
+  ) -> Result<()> {
+    self.log(UiLogLevel::Rx, format!("CALLRESULT {message_id}"));
+    let Some((action, error)) =
+      self.strict_call_result_schema_error(message_id, payload)
+    else {
+      self.handle_call_result(message_id, payload)?;
+      return Ok(());
+    };
+
+    self.log(
+      UiLogLevel::Warn,
+      format!("Strict response schema validation failed for {action}: {error}"),
+    );
+    if self.config.protocol == OcppVersion::V2_1 {
+      self
+        .send_call_result_error(
+          write,
+          message_id,
+          OcppErrorCode::FormationViolation.as_str(),
+          &error,
+          json!({}),
+        )
+        .await?;
+    }
+    self.reject_call_result(message_id);
+    Ok(())
   }
 
   fn handle_call_result_error_frame(
@@ -355,12 +395,83 @@ impl Simulator {
 
     Err(anyhow!(errors.join("; ")))
   }
+
+  fn strict_call_result_schema_error(
+    &mut self,
+    message_id: &str,
+    payload: &Value,
+  ) -> Option<(String, String)> {
+    if !self.config.strict {
+      return None;
+    }
+    let pending = self.pending.as_ref()?;
+    if pending.message_id != message_id {
+      return None;
+    }
+    let action = pending.call.action.clone();
+
+    match self.validate_incoming_response_schema(&action, payload) {
+      Ok(IncomingResponseSchemaValidation::Valid) => None,
+      Ok(IncomingResponseSchemaValidation::MissingSchema) => {
+        self.log(
+          UiLogLevel::Warn,
+          format!(
+            "Strict schema coverage is missing for {} response {action}; \
+            payload validation skipped.",
+            self.config.protocol.label()
+          ),
+        );
+        None
+      }
+      Err(error) => Some((action, error.to_string())),
+    }
+  }
+
+  /// Validates an inbound CALLRESULT payload against the response schema.
+  fn validate_incoming_response_schema(
+    &mut self,
+    action: &str,
+    payload: &Value,
+  ) -> Result<IncomingResponseSchemaValidation> {
+    let protocol = self.config.protocol;
+    let cache_key = incoming_validator_cache_key(protocol, action);
+    let validator = match self.incoming_response_validators.entry(cache_key) {
+      Entry::Occupied(entry) => entry.into_mut(),
+      Entry::Vacant(entry) => {
+        let Some(schema_text) =
+          crate::embedded_schemas::incoming_response_schema_text(
+            protocol, action,
+          )
+        else {
+          return Ok(IncomingResponseSchemaValidation::MissingSchema);
+        };
+        let schema: Value = serde_json::from_str(schema_text)?;
+        let validator = jsonschema::validator_for(&schema)?;
+        entry.insert(validator)
+      }
+    };
+
+    let errors = validator
+      .iter_errors(payload)
+      .take(5)
+      .map(|error| error.to_string())
+      .collect::<Vec<_>>();
+    if errors.is_empty() {
+      return Ok(IncomingResponseSchemaValidation::Valid);
+    }
+
+    Err(anyhow!(errors.join("; ")))
+  }
 }
 
 fn incoming_request_validator_cache_key(
   protocol: OcppVersion,
   action: &str,
 ) -> String {
+  incoming_validator_cache_key(protocol, action)
+}
+
+fn incoming_validator_cache_key(protocol: OcppVersion, action: &str) -> String {
   format!("{}:{action}", protocol.subprotocol())
 }
 

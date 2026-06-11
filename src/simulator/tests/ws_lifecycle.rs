@@ -1264,6 +1264,90 @@ async fn strict_mode_caches_request_schema_validator_per_action() {
 }
 
 #[tokio::test]
+async fn strict_mode_rejects_schema_invalid_v1_6_call_result() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.config.strict = true;
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect("start transaction");
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send start transaction");
+  let OcppFrame::Call { message_id, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALL frame");
+  };
+
+  simulator
+    .handle_ws_text(
+      build_call_result(
+        &message_id,
+        &json!({
+          "idTagInfo": { "status": "Accepted" }
+        }),
+      ),
+      &mut write,
+    )
+    .await
+    .expect("handle invalid response");
+
+  assert!(simulator.pending.is_none());
+  assert!(simulator.connector_ref(1).unwrap().transaction.is_none());
+  assert_eq!(
+    simulator.connector_ref(1).unwrap().status,
+    ConnectorStatus::Available
+  );
+}
+
+#[tokio::test]
+async fn strict_mode_sends_call_result_error_for_invalid_v2_1_response() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
+  simulator.config.strict = true;
+  simulator.connected = true;
+  simulator.enqueue_boot_notification();
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send boot");
+  let OcppFrame::Call { message_id, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALL frame");
+  };
+
+  simulator
+    .handle_ws_text(
+      build_call_result(&message_id, &json!({ "status": "Accepted" })),
+      &mut write,
+    )
+    .await
+    .expect("handle invalid response");
+
+  let OcppFrame::CallResultError {
+    message_id: error_message_id,
+    code,
+    ..
+  } = read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLRESULTERROR frame");
+  };
+  assert_eq!(error_message_id, message_id);
+  assert_eq!(code, "FormationViolation");
+  assert!(simulator.pending.is_none());
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Accepted
+  );
+  assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
 async fn strict_mode_warns_when_request_schema_is_missing() {
   let (frame, simulator, events) = capture_inbound_call_response_with_events(
     OcppVersion::V1_6,

@@ -25,7 +25,7 @@ use crate::ocpp::{
   OcppVersion, OutgoingAction, ReadingContext, ResponseStatus,
   StatusNotificationErrorCode, StopReason, TransactionTriggerReason,
   TriggerMessage_V1_6, TriggerMessage_V2_X, VariableAttributeType, build_call,
-  build_call_error, build_call_result, parse_frame,
+  build_call_error, build_call_result, build_call_result_error, parse_frame,
 };
 use crate::sensitive::redact_url_secrets;
 
@@ -380,6 +380,7 @@ impl Simulator {
       ui_tx,
       self_cmd_tx,
       incoming_request_validators: BTreeMap::new(),
+      incoming_response_validators: BTreeMap::new(),
       connectors,
       configuration,
       reservations: BTreeMap::new(),
@@ -889,13 +890,13 @@ impl Simulator {
         "Timed out waiting for response to {action} (messageId={message_id})."
       ),
     );
-    self.handle_pending_timeout_context(&context);
+    self.handle_pending_failure_context(&context);
     self.pending = None;
     self.emit_runtime_state();
   }
 
-  /// Restores local state for pending calls that timed out before a response.
-  fn handle_pending_timeout_context(&mut self, context: &PendingContext) {
+  /// Restores local state for pending calls that failed before a valid response.
+  fn handle_pending_failure_context(&mut self, context: &PendingContext) {
     let result = match context {
       PendingContext::StartTxV1_6 {
         connector,
@@ -944,7 +945,7 @@ impl Simulator {
     if let Err(error) = result {
       self.log(
         UiLogLevel::Error,
-        format!("Failed to apply timeout rollback: {error}"),
+        format!("Failed to apply pending response rollback: {error}"),
       );
     }
   }

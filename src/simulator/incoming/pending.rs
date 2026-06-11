@@ -33,6 +33,33 @@ impl Simulator {
     Ok(())
   }
 
+  /// Rejects a schema-invalid CALLRESULT without applying response side effects.
+  pub(in crate::simulator) fn reject_call_result(&mut self, message_id: &str) {
+    let Some(pending) = &self.pending else {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "Unexpected invalid CALLRESULT {message_id} (no pending request)."
+        ),
+      );
+      return;
+    };
+    if pending.message_id != message_id {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "Invalid CALLRESULT {} does not match pending {}.",
+          message_id, pending.message_id
+        ),
+      );
+      return;
+    }
+
+    let pending = self.pending.take().expect("pending exists");
+    self.handle_pending_failure_context(&pending.call.context);
+    self.emit_runtime_state();
+  }
+
   /// Handles CALLERROR for the current pending request and performs rollback.
   pub(in crate::simulator) fn handle_call_error(
     &mut self,

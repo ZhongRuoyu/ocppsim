@@ -2,8 +2,8 @@ use super::super::{
   ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
   OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
   SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel,
-  Value, WsMessageSink, build_call_error, build_call_result, json,
-  sanitized_trace_frame_text,
+  Value, WsMessageSink, build_call_error, build_call_result,
+  build_call_result_error, json, sanitized_trace_frame_text,
 };
 use crate::sensitive::{redact_url_secrets, sanitize_log_text};
 
@@ -79,6 +79,26 @@ impl Simulator {
         text,
         UiLogLevel::Tx,
         format!("CALLERROR {message_id} {code}"),
+      )
+      .await
+  }
+
+  /// Sends a CALLRESULTERROR frame for an invalid inbound CALLRESULT.
+  pub(in crate::simulator) async fn send_call_result_error(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+    code: &str,
+    description: &str,
+    details: Value,
+  ) -> Result<()> {
+    let text = build_call_result_error(message_id, code, description, &details);
+    self
+      .send_text(
+        write,
+        text,
+        UiLogLevel::Tx,
+        format!("CALLRESULTERROR {message_id} {code}"),
       )
       .await
   }

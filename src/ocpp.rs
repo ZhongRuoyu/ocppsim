@@ -1839,6 +1839,23 @@ pub fn build_call_error(
   .to_string()
 }
 
+/// Builds a CALLRESULTERROR frame string (`[5, messageId, code, desc, details]`).
+pub fn build_call_result_error(
+  message_id: &str,
+  code: &str,
+  description: &str,
+  details: &Value,
+) -> String {
+  json!([
+    OcppMessageTypeId::CallResultError.value(),
+    message_id,
+    code,
+    description,
+    details
+  ])
+  .to_string()
+}
+
 /// Validates and normalizes the payload object field of an OCPP frame.
 ///
 /// `null` is accepted and converted to an empty object for convenience.

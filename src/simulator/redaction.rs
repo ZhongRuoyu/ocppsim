@@ -3,8 +3,8 @@ use serde_json::Value;
 use crate::sensitive::{REDACTED_VALUE, redact_text_secrets};
 
 use super::{
-  OcppFrame, build_call, build_call_error, build_call_result, json,
-  normalize_identifier, parse_frame,
+  OcppFrame, build_call, build_call_error, build_call_result,
+  build_call_result_error, json, normalize_identifier, parse_frame,
 };
 
 pub(in crate::simulator) fn sanitized_trace_frame_text(text: &str) -> String {
@@ -30,13 +30,18 @@ pub(in crate::simulator) fn sanitized_trace_frame(frame: &OcppFrame) -> String {
       code,
       description,
       details,
-    }
-    | OcppFrame::CallResultError {
+    } => build_call_error(
+      message_id,
+      code,
+      description,
+      &redact_sensitive_fields(details),
+    ),
+    OcppFrame::CallResultError {
       message_id,
       code,
       description,
       details,
-    } => build_call_error(
+    } => build_call_result_error(
       message_id,
       code,
       description,
