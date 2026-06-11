@@ -1,7 +1,7 @@
 /// Dispatches a fallible handler that returns `Result<ResponseStatus>`.
 ///
 /// On success, sends a CALLRESULT with a `{ "status": "..." }` payload.
-/// On error, sends a `FormationViolation` CALLERROR.
+/// On error, sends the protocol-specific format-violation CALLERROR.
 macro_rules! dispatch_status {
   ($self:ident, $write:ident, $mid:ident, $handler:expr) => {
     match $handler {
@@ -20,7 +20,7 @@ macro_rules! dispatch_status {
       }
       Err(error) => {
         $self
-          .send_formation_violation($write, $mid, &error.to_string())
+          .send_format_violation($write, $mid, &error.to_string())
           .await?;
       }
     }
@@ -30,7 +30,7 @@ macro_rules! dispatch_status {
 /// Dispatches a fallible handler that returns `Result<Value>`.
 ///
 /// On success, sends the `Value` as a CALLRESULT payload.
-/// On error, sends a `FormationViolation` CALLERROR.
+/// On error, sends the protocol-specific format-violation CALLERROR.
 macro_rules! dispatch_response {
   ($self:ident, $write:ident, $mid:ident, $handler:expr) => {
     match $handler {
@@ -39,7 +39,7 @@ macro_rules! dispatch_response {
       }
       Err(error) => {
         $self
-          .send_formation_violation($write, $mid, &error.to_string())
+          .send_format_violation($write, $mid, &error.to_string())
           .await?;
       }
     }

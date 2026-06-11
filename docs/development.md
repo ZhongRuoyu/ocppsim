@@ -39,8 +39,8 @@ and avoid fragile ad hoc JSON construction.
 
 Keep request extractors side-effect free.
 Inbound handlers should validate required fields before mutating simulator
-state, so malformed supported requests can return `FormationViolation` without
-partial state changes.
+state, so malformed supported requests can return the protocol-specific
+format-violation error code without partial state changes.
 
 When adding or expanding an OCPP action, update the whole vertical slice:
 
@@ -65,7 +65,8 @@ The separate entry points make later differences local.
 `--strict` and the `strict` TOML item enable inbound CALL payload validation
 against checked-in schemas under `schemas/`.
 Strict mode runs before protocol-specific dispatch and returns
-`FormationViolation` when the payload does not match the request schema.
+`FormationViolation` on OCPP 1.6 or `FormatViolation` on OCPP 2.x when the
+payload does not match the request schema.
 
 Keep strict mode optional.
 The default mode remains pragmatic for CSMS development: handlers validate the

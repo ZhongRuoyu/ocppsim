@@ -309,9 +309,11 @@ conformance before any URI scheme is considered.
 
 The simulator validates required fields before mutating state for supported
 inbound flows.
-Malformed CALL payloads for supported actions receive `FormationViolation`
+Malformed CALL payloads for supported actions receive format-violation
 CALLERROR responses instead of falling back to connector zero, empty strings,
 or silent no-op behavior.
+The wire error code is `FormationViolation` for OCPP 1.6 and
+`FormatViolation` for OCPP 2.x.
 Malformed OCPP frames that cannot be parsed receive `ProtocolError`.
 Inbound CSMS `CALL` and OCPP 2.1 `SEND` message ids are tracked for the active
 WebSocket connection.
@@ -394,12 +396,12 @@ Strict mode can be enabled with `--strict`, global `strict = true`, or
 per-charge-point `strict = true`.
 When enabled, inbound CALL payloads are validated against the checked-in
 request schema before simulator dispatch.
-Schema-invalid requests return `FormationViolation` without mutating simulator
-state.
+Schema-invalid requests return `FormationViolation` on OCPP 1.6 or
+`FormatViolation` on OCPP 2.x without mutating simulator state.
 Matching inbound CALLRESULT payloads are validated against the checked-in
 response schema before response side effects are applied.
 Schema-invalid responses are not applied; OCPP 2.1 also sends
-`CALLRESULTERROR` with `FormationViolation`.
+`CALLRESULTERROR` with `FormatViolation`.
 
 Without strict mode, supported inbound actions still validate the fields needed
 by implemented behavior, but optional fields outside that behavior may be

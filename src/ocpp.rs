@@ -1097,12 +1097,22 @@ wire_enum! {
     ProtocolError => "ProtocolError",
     SecurityError => "SecurityError",
     FormationViolation => "FormationViolation",
+    FormatViolation => "FormatViolation",
     PropertyConstraintViolation => "PropertyConstraintViolation",
     OccurrenceConstraintViolation => "OccurrenceConstraintViolation",
     TypeConstraintViolation => "TypeConstraintViolation",
     GenericError => "GenericError",
     MessageTypeNotSupported => "MessageTypeNotSupported",
     RpcFrameworkError => "RpcFrameworkError",
+  }
+}
+
+impl OcppErrorCode {
+  pub const fn format_violation_for(protocol: OcppVersion) -> Self {
+    match protocol {
+      OcppVersion::V1_6 => Self::FormationViolation,
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => Self::FormatViolation,
+    }
   }
 }
 

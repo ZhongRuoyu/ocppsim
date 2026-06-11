@@ -260,8 +260,8 @@ URL-contained credentials.
 Use `--strict` or profile `strict = true` when you want inbound CSMS requests
 and responses validated against the checked-in JSON schemas before simulator
 dispatch or response side effects.
-Strict mode returns `FormationViolation` for schema-invalid inbound CALL
-payloads.
+Strict mode returns `FormationViolation` on OCPP 1.6 and `FormatViolation` on
+OCPP 2.x for schema-invalid inbound CALL payloads.
 Schema-invalid CALLRESULT payloads are not applied, and OCPP 2.1 also receives
 `CALLRESULTERROR`.
 
@@ -313,8 +313,8 @@ If a command appears to do nothing, check the connection state first.
 Commands that send OCPP messages require an active WebSocket connection;
 offline local commands only update simulator state.
 
-If the CSMS rejects remote requests with `FormationViolation`, inspect the raw
-frame with `--trace-frames`.
+If the CSMS rejects remote requests with `FormationViolation` on OCPP 1.6 or
+`FormatViolation` on OCPP 2.x, inspect the raw frame with `--trace-frames`.
 Supported inbound actions validate schema-required fields before mutating
 state, including connector or EVSE ids, reservation ids, trigger-message
 names, local-list versions, firmware locations, and smart-charging schedules.

@@ -246,7 +246,7 @@ impl Simulator {
         .send_call_result_error(
           write,
           message_id,
-          OcppErrorCode::FormationViolation.as_str(),
+          OcppErrorCode::format_violation_for(self.config.protocol).as_str(),
           &error,
           json!({}),
         )
@@ -349,7 +349,7 @@ impl Simulator {
             format!("Strict schema validation failed for {action}: {error}"),
           );
           self
-            .send_formation_violation(write, message_id, &error.to_string())
+            .send_format_violation(write, message_id, &error.to_string())
             .await?;
           return Ok(());
         }
@@ -388,7 +388,7 @@ impl Simulator {
         Ok(value) => value,
         Err(error) => {
           self
-            .send_formation_violation(write, message_id, &error.to_string())
+            .send_format_violation(write, message_id, &error.to_string())
             .await?;
           return Ok(true);
         }

@@ -103,8 +103,8 @@ impl Simulator {
       .await
   }
 
-  /// Sends a `FormationViolation` CALLERROR for invalid inbound payloads.
-  pub(in crate::simulator) async fn send_formation_violation(
+  /// Sends the protocol-specific format-violation CALLERROR.
+  pub(in crate::simulator) async fn send_format_violation(
     &mut self,
     write: &mut impl WsMessageSink,
     message_id: &str,
@@ -114,7 +114,7 @@ impl Simulator {
       .send_call_error(
         write,
         message_id,
-        OcppErrorCode::FormationViolation.as_str(),
+        OcppErrorCode::format_violation_for(self.config.protocol).as_str(),
         description,
         json!({}),
       )

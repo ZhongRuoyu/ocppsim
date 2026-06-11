@@ -15,6 +15,13 @@ type TestWsStream = WebSocketStream<DuplexStream>;
 type TestWsWrite = SplitSink<TestWsStream, Message>;
 type TestWsRead = SplitStream<TestWsStream>;
 
+fn format_violation_code(protocol: OcppVersion) -> &'static str {
+  match protocol {
+    OcppVersion::V1_6 => "FormationViolation",
+    OcppVersion::V2_0_1 | OcppVersion::V2_1 => "FormatViolation",
+  }
+}
+
 async fn in_memory_ws_pair()
 -> (TestWsWrite, TestWsRead, TestWsWrite, TestWsRead) {
   let (client, server) = duplex(64 * 1024);
@@ -842,7 +849,7 @@ async fn malformed_request_start_v2_x_returns_call_error() {
       let OcppFrame::CallError { code, .. } = frame else {
         panic!("expected CALLERROR frame");
       };
-      assert_eq!(code, "FormationViolation");
+      assert_eq!(code, format_violation_code(protocol));
       assert!(
         simulator
           .connectors
@@ -1089,7 +1096,7 @@ async fn malformed_request_stop_v2_x_returns_call_error() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(
       simulator
         .connectors
@@ -1100,7 +1107,7 @@ async fn malformed_request_stop_v2_x_returns_call_error() {
 }
 
 #[tokio::test]
-async fn malformed_supported_requests_return_formation_violation() {
+async fn malformed_supported_requests_return_format_violation_code() {
   let mut cases = vec![
     (
       OcppVersion::V1_6,
@@ -1145,7 +1152,7 @@ async fn malformed_supported_requests_return_formation_violation() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame for {action}");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(
       simulator
         .connectors
@@ -1281,7 +1288,7 @@ async fn strict_mode_rejects_schema_invalid_v2_x_requests() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(simulator.queue.is_empty());
   }
 }
@@ -1302,7 +1309,7 @@ async fn strict_mode_caches_request_schema_validator_per_action() {
   let OcppFrame::CallError { code, .. } = first_frame else {
     panic!("expected CALLERROR frame");
   };
-  assert_eq!(code, "FormationViolation");
+  assert_eq!(code, "FormatViolation");
 
   let cache_key = format!("{}:Reset", OcppVersion::V2_1.subprotocol());
   assert_eq!(simulator.incoming_request_validators.len(), 1);
@@ -1321,7 +1328,7 @@ async fn strict_mode_caches_request_schema_validator_per_action() {
   let OcppFrame::CallError { code, .. } = second_frame else {
     panic!("expected CALLERROR frame");
   };
-  assert_eq!(code, "FormationViolation");
+  assert_eq!(code, "FormatViolation");
   assert_eq!(simulator.incoming_request_validators.len(), 1);
   assert!(
     simulator
@@ -1405,7 +1412,7 @@ async fn strict_mode_sends_call_result_error_for_invalid_v2_1_response() {
     panic!("expected CALLRESULTERROR frame");
   };
   assert_eq!(error_message_id, message_id);
-  assert_eq!(code, "FormationViolation");
+  assert_eq!(code, "FormatViolation");
   assert!(simulator.pending.is_none());
   assert_eq!(
     simulator.boot_registration_status,
@@ -1474,7 +1481,7 @@ async fn non_strict_mode_rejects_data_transfer_without_vendor_id() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(simulator.queue.is_empty());
   }
 }
@@ -1531,7 +1538,7 @@ async fn non_strict_mode_rejects_malformed_clear_charging_profile_v2_x() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(simulator.queue.is_empty());
   }
 }
@@ -1551,7 +1558,7 @@ async fn non_strict_mode_rejects_non_integer_clear_charging_profile_id_v2_x() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(simulator.queue.is_empty());
   }
 }
@@ -1605,7 +1612,7 @@ async fn non_strict_mode_rejects_set_charging_profile_without_limit_v2_x() {
     let OcppFrame::CallError { code, .. } = frame else {
       panic!("expected CALLERROR frame");
     };
-    assert_eq!(code, "FormationViolation");
+    assert_eq!(code, format_violation_code(protocol));
     assert!(!simulator.charging_profiles.contains_key(&1));
   }
 }

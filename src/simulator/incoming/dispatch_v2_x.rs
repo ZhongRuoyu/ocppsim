@@ -223,7 +223,7 @@ impl Simulator {
       Ok(value) => value,
       Err(error) => {
         return self
-          .send_formation_violation(write, message_id, &error.to_string())
+          .send_format_violation(write, message_id, &error.to_string())
           .await;
       }
     };
@@ -304,7 +304,7 @@ impl Simulator {
       Ok(value) => value,
       Err(error) => {
         return self
-          .send_formation_violation(write, message_id, &error.to_string())
+          .send_format_violation(write, message_id, &error.to_string())
           .await;
       }
     };
@@ -337,7 +337,7 @@ impl Simulator {
       Ok(value) => value,
       Err(error) => {
         return self
-          .send_formation_violation(write, message_id, &error.to_string())
+          .send_format_violation(write, message_id, &error.to_string())
           .await;
       }
     };
@@ -353,7 +353,7 @@ impl Simulator {
       Ok(status) => self.send_status_response(write, message_id, status).await,
       Err(error) => {
         self
-          .send_formation_violation(write, message_id, &error.to_string())
+          .send_format_violation(write, message_id, &error.to_string())
           .await
       }
     }
