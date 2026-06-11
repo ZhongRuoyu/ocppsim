@@ -61,6 +61,8 @@ type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
+const DEFAULT_BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_BOOT_RETRY_INTERVAL: Duration = Duration::from_hours(24);
 
 #[derive(PartialEq, Eq)]
 struct BootRegistrationScope {
@@ -150,6 +152,7 @@ async fn handle_connected_loop_step(
   tokio::select! {
     _ = timeout_tick.tick() => {
       simulator.check_pending_timeout();
+      simulator.check_boot_retry();
     }
     maybe_command = cmd_rx.recv() => {
       handle_connected_command_result(
@@ -409,6 +412,7 @@ impl Simulator {
       heartbeat: None,
       connected: false,
       boot_registration_status: BootRegistrationStatus::Accepted,
+      boot_retry_after: None,
     }
   }
 
@@ -472,12 +476,87 @@ impl Simulator {
   }
 
   fn enqueue_boot_with_registration_state(&mut self) -> Result<()> {
+    if let Some(remaining) = self.boot_retry_remaining() {
+      self.log_boot_retry_wait(remaining);
+      return Ok(());
+    }
+    self.enqueue_boot_ignoring_retry_interval()
+  }
+
+  fn enqueue_boot_ignoring_retry_interval(&mut self) -> Result<()> {
     self.ensure_outbound_queue_capacity(
       OutgoingAction::BootNotification.as_str(),
     )?;
-    self.boot_registration_status = BootRegistrationStatus::AwaitingResponse;
-    self.enqueue_boot_notification();
+    self.queue_boot_with_registration_state();
     Ok(())
+  }
+
+  fn queue_boot_with_registration_state(&mut self) {
+    self.boot_registration_status = BootRegistrationStatus::AwaitingResponse;
+    self.boot_retry_after = None;
+    self.enqueue_boot_notification();
+  }
+
+  fn outbound_queue_has_capacity(&self) -> bool {
+    let limit = self.config.outbound_queue_limit;
+    limit == 0 || self.queue.len() < limit
+  }
+
+  pub(in crate::simulator) fn enqueue_triggered_boot_notification(&mut self) {
+    if self.outbound_queue_has_capacity() {
+      self.queue_boot_with_registration_state();
+    } else {
+      self.enqueue_boot_notification();
+    }
+  }
+
+  fn boot_retry_remaining(&self) -> Option<Duration> {
+    self
+      .boot_retry_after
+      .and_then(|retry_after| {
+        retry_after.checked_duration_since(Instant::now())
+      })
+      .filter(|remaining| !remaining.is_zero())
+  }
+
+  fn log_boot_retry_wait(&mut self, remaining: Duration) {
+    self.log(
+      UiLogLevel::Warn,
+      format!(
+        "BootNotification retry interval has not expired; retry in {}s.",
+        remaining.as_secs().max(1)
+      ),
+    );
+  }
+
+  fn boot_request_pending_or_queued(&self) -> bool {
+    self.pending.as_ref().is_some_and(|pending| {
+      pending.call.action == OutgoingAction::BootNotification.as_str()
+    }) || self
+      .queue
+      .iter()
+      .any(|queued| queued.action == OutgoingAction::BootNotification.as_str())
+  }
+
+  fn check_boot_retry(&mut self) {
+    if !self.connected
+      || self.boot_retry_remaining().is_some()
+      || self.boot_request_pending_or_queued()
+      || !self.outbound_queue_has_capacity()
+      || matches!(
+        self.boot_registration_status,
+        BootRegistrationStatus::Accepted
+          | BootRegistrationStatus::AwaitingResponse
+      )
+    {
+      return;
+    }
+
+    self.log(
+      UiLogLevel::Info,
+      "BootNotification retry interval expired; retrying.",
+    );
+    self.queue_boot_with_registration_state();
   }
 
   pub(in crate::simulator) fn post_boot_ocpp_requests_allowed(&self) -> bool {
@@ -686,6 +765,7 @@ impl Simulator {
   fn reset_boot_registration_state(&mut self) {
     self.boot_registration_status = BootRegistrationStatus::Rejected;
     self.last_boot_notification_payload = None;
+    self.boot_retry_after = None;
   }
 
   fn has_connection_target(&self) -> bool {
@@ -818,6 +898,8 @@ impl Simulator {
 
     if self.should_enqueue_boot_on_connect() {
       self.enqueue_boot_with_registration_state()?;
+    } else if let Some(remaining) = self.boot_retry_remaining() {
+      self.log_boot_retry_wait(remaining);
     } else {
       self.log(
         UiLogLevel::Info,
@@ -831,8 +913,9 @@ impl Simulator {
   }
 
   fn should_enqueue_boot_on_connect(&self) -> bool {
-    self.boot_registration_status != BootRegistrationStatus::Accepted
-      || self.boot_notification_changed()
+    self.boot_retry_remaining().is_none()
+      && (self.boot_registration_status != BootRegistrationStatus::Accepted
+        || self.boot_notification_changed())
   }
 
   /// Builds the final WebSocket URL, appending charge point ID when enabled.

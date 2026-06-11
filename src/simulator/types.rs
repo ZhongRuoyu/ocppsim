@@ -546,6 +546,7 @@ pub(in crate::simulator) struct Simulator {
   pub(in crate::simulator) heartbeat: Option<HeartbeatTask>,
   pub(in crate::simulator) connected: bool,
   pub(in crate::simulator) boot_registration_status: BootRegistrationStatus,
+  pub(in crate::simulator) boot_retry_after: Option<Instant>,
 }
 
 /// Normalizes free-form identifier text for case-insensitive matching.

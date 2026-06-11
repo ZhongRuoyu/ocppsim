@@ -3,10 +3,10 @@ use std::collections::btree_map::Entry;
 use crate::ocpp::OcppMessageTypeId;
 
 use super::super::{
-  Message, OcppErrorCode, OcppFrame, OcppVersion, Result, Simulator, SinkExt,
-  UiLogLevel, Value, WsMessageSink, anyhow, build_call_error, json,
-  parse_frame, sanitized_trace_details, sanitized_trace_frame,
-  sanitized_trace_payload,
+  BootRegistrationStatus, Message, OcppErrorCode, OcppFrame, OcppVersion,
+  Result, Simulator, SinkExt, UiLogLevel, Value, WsMessageSink, anyhow,
+  build_call_error, json, parse_frame, sanitized_trace_details,
+  sanitized_trace_frame, sanitized_trace_payload,
 };
 use super::request::CompositeScheduleRequestV1_6;
 
@@ -85,6 +85,18 @@ impl Simulator {
         action,
         payload,
       } => {
+        if self.config.protocol == OcppVersion::V1_6
+          && self.boot_registration_status == BootRegistrationStatus::Rejected
+        {
+          self.log(
+            UiLogLevel::Warn,
+            format!(
+              "Ignoring inbound CALL {action} while BootNotification is \
+              Rejected."
+            ),
+          );
+          return Ok(());
+        }
         if !self
           .accept_unique_inbound_call_id(write, &message_id)
           .await?

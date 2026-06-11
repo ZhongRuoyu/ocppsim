@@ -1860,6 +1860,27 @@ async fn non_strict_mode_keeps_pragmatic_v2_x_request_handling() {
 }
 
 #[tokio::test]
+async fn rejected_v1_6_registration_ignores_inbound_calls_without_response() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.boot_registration_status = BootRegistrationStatus::Rejected;
+
+  simulator
+    .handle_ws_text(
+      build_call("blocked", "GetConfiguration", &json!({})),
+      &mut write,
+    )
+    .await
+    .expect("handle inbound call");
+
+  let read_result =
+    tokio::time::timeout(Duration::from_millis(20), server_read.next()).await;
+  assert!(read_result.is_err());
+  assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
 async fn trigger_message_v1_6_enqueues_requested_simulator_calls() {
   let (v1_6_frame, v1_6_simulator) = capture_inbound_call_response(
     OcppVersion::V1_6,

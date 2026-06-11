@@ -1,8 +1,11 @@
+use std::time::Instant;
+
 use super::super::{
-  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, PendingContext,
-  REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator, StopReason,
-  TransactionEventRequest, TransactionTriggerReason, TxEventType, UiLogLevel,
-  Value, authorize_status,
+  BootRegistrationStatus, ConfigurationKey, ConnectorStatus,
+  DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, OcppVersion,
+  PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator,
+  StopReason, TransactionEventRequest, TransactionTriggerReason, TxEventType,
+  UiLogLevel, Value, authorize_status,
 };
 
 impl Simulator {
@@ -106,16 +109,25 @@ impl Simulator {
       ),
     );
     self.apply_boot_registration_status(status);
-    if status == ResponseStatus::Accepted
-      && let Some(seconds) = interval
-    {
-      self.apply_boot_heartbeat_interval(seconds);
-    }
     if status == ResponseStatus::Accepted {
+      self.boot_retry_after = None;
+      if let Some(seconds) = interval {
+        self.apply_boot_heartbeat_interval(seconds);
+      }
       self.enqueue_boot_status_notifications()?;
       self.enqueue_pending_security_event_notifications();
+    } else if self.config.protocol == OcppVersion::V1_6 {
+      self.apply_v1_6_boot_retry_interval(interval);
     }
     Ok(())
+  }
+
+  fn apply_v1_6_boot_retry_interval(&mut self, interval: Option<u64>) {
+    let retry_interval = interval
+      .filter(|seconds| *seconds > 0)
+      .map_or(DEFAULT_BOOT_RETRY_INTERVAL, std::time::Duration::from_secs)
+      .min(MAX_BOOT_RETRY_INTERVAL);
+    self.boot_retry_after = Instant::now().checked_add(retry_interval);
   }
 
   fn apply_boot_registration_status(&mut self, status: ResponseStatus) {

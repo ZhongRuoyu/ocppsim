@@ -629,6 +629,7 @@ fn change_availability_v1_6_requires_connector_id() {
 #[test]
 fn accepted_boot_result_enqueues_v1_6_status_for_charge_point_and_connectors() {
   let mut simulator = simulator_for_tests();
+  simulator.boot_retry_after = Some(Instant::now() + Duration::from_secs(10));
 
   simulator
     .apply_call_result_context(
@@ -644,12 +645,14 @@ fn accepted_boot_result_enqueues_v1_6_status_for_charge_point_and_connectors() {
     simulator.boot_registration_status,
     BootRegistrationStatus::Accepted
   );
+  assert!(simulator.boot_retry_after.is_none());
   assert_eq!(queued_status_connector_ids(&simulator), vec![0, 1, 2]);
 }
 
 #[test]
 fn rejected_boot_result_does_not_enqueue_initial_status_notifications() {
   let mut simulator = simulator_for_tests();
+  simulator.connected = true;
 
   simulator
     .apply_call_result_context(
@@ -666,7 +669,19 @@ fn rejected_boot_result_does_not_enqueue_initial_status_notifications() {
     simulator.boot_registration_status,
     BootRegistrationStatus::Rejected
   );
+  assert!(simulator.boot_retry_after.is_some());
+  assert!(!simulator.should_enqueue_boot_on_connect());
   assert!(simulator.queue.is_empty());
+
+  simulator
+    .handle_common_command(SimulatorCommand::Boot, true)
+    .expect("boot command");
+
+  assert!(simulator.queue.is_empty());
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Rejected
+  );
 }
 
 #[test]
@@ -688,7 +703,57 @@ fn pending_boot_result_keeps_v1_6_registration_pending() {
     simulator.boot_registration_status,
     BootRegistrationStatus::Pending
   );
+  assert!(simulator.boot_retry_after.is_some());
   assert!(simulator.queue.is_empty());
+}
+
+#[test]
+fn expired_boot_retry_interval_enqueues_v1_6_boot_retry() {
+  let mut simulator = simulator_for_tests();
+  simulator.connected = true;
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+  simulator.boot_retry_after = Some(
+    Instant::now()
+      .checked_sub(Duration::from_secs(1))
+      .expect("retry instant"),
+  );
+
+  simulator.check_boot_retry();
+
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::AwaitingResponse
+  );
+  assert!(simulator.boot_retry_after.is_none());
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("BootNotification")
+  );
+}
+
+#[test]
+fn trigger_message_boot_bypasses_v1_6_retry_interval() {
+  let mut simulator = simulator_for_tests();
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+  simulator.boot_retry_after = Some(Instant::now() + Duration::from_secs(10));
+
+  let status = simulator
+    .trigger_message_v1_6_standard(
+      crate::ocpp::TriggerMessage_V1_6::BootNotification,
+      None,
+    )
+    .expect("trigger boot");
+
+  assert_eq!(status, ResponseStatus::Accepted);
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::AwaitingResponse
+  );
+  assert!(simulator.boot_retry_after.is_none());
+  assert_eq!(
+    simulator.queue.front().map(|call| call.action.as_str()),
+    Some("BootNotification")
+  );
 }
 
 #[test]
