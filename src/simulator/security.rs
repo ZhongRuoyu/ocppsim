@@ -64,7 +64,7 @@ impl Simulator {
             "Security profile {profile} requires a basic auth password."
           ));
         }
-        self.validated_basic_auth_identity(profile)?;
+        self.validate_basic_auth_url_identity(profile, url)?;
       }
       3 => {
         if self.config.client_cert_path.is_none()
@@ -116,6 +116,36 @@ impl Simulator {
       ));
     }
     Ok(cp_id)
+  }
+
+  fn validate_basic_auth_url_identity(
+    &self,
+    profile: u8,
+    url: &Url,
+  ) -> Result<()> {
+    let cp_id = self.validated_basic_auth_identity(profile)?;
+    let url_identity = final_path_segment(url).ok_or_else(|| {
+      anyhow!(
+        "Security profile {profile} requires an OCPP-J URL path identity \
+        matching the charge point ID."
+      )
+    })?;
+    let Some(decoded_identity) = percent_decode_path_segment(url_identity)
+    else {
+      return Err(anyhow!(
+        "Security profile {profile} requires a valid UTF-8 OCPP-J URL path \
+        identity."
+      ));
+    };
+
+    if decoded_identity == cp_id {
+      return Ok(());
+    }
+
+    Err(anyhow!(
+      "Security profile {profile} requires the Basic Auth username to match \
+      the final OCPP-J URL path identity."
+    ))
   }
 
   pub(in crate::simulator) fn tls_connector(
@@ -974,6 +1004,39 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
   let mut reader = BufReader::new(File::open(path)?);
   rustls_pemfile::private_key(&mut reader)?
     .ok_or_else(|| anyhow!("No private key found in {}.", path.display()))
+}
+
+fn final_path_segment(url: &Url) -> Option<&str> {
+  url.path_segments()?.next_back()
+}
+
+fn percent_decode_path_segment(segment: &str) -> Option<String> {
+  let source = segment.as_bytes();
+  let mut bytes = Vec::with_capacity(source.len());
+  let mut index = 0;
+
+  while index < source.len() {
+    if source[index] == b'%' {
+      let high = hex_value(*source.get(index + 1)?)?;
+      let low = hex_value(*source.get(index + 2)?)?;
+      bytes.push((high << 4) | low);
+      index += 3;
+    } else {
+      bytes.push(source[index]);
+      index += 1;
+    }
+  }
+
+  String::from_utf8(bytes).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+  match value {
+    b'0'..=b'9' => Some(value - b'0'),
+    b'a'..=b'f' => Some(value - b'a' + 10),
+    b'A'..=b'F' => Some(value - b'A' + 10),
+    _ => None,
+  }
 }
 
 fn is_central_system_root_certificate_type(certificate_type: &str) -> bool {

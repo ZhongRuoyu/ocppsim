@@ -35,6 +35,8 @@ For OCPP 2.0.1 and 2.1, ids are limited to 48 characters and cannot contain
 `:`.
 The `:` character is also rejected for Security Profile 1 and 2 because HTTP
 Basic authentication uses it to separate the username from the password.
+When Security Profile 1 or 2 is active, the final URL path identity must match
+the charge point ID used as the Basic Auth username.
 
 Some other useful flags include:
 

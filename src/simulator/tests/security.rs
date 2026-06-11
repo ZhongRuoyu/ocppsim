@@ -902,7 +902,7 @@ fn sign_certificate_v2_1_ignores_dropped_queue_entries() {
 async fn local_tls_setup_failure_does_not_record_security_event() {
   let path = write_temp_security_file("not a certificate");
   let mut simulator = simulator_for_tests();
-  simulator.config.ws_url = Some("wss://127.0.0.1:9/ocpp".to_string());
+  simulator.config.ws_url = Some("wss://127.0.0.1:9/ocpp/CP-TEST".to_string());
   simulator.config.ca_cert_path = Some(path.clone());
   simulator.security.security_profile = Some(2);
   simulator.security.basic_auth_password =
@@ -978,7 +978,8 @@ fn security_profile_transport_validation_and_basic_auth() {
   simulator.security.basic_auth_password =
     Some("0123456789abcdef0123456789abcdef".to_string());
 
-  let ws_url = url::Url::parse("ws://localhost:9000/ocpp").expect("ws url");
+  let ws_url =
+    url::Url::parse("ws://localhost:9000/ocpp/CP-TEST").expect("ws url");
   let secure_url =
     url::Url::parse("wss://localhost:9000/ocpp").expect("wss url");
   assert!(simulator.validate_connection_security(&ws_url).is_ok());
@@ -993,6 +994,31 @@ fn security_profile_transport_validation_and_basic_auth() {
       .to_str()
       .expect("header string")
       .starts_with("Basic ")
+  );
+}
+
+#[test]
+fn basic_auth_identity_must_match_final_url_path() {
+  let mut simulator = simulator_for_tests();
+  simulator.security.security_profile = Some(1);
+  simulator.security.basic_auth_password =
+    Some("0123456789abcdef0123456789abcdef".to_string());
+
+  let matching =
+    url::Url::parse("ws://localhost:9000/ocpp/CP-TEST").expect("matching url");
+  let encoded =
+    url::Url::parse("ws://localhost:9000/ocpp/%43P-TEST").expect("encoded url");
+  let mismatched =
+    url::Url::parse("ws://localhost:9000/ocpp/OTHER").expect("mismatched url");
+
+  assert!(simulator.validate_connection_security(&matching).is_ok());
+  assert!(simulator.validate_connection_security(&encoded).is_ok());
+  assert!(
+    simulator
+      .validate_connection_security(&mismatched)
+      .expect_err("identity mismatch should fail")
+      .to_string()
+      .contains("Basic Auth username")
   );
 }
 
