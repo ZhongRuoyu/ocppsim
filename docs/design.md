@@ -10,14 +10,11 @@ The event loop bridges three streams of work:
 ## Runtime Model
 
 The Tokio runtime owns one `Simulator` value for the active session.
-The simulator stores connector state, local transactions, meter values,
-reservations, scheduled availability changes, charging profiles,
-configuration entries, pending CALL context, and an outbound queue.
-Security-related simulator state is stored beside the common state: selected
-security profile, in-memory synthetic certificates, recent security events,
-and certificate/log/firmware limits.
-Security events also track notification delivery state so they can be replayed
-after reconnect until the CSMS acknowledges them.
+The simulator stores protocol-neutral operating state, pending CALL context,
+and an outbound queue.
+Feature-specific state, such as reservations, charging profiles, certificates,
+and security events, lives beside the connector and transaction state so the
+same event loop can coordinate cross-cutting workflows.
 
 When connected, the loop sends the next queued CALL only when there is no
 pending request.
@@ -33,6 +30,8 @@ The WebSocket handshake requires the CSMS to negotiate the configured OCPP-J
 subprotocol token.
 A missing or mismatched `Sec-WebSocket-Protocol` response fails the connection
 instead of silently continuing with an ambiguous protocol version.
+See [`ocpp-support.md`](ocpp-support.md) for the exact support behavior behind
+these runtime paths.
 
 ## Protocol Dispatch
 
@@ -40,36 +39,13 @@ Inbound CALL frames are parsed into OCPP-J frame types, then dispatched by the
 configured protocol version.
 The WebSocket reader caps inbound messages at 1 MiB, and the OCPP-J frame parser
 enforces the specification's 36-character `messageId` limit before dispatch.
-Inbound CSMS `CALL` and OCPP 2.1 `SEND` message ids are tracked for the active
-connection so duplicate requests cannot apply state changes twice.
-Duplicate `CALL` ids receive `OccurrenceConstraintViolation`; duplicate `SEND`
-ids are logged and dropped because `SEND` is unconfirmed.
 OCPP 1.6 and OCPP 2.x have separate dispatch modules because action names,
 payload shapes, and response statuses differ.
-Typed request extractors validate required fields before mutating simulator
-state for state-changing flows such as remote start, remote stop, and
-availability changes, plus supported connector-addressed flows such as
-reservations, local-list updates, unlock requests, trigger messages, firmware
-updates, and smart-charging requests.
-Malformed supported payloads return `FormationViolation` instead of defaulting
-missing identifiers.
-OCPP 1.6 standard `TriggerMessage` and security `ExtendedTriggerMessage` use
-separate parsers so security-extension triggers are not accepted on the base
-action in non-strict mode.
-
-When strict mode is enabled through `--strict` or profile `strict = true`,
-inbound CALL payloads are also validated against the checked-in request schemas
-before dispatch.
-Matching CSMS CALLRESULT payloads are validated against response schemas before
-their side effects are applied.
-Strict request schema failures return `FormationViolation`; strict response
-schema failures are not applied, and OCPP 2.1 receives `CALLRESULTERROR`.
-
-The 2.x dispatcher intentionally supports only the common subset that maps to
-the simulator's implemented behavior plus overlapping certificate and security
-flows.
-Known but unsupported 2.x actions return `NotSupported`; unknown action names
-return `NotImplemented`.
+Typed request extractors stay side-effect free until required fields have been
+validated, which lets handlers reject malformed supported requests without
+partial state changes.
+Duplicate-message handling, strict validation, and action support are support
+semantics documented in [`ocpp-support.md`](ocpp-support.md).
 
 ## State And Workflows
 
@@ -78,29 +54,14 @@ Outbound workflow methods translate that state into version-specific OCPP
 payloads at enqueue time.
 OCPP 1.6 uses `StartTransaction` and `StopTransaction`; OCPP 2.0.1 and OCPP
 2.1 use `TransactionEvent`.
-Transaction starts are accepted only for known connectors that are currently
-startable.
-Reserved, unavailable, faulted, occupied, or finishing connectors reject new
-starts.
-Already-active connectors reject local starts and OCPP 1.6 remote starts.
-For OCPP 2.x `RequestStartTransaction`, an already-active requested EVSE is
-accepted with the existing `transactionId`, matching the schema intent for a
-transaction that began before the request arrived.
-When a remote start omits a connector or EVSE, the simulator chooses the first
-startable connector.
+Transaction workflows keep enough pending context to roll back, finish, or
+advance local state after the corresponding CSMS response, error, or timeout.
 
 `ChangeAvailability` requests that make an active connector inoperative are
-stored as scheduled changes.
-The scheduled state is applied after the active transaction stops and is
-acknowledged, then a status notification is queued.
-Online start and stop workflows queue status notifications only after the
-outbound CALL result, CALLERROR, or timeout has finalized local state.
-This keeps status payloads from reporting stale intermediate states such as
-`Finishing` after the transaction has been restored or completed.
+stored as scheduled changes so connector transitions can be resolved after the
+active transaction finishes.
 Availability changes and post-transaction cleanup share connector transition
-helpers so reservations and scheduled availability are resolved consistently.
-Duplicate reservation ids are rejected so one reservation cannot orphan a
-previous connector in `Reserved` state.
+helpers, which keeps reservations and scheduled availability coordinated.
 
 Configuration is stored as a map of OCPP 1.6-style keys.
 OCPP 1.6 exposes that map through `GetConfiguration` and
@@ -108,32 +69,18 @@ OCPP 1.6 exposes that map through `GetConfiguration` and
 OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
 `GetVariables` and `SetVariables` for component `ChargingStation` or
 `SecurityCtrlr`.
-The OCPP 2.1 `NetworkConfiguration` component is intentionally outside the
-current simulator model; OCPP 2.1 Basic Auth changes use the legacy-compatible
-`SecurityCtrlr` variable path.
-Security password values are write-only: they can be changed, but
-`GetConfiguration` and `GetVariables` do not return the secret value.
+The mapping table and unsupported variable scope live in
+[`ocpp-support.md`](ocpp-support.md).
 
 Accepted `BootNotification` responses update the local `HeartbeatInterval`
 configuration value and start or restart periodic heartbeats with the interval
 returned by the CSMS.
-For OCPP 1.6 and OCPP 2.x, station-initiated requests remain gated until boot
-registration is accepted.
-Reconnects skip `BootNotification` when registration is already accepted and the
-boot payload is unchanged since the previous connection.
-Manual `boot` commands and trigger-message boot requests still enqueue an
-immediate `BootNotification`.
 
 Smart charging stores one effective profile per connector.
 The simulator applies the first supported limit value to connector state and
 composite schedules.
-A missing profile is represented separately from a zero limit: no profile makes
-composite schedule requests return `Rejected`, while a zero limit is accepted
-and suspends an active connector.
-`ClearChargingProfile` honors connector/EVSE, profile ID, purpose, and stack
-level filters against that simplified store, but it does not model full
-profile stacking, recurrency, validity windows, sales tariff data, phase
-constraints, or time-window precedence.
+Support limits for starts, boot gating, reservations, smart charging, and
+composite schedules are documented in [`ocpp-support.md`](ocpp-support.md).
 
 Each local connector is modeled as one OCPP 2.x EVSE with `connectorId = 1`.
 This keeps 1.6 connector addressing and 2.x EVSE addressing aligned for the
@@ -142,42 +89,22 @@ Supporting multiple physical connectors per EVSE would require a richer EVSE
 model and separate connector state beneath each EVSE.
 
 Security extension behavior is modeled at the simulator boundary.
-Transport profile validation checks URL schemes, Basic Auth password format,
-and profile 3 certificate/key configuration before connecting.
 When CA or client certificate paths are provided, the connection uses a custom
 rustls connector with WebPKI roots plus the configured PEM files.
 Configured CA and client certificate/key paths are treated as the OCPP-level
 certificate prerequisites for security-profile upgrades, because those files
 are the real transport trust and identity material used by rustls.
-Secure connection setup failures record a local
-`InvalidCentralSystemCertificate` security event when the selected profile uses
-TLS.
-Accepted password changes and higher OCPP 1.6 security profile changes request
-a disconnect/reconnect after the CALLRESULT is sent.
-Profile-upgrade reconnect failure restores the previous profile and attempts a
-fallback reconnect.
-Security events remain pending until their `SecurityEventNotification` receives
-a CALLRESULT.
-Disconnect and security reconnect paths reset queued but unacknowledged events
-so they are sent again after the next successful connection.
-Retained security events are capped by `security-event-limit`; sent events are
-discarded before unsent events when trimming is needed.
 Certificate-management actions maintain deterministic synthetic certificate
 hashes in memory so install, list, and delete flows are stable across tests
 without adding full certificate parsing to simulator state.
-`AdditionalRootCertificateCheck` is modeled as a Central System root plus one
-fallback root; the simulator does not verify the real signing relationship
-between those roots.
 Signed firmware and log actions enqueue the expected status-notification
-sequence, enforce configured URI schemes, and record clear invalid-value events,
-but they do not download or upload files, verify firmware binaries, perform
-OCSP/CRL checks, or generate real CSRs.
-The original OCPP 1.6 `UpdateFirmware` action returns CALLERROR
-`NotSupported`; OCPP 1.6 security firmware testing uses
-`SignedUpdateFirmware`.
+sequence without adding file transfer or cryptographic verification to the core
+runtime.
 Trace-frame logging runs through parsed-frame redaction before emitting logs,
 so known password, ID token, and URL-contained credential values are not
 printed in frame traces.
+Detailed security support, retention, and firmware limitations are documented in
+[`ocpp-support.md`](ocpp-support.md).
 
 ## Terminal UI
 
@@ -210,20 +137,9 @@ before being mapped to wire values.
 ## Schema Validation
 
 Checked-in JSON schemas under [`schemas/`](../schemas/) are the source of truth
-for tests.
-Representative payload tests validate outbound requests for OCPP 1.6, OCPP
-2.0.1, and OCPP 2.1.
-Supported inbound CALL response payloads are validated against a schema matrix
-for all three protocol families, and strict mode validates runtime CSMS
-responses before applying side effects.
-Additional regression tests cover malformed inbound remote-start and
-request-start requests, stricter supported-action payload parsing,
-subprotocol negotiation, scheduled availability, duplicate reservations,
-transaction-start eligibility, timeout rollback, final status notification
-sequencing, filtered charging-profile clearing, certificate install/list/delete,
-write-only security configuration, signed-firmware security events, malformed
-WebSocket frames, and local mock CSMS WebSocket boot plus
-remote-start/meter/remote-stop lifecycles.
+for payload validation tests.
+Runtime strict-validation behavior is documented in
+[`ocpp-support.md`](ocpp-support.md).
 
 Version-specific builders and tests are kept even when the current payloads are
 identical.
