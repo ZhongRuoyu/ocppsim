@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -530,6 +530,7 @@ pub(in crate::simulator) struct Simulator {
     BTreeMap<String, jsonschema::Validator>,
   pub(in crate::simulator) incoming_response_validators:
     BTreeMap<String, jsonschema::Validator>,
+  pub(in crate::simulator) incoming_message_ids: BTreeSet<String>,
   pub(in crate::simulator) connectors: BTreeMap<u16, ConnectorState>,
   pub(in crate::simulator) configuration:
     BTreeMap<ConfigurationKey, ConfigurationEntry>,

@@ -85,6 +85,12 @@ impl Simulator {
         action,
         payload,
       } => {
+        if !self
+          .accept_unique_inbound_call_id(write, &message_id)
+          .await?
+        {
+          return Ok(());
+        }
         self.log(UiLogLevel::Rx, format!("CALL {message_id} {action}"));
         self
           .handle_incoming_call(write, &message_id, &action, payload)
@@ -129,6 +135,9 @@ impl Simulator {
         action,
         payload,
       } => {
+        if !self.accept_unique_inbound_send_id(&message_id) {
+          return Ok(());
+        }
         self.handle_send_frame(&message_id, &action, &payload);
       }
       OcppFrame::Unsupported {
@@ -172,6 +181,46 @@ impl Simulator {
       );
     }
     self.handle_call_error(message_id, code, description)
+  }
+
+  async fn accept_unique_inbound_call_id(
+    &mut self,
+    write: &mut impl WsMessageSink,
+    message_id: &str,
+  ) -> Result<bool> {
+    if self.record_inbound_message_id(message_id) {
+      return Ok(true);
+    }
+    self.log_duplicate_inbound_message_id(message_id);
+    self
+      .send_call_error(
+        write,
+        message_id,
+        OcppErrorCode::OccurrenceConstraintViolation.as_str(),
+        "Duplicate OCPP messageId",
+        json!({}),
+      )
+      .await?;
+    Ok(false)
+  }
+
+  fn accept_unique_inbound_send_id(&mut self, message_id: &str) -> bool {
+    if self.record_inbound_message_id(message_id) {
+      return true;
+    }
+    self.log_duplicate_inbound_message_id(message_id);
+    false
+  }
+
+  fn record_inbound_message_id(&mut self, message_id: &str) -> bool {
+    self.incoming_message_ids.insert(message_id.to_string())
+  }
+
+  fn log_duplicate_inbound_message_id(&mut self, message_id: &str) {
+    self.log(
+      UiLogLevel::Warn,
+      format!("Duplicate inbound OCPP messageId {message_id}."),
+    );
   }
 
   async fn handle_call_result_frame(

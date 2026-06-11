@@ -313,6 +313,10 @@ Malformed CALL payloads for supported actions receive `FormationViolation`
 CALLERROR responses instead of falling back to connector zero, empty strings,
 or silent no-op behavior.
 Malformed OCPP frames that cannot be parsed receive `ProtocolError`.
+Inbound CSMS `CALL` and OCPP 2.1 `SEND` message ids are tracked for the active
+WebSocket connection.
+Duplicate `CALL` ids receive `OccurrenceConstraintViolation` before dispatch,
+and duplicate `SEND` ids are logged and dropped without mutating state.
 
 For OCPP 1.6 and OCPP 2.x, station-initiated OCPP messages are held until
 `BootNotification` is accepted.

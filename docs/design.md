@@ -40,6 +40,10 @@ Inbound CALL frames are parsed into OCPP-J frame types, then dispatched by the
 configured protocol version.
 The WebSocket reader caps inbound messages at 1 MiB, and the OCPP-J frame parser
 enforces the specification's 36-character `messageId` limit before dispatch.
+Inbound CSMS `CALL` and OCPP 2.1 `SEND` message ids are tracked for the active
+connection so duplicate requests cannot apply state changes twice.
+Duplicate `CALL` ids receive `OccurrenceConstraintViolation`; duplicate `SEND`
+ids are logged and dropped because `SEND` is unconfirmed.
 OCPP 1.6 and OCPP 2.x have separate dispatch modules because action names,
 payload shapes, and response statuses differ.
 Typed request extractors validate required fields before mutating simulator

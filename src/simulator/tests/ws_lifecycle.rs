@@ -321,6 +321,73 @@ async fn older_protocol_rejects_send_message_type() {
 }
 
 #[tokio::test]
+async fn duplicate_inbound_call_ids_return_call_error_without_dispatch() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  let frame = build_call(
+    "duplicate-message",
+    "RemoteStartTransaction",
+    &json!({ "idTag": "TOKEN" }),
+  );
+
+  simulator
+    .handle_ws_text(frame.clone(), &mut write)
+    .await
+    .expect("handle first request");
+
+  let OcppFrame::CallResult { payload, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
+  assert_eq!(simulator.queue.len(), 1);
+
+  simulator
+    .handle_ws_text(frame, &mut write)
+    .await
+    .expect("handle duplicate request");
+
+  let OcppFrame::CallError { code, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "OccurrenceConstraintViolation");
+  assert_eq!(simulator.queue.len(), 1);
+}
+
+#[tokio::test]
+async fn duplicate_inbound_send_ids_are_logged_and_dropped() {
+  let (mut write, read, _server_write, _server_read) =
+    in_memory_ws_pair().await;
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V2_1);
+  let frame = json!([6, "duplicate-send", "NotifyEvent", {}]).to_string();
+
+  simulator
+    .handle_ws_text(frame.clone(), &mut write)
+    .await
+    .expect("handle first send");
+  simulator
+    .handle_ws_text(frame, &mut write)
+    .await
+    .expect("handle duplicate send");
+  drop(write);
+  drop(read);
+
+  assert_eq!(simulator.incoming_message_ids.len(), 1);
+  let messages = drain_log_messages(&mut ui_rx);
+  assert!(
+    messages
+      .iter()
+      .any(|message| message.contains("Duplicate inbound OCPP messageId")),
+    "duplicate SEND log missing: {messages:?}"
+  );
+}
+
+#[tokio::test]
 async fn trace_frames_redacts_set_variables_basic_auth_password() {
   let password = "0123456789abcdef0123456789abcdef";
   let frame = build_call(

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
@@ -381,6 +381,7 @@ impl Simulator {
       self_cmd_tx,
       incoming_request_validators: BTreeMap::new(),
       incoming_response_validators: BTreeMap::new(),
+      incoming_message_ids: BTreeSet::new(),
       connectors,
       configuration,
       reservations: BTreeMap::new(),
@@ -775,6 +776,7 @@ impl Simulator {
     self.connected = true;
     self.pending = None;
     self.queue.clear();
+    self.incoming_message_ids.clear();
     self.log(
       UiLogLevel::Info,
       format!("Connected. Negotiated WebSocket subprotocol: {negotiated}"),
