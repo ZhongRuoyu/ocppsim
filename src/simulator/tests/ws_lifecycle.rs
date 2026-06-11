@@ -890,11 +890,30 @@ async fn remote_start_v1_6_applies_charging_profile_after_authorize() {
 #[tokio::test]
 async fn malformed_request_start_v2_x_returns_call_error() {
   let malformed_payloads = [
-    json!({ "idToken": { "idToken": "TOKEN" } }),
-    json!({ "remoteStartId": 11, "idToken": {} }),
+    json!({
+      "idToken": {
+        "idToken": "TOKEN",
+        "type": "Central"
+      }
+    }),
     json!({
       "remoteStartId": 11,
-      "idToken": { "idToken": "TOKEN" },
+      "idToken": {
+        "idToken": "TOKEN"
+      }
+    }),
+    json!({
+      "remoteStartId": 11,
+      "idToken": {
+        "type": "Central"
+      }
+    }),
+    json!({
+      "remoteStartId": 11,
+      "idToken": {
+        "idToken": "TOKEN",
+        "type": "Central"
+      },
       "evseId": "bad"
     }),
   ];
@@ -936,7 +955,10 @@ async fn request_start_stop_v2_x_rejected_until_boot_accepted() {
         "RequestStartTransaction",
         json!({
           "remoteStartId": 12,
-          "idToken": { "idToken": "TOKEN" },
+          "idToken": {
+            "idToken": "TOKEN",
+            "type": "Central"
+          },
           "evseId": 1
         }),
       )
@@ -1012,7 +1034,10 @@ async fn request_start_v2_x_applies_charging_profile() {
       "RequestStartTransaction",
       json!({
         "remoteStartId": 12,
-        "idToken": { "idToken": "TOKEN" },
+        "idToken": {
+          "idToken": "TOKEN",
+          "type": "Central"
+        },
         "evseId": 1,
         "chargingProfile": profile.clone()
       }),
@@ -1069,7 +1094,10 @@ async fn request_start_v2_x_accepts_not_yet_authorized_active_evse() {
         "RequestStartTransaction",
         json!({
           "remoteStartId": 12,
-          "idToken": { "idToken": "TOKEN" },
+          "idToken": {
+            "idToken": "TOKEN",
+            "type": "Central"
+          },
           "evseId": 1
         }),
       )
@@ -1126,7 +1154,10 @@ async fn request_start_v2_x_rejects_authorized_active_evse() {
         "RequestStartTransaction",
         json!({
           "remoteStartId": 13,
-          "idToken": { "idToken": "TOKEN" },
+          "idToken": {
+            "idToken": "TOKEN",
+            "type": "Central"
+          },
           "evseId": 1
         }),
       )
@@ -1862,7 +1893,10 @@ async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
         "RequestStartTransaction",
         json!({
           "remoteStartId": 99,
-          "idToken": { "idToken": "TOKEN" },
+          "idToken": {
+            "idToken": "TOKEN",
+            "type": "Central"
+          },
           "evseId": 1
         }),
       )

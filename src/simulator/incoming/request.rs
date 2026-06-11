@@ -46,11 +46,13 @@ pub(in crate::simulator) struct RequestStartTransactionRequest_V2_X {
 
 impl RequestStartTransactionRequest_V2_X {
   pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+    let id_token =
+      required_nested_string_field(payload, "idToken", "idToken")?.to_string();
+    let _ = required_nested_string_field(payload, "idToken", "type")?;
     Ok(Self {
       connector: optional_u16_field(payload, "evseId")?,
       remote_start_id: required_i64_field(payload, "remoteStartId")?,
-      id_token: required_nested_string_field(payload, "idToken", "idToken")?
-        .to_string(),
+      id_token,
       charging_profile: optional_object_field(payload, "chargingProfile")?,
     })
   }
