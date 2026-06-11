@@ -22,8 +22,10 @@ use super::{
 use base64::Engine as _;
 use http::HeaderValue;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{ClientConfig, RootCertStore};
+use rustls::{ClientConfig, PeerIncompatible, RootCertStore};
 use tokio_tungstenite::Connector;
+use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::error::TlsError;
 use url::Url;
 
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
@@ -173,13 +175,63 @@ impl Simulator {
 
   pub(in crate::simulator) fn record_secure_connection_failure(
     &mut self,
-    error: &dyn std::fmt::Display,
+    error: &WsError,
   ) {
-    if matches!(self.security.security_profile, Some(2 | 3)) {
-      self.record_security_event(
-        "InvalidCentralSystemCertificate",
-        Some(format!("Secure connection setup failed: {error}")),
-      );
+    let Some(event_type) = self.secure_connection_failure_event_type(error)
+    else {
+      return;
+    };
+    self.record_security_event(
+      event_type,
+      Some(format!("Secure connection setup failed: {error}")),
+    );
+  }
+
+  fn secure_connection_failure_event_type(
+    &self,
+    error: &WsError,
+  ) -> Option<&'static str> {
+    if !matches!(self.security.security_profile, Some(2 | 3)) {
+      return None;
+    }
+    match error {
+      WsError::Tls(TlsError::Rustls(error)) => {
+        self.rustls_security_event_type(error)
+      }
+      _ => None,
+    }
+  }
+
+  fn rustls_security_event_type(
+    &self,
+    error: &rustls::Error,
+  ) -> Option<&'static str> {
+    match error {
+      rustls::Error::InvalidCertificate(_)
+      | rustls::Error::NoCertificatesPresented
+      | rustls::Error::UnsupportedNameType => {
+        Some(self.invalid_csms_certificate_event_type())
+      }
+      rustls::Error::PeerIncompatible(reason) => match reason {
+        PeerIncompatible::ServerDoesNotSupportTls12Or13
+        | PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig
+        | PeerIncompatible::Tls12NotOffered
+        | PeerIncompatible::Tls12NotOfferedOrEnabled => {
+          Some("InvalidTLSVersion")
+        }
+        PeerIncompatible::NoCipherSuitesInCommon => {
+          Some("InvalidTLSCipherSuite")
+        }
+        _ => None,
+      },
+      _ => None,
+    }
+  }
+
+  fn invalid_csms_certificate_event_type(&self) -> &'static str {
+    match self.config.protocol {
+      OcppVersion::V1_6 => "InvalidCentralSystemCertificate",
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => "InvalidCsmsCertificate",
     }
   }
 

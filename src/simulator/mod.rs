@@ -333,7 +333,6 @@ async fn reconnect_after_security_change(
         UiLogLevel::Error,
         format!("Reconnect after security parameter change failed: {error}"),
       );
-      simulator.record_secure_connection_failure(&error);
       if let SecurityProfileFallback::Restore(fallback) =
         plan.fallback_security_profile
       {
@@ -785,10 +784,7 @@ impl Simulator {
     );
     let connector = match self.tls_connector() {
       Ok(connector) => connector,
-      Err(error) => {
-        self.record_secure_connection_failure(&error);
-        return Err(error);
-      }
+      Err(error) => return Err(error),
     };
     let ws_config = Some(websocket_config());
     let connection_result = if connector.is_some() {

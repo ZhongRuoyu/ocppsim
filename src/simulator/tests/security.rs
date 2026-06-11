@@ -899,7 +899,7 @@ fn sign_certificate_v2_1_ignores_dropped_queue_entries() {
 }
 
 #[tokio::test]
-async fn secure_connection_setup_failure_records_local_security_event() {
+async fn local_tls_setup_failure_does_not_record_security_event() {
   let path = write_temp_security_file("not a certificate");
   let mut simulator = simulator_for_tests();
   simulator.config.ws_url = Some("wss://127.0.0.1:9/ocpp".to_string());
@@ -910,15 +910,65 @@ async fn secure_connection_setup_failure_records_local_security_event() {
 
   let result = simulator.connect().await;
   assert!(result.is_err());
-  assert!(
-    simulator
-      .security
-      .events
-      .iter()
-      .any(|event| { event.event_type == "InvalidCentralSystemCertificate" })
-  );
+  assert!(simulator.security.events.is_empty());
 
   let _ = fs::remove_file(path);
+}
+
+#[test]
+fn secure_connection_certificate_failure_records_version_specific_event() {
+  for (protocol, event_type) in [
+    (OcppVersion::V1_6, "InvalidCentralSystemCertificate"),
+    (OcppVersion::V2_0_1, "InvalidCsmsCertificate"),
+    (OcppVersion::V2_1, "InvalidCsmsCertificate"),
+  ] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.security.security_profile = Some(2);
+    let error = rustls_websocket_error(rustls::Error::InvalidCertificate(
+      rustls::CertificateError::UnknownIssuer,
+    ));
+
+    simulator.record_secure_connection_failure(&error);
+
+    assert_eq!(simulator.security.events.len(), 1);
+    assert_eq!(simulator.security.events[0].event_type, event_type);
+  }
+}
+
+#[test]
+fn secure_connection_tls_failures_record_specific_security_events() {
+  let mut simulator = simulator_for_tests();
+  simulator.security.security_profile = Some(2);
+  let version_error = rustls_websocket_error(rustls::Error::PeerIncompatible(
+    rustls::PeerIncompatible::ServerDoesNotSupportTls12Or13,
+  ));
+  let cipher_error = rustls_websocket_error(rustls::Error::PeerIncompatible(
+    rustls::PeerIncompatible::NoCipherSuitesInCommon,
+  ));
+
+  simulator.record_secure_connection_failure(&version_error);
+  simulator.record_secure_connection_failure(&cipher_error);
+
+  assert_eq!(simulator.security.events.len(), 2);
+  assert_eq!(simulator.security.events[0].event_type, "InvalidTLSVersion");
+  assert_eq!(
+    simulator.security.events[1].event_type,
+    "InvalidTLSCipherSuite"
+  );
+}
+
+#[test]
+fn secure_connection_non_tls_failure_does_not_record_security_event() {
+  let mut simulator = simulator_for_tests();
+  simulator.security.security_profile = Some(2);
+  let error = tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+    std::io::ErrorKind::ConnectionRefused,
+    "refused",
+  ));
+
+  simulator.record_secure_connection_failure(&error);
+
+  assert!(simulator.security.events.is_empty());
 }
 
 #[test]
@@ -959,6 +1009,14 @@ fn write_temp_security_file(content: &str) -> PathBuf {
   ));
   fs::write(&path, content).expect("write temp file");
   path
+}
+
+fn rustls_websocket_error(
+  error: rustls::Error,
+) -> tokio_tungstenite::tungstenite::Error {
+  tokio_tungstenite::tungstenite::Error::Tls(
+    tokio_tungstenite::tungstenite::error::TlsError::Rustls(Box::new(error)),
+  )
 }
 
 fn always_read_only_security_keys() -> [ConfigurationKey; 3] {
