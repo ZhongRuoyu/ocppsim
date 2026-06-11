@@ -161,13 +161,15 @@ impl Simulator {
       return Ok(ResponseStatus::Rejected);
     };
 
-    let limit = Self::extract_profile_limit(profile);
+    let Some(limit) = Self::extract_profile_limit(profile) else {
+      return Err(anyhow!(
+        "charging profile must include one numeric limit value."
+      ));
+    };
     for target in targets {
       self.charging_profiles.insert(target, profile.clone());
-      if let Some(limit_value) = limit {
-        self.set_offered_limit(target, Some(limit_value))?;
-        self.apply_charging_profile_state(target)?;
-      }
+      self.set_offered_limit(target, Some(limit))?;
+      self.apply_charging_profile_state(target)?;
     }
     Ok(ResponseStatus::Accepted)
   }

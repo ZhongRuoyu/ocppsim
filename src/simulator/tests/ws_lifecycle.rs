@@ -1406,6 +1406,60 @@ async fn non_strict_mode_rejects_non_integer_clear_charging_profile_id_v2_x() {
 }
 
 #[tokio::test]
+async fn non_strict_mode_rejects_set_charging_profile_without_limit_v1_6() {
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "SetChargingProfile",
+    json!({
+      "connectorId": 1,
+      "csChargingProfiles": {
+        "chargingSchedule": {
+          "chargingSchedulePeriod": [
+            { "startPeriod": 0 }
+          ]
+        }
+      }
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallError { code, .. } = frame else {
+    panic!("expected CALLERROR frame");
+  };
+  assert_eq!(code, "FormationViolation");
+  assert!(!simulator.charging_profiles.contains_key(&1));
+}
+
+#[tokio::test]
+async fn non_strict_mode_rejects_set_charging_profile_without_limit_v2_x() {
+  for protocol in v2_x_protocols() {
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "SetChargingProfile",
+      json!({
+        "evseId": 1,
+        "chargingProfile": {
+          "chargingSchedule": [
+            {
+              "chargingSchedulePeriod": [
+                { "startPeriod": 0 }
+              ]
+            }
+          ]
+        }
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallError { code, .. } = frame else {
+      panic!("expected CALLERROR frame");
+    };
+    assert_eq!(code, "FormationViolation");
+    assert!(!simulator.charging_profiles.contains_key(&1));
+  }
+}
+
+#[tokio::test]
 async fn non_strict_mode_keeps_pragmatic_v2_x_request_handling() {
   for protocol in v2_x_protocols() {
     let (frame, _) =
