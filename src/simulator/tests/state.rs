@@ -175,6 +175,25 @@ fn boot_state_is_unchanged_when_queue_is_full() {
 }
 
 #[test]
+fn reconnect_boot_depends_on_registration_and_payload_changes() {
+  let mut simulator = simulator_for_tests();
+  assert!(simulator.should_enqueue_boot_on_connect());
+
+  simulator.enqueue_boot_notification();
+  simulator.queue.clear();
+  simulator.boot_registration_status = BootRegistrationStatus::Accepted;
+
+  assert!(!simulator.should_enqueue_boot_on_connect());
+
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+  assert!(simulator.should_enqueue_boot_on_connect());
+
+  simulator.boot_registration_status = BootRegistrationStatus::Accepted;
+  simulator.config.firmware = "1.2.3".to_string();
+  assert!(simulator.should_enqueue_boot_on_connect());
+}
+
+#[test]
 fn trace_frame_redacts_network_profile_secrets() {
   let frame = json!([
     2,

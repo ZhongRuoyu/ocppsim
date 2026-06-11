@@ -136,8 +136,9 @@ Logs are printed into normal terminal scrollback, so they can be selected with
 the mouse and remain available after `ocppsim` exits.
 
 - `status`: show current simulator state.
-- `connect`: open the configured WebSocket target and enqueue boot/status
-  messages.
+- `connect`: open the configured WebSocket target.
+  A new `BootNotification` is sent when registration is not accepted yet or the
+  boot payload changed since the previous connection.
 - `connect <profile>`: load a profile and connect to its WebSocket target.
 - `connect <ws-url> <cp-id>`: connect to a direct WebSocket target.
 - `disconnect`: close the active WebSocket connection.

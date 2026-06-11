@@ -392,6 +392,7 @@ impl Simulator {
       pending: None,
       next_message_id: 1,
       next_tx_id: 1,
+      last_boot_notification_payload: None,
       heartbeat: None,
       connected: false,
       boot_registration_status: BootRegistrationStatus::Accepted,
@@ -782,11 +783,23 @@ impl Simulator {
       format!("Connected. Negotiated WebSocket subprotocol: {negotiated}"),
     );
 
-    self.enqueue_boot_with_registration_state()?;
+    if self.should_enqueue_boot_on_connect() {
+      self.enqueue_boot_with_registration_state()?;
+    } else {
+      self.log(
+        UiLogLevel::Info,
+        "Skipping BootNotification on reconnect; boot payload is unchanged.",
+      );
+    }
     self.emit_snapshot();
 
     let (write, read) = stream.split();
     Ok(Connection { write, read })
+  }
+
+  fn should_enqueue_boot_on_connect(&self) -> bool {
+    self.boot_registration_status != BootRegistrationStatus::Accepted
+      || self.boot_notification_changed()
   }
 
   /// Builds the final WebSocket URL, appending charge point ID when enabled.

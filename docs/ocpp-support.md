@@ -322,6 +322,10 @@ For OCPP 1.6 and OCPP 2.x, station-initiated OCPP messages are held until
 `BootNotification` is accepted.
 For OCPP 1.6, `Pending` and `Rejected` registration states block
 station-initiated requests until a later accepted boot response.
+Reconnects send `BootNotification` only when registration is not accepted yet or
+the current boot payload differs from the last queued boot payload.
+Manual `boot` commands and trigger-message boot requests still send
+`BootNotification` immediately.
 Inbound `RequestStartTransaction` and `RequestStopTransaction` requests are
 rejected while boot registration is pending, rejected, or awaiting a response.
 

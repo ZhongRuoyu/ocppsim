@@ -542,6 +542,7 @@ pub(in crate::simulator) struct Simulator {
   pub(in crate::simulator) pending: Option<PendingCall>,
   pub(in crate::simulator) next_message_id: u64,
   pub(in crate::simulator) next_tx_id: u64,
+  pub(in crate::simulator) last_boot_notification_payload: Option<Value>,
   pub(in crate::simulator) heartbeat: Option<HeartbeatTask>,
   pub(in crate::simulator) connected: bool,
   pub(in crate::simulator) boot_registration_status: BootRegistrationStatus,

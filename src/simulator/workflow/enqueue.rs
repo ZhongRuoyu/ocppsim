@@ -95,16 +95,22 @@ impl Simulator {
 
   /// Enqueues a protocol-version-specific `BootNotification` request.
   pub(in crate::simulator) fn enqueue_boot_notification(&mut self) {
-    let payload = match self.config.protocol {
-      OcppVersion::V1_6 => self.boot_notification_v1_6_payload(),
-      OcppVersion::V2_0_1 => self.boot_notification_v2_0_1_payload(),
-      OcppVersion::V2_1 => self.boot_notification_v2_1_payload(),
-    };
-    self.enqueue_call(
+    let payload = self.boot_notification_payload();
+    if self.enqueue_call(
       OutgoingAction::BootNotification.as_str(),
-      payload,
+      payload.clone(),
       PendingContext::Boot,
-    );
+    ) {
+      self.last_boot_notification_payload = Some(payload);
+    }
+  }
+
+  pub(in crate::simulator) fn boot_notification_changed(&self) -> bool {
+    let payload = self.boot_notification_payload();
+    self
+      .last_boot_notification_payload
+      .as_ref()
+      .is_none_or(|last_payload| last_payload != &payload)
   }
 
   /// Enqueues an `Authorize` request for the provided ID token.
@@ -403,6 +409,14 @@ impl Simulator {
       charge_point_model: &self.config.model,
       firmware_version: &self.config.firmware,
     })
+  }
+
+  fn boot_notification_payload(&self) -> Value {
+    match self.config.protocol {
+      OcppVersion::V1_6 => self.boot_notification_v1_6_payload(),
+      OcppVersion::V2_0_1 => self.boot_notification_v2_0_1_payload(),
+      OcppVersion::V2_1 => self.boot_notification_v2_1_payload(),
+    }
   }
 
   fn boot_notification_v2_0_1_payload(&self) -> Value {
