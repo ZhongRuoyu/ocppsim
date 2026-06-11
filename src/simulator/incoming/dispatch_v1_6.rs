@@ -293,7 +293,18 @@ impl Simulator {
       id_token,
       charging_profile,
     } = request;
-    let status = if self.authorize_remote_tx_requests() {
+    let status = if let Err(error) =
+      Self::validate_remote_start_charging_profile(charging_profile.as_ref())
+    {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "RemoteStartTransaction charging profile rejected on connector \
+          {connector}: {error}"
+        ),
+      );
+      ResponseStatus::Rejected
+    } else if self.authorize_remote_tx_requests() {
       if self
         .enqueue_remote_start_authorize_v1_6(
           connector,

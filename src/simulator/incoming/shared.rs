@@ -194,6 +194,21 @@ impl Simulator {
     ))
   }
 
+  /// Validates a remote-start charging profile before transaction side effects.
+  pub(in crate::simulator) fn validate_remote_start_charging_profile(
+    profile: Option<&Value>,
+  ) -> Result<()> {
+    let Some(profile) = profile else {
+      return Ok(());
+    };
+    if Self::extract_profile_limit(profile).is_some() {
+      return Ok(());
+    }
+    Err(anyhow!(
+      "charging profile must include one numeric limit value."
+    ))
+  }
+
   /// Builds target connectors for a charging-profile clear request.
   pub(in crate::simulator) fn clear_profile_targets(
     &self,

@@ -134,6 +134,7 @@ impl Simulator {
     id_token: String,
     charging_profile: Option<Value>,
   ) -> Result<()> {
+    Self::validate_remote_start_charging_profile(charging_profile.as_ref())?;
     let payload = Self::authorize_v1_6_payload(&id_token);
     self.try_enqueue_call(
       OutgoingAction::Authorize.as_str(),

@@ -482,6 +482,54 @@ fn remote_start_authorization_acceptance_starts_v1_6_transaction() {
 }
 
 #[test]
+fn remote_start_authorization_invalid_profile_does_not_start_v1_6() {
+  let mut simulator = simulator_for_tests();
+  let invalid_profile = json!({
+    "chargingProfileId": 1,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "chargingSchedule": {
+      "chargingRateUnit": "A",
+      "chargingSchedulePeriod": [{ "startPeriod": 0 }]
+    }
+  });
+  assert!(simulator.enqueue_call(
+    "Authorize",
+    json!({}),
+    PendingContext::RemoteStartAuthorizeV1_6 {
+      connector: 1,
+      id_token: "TOKEN".to_string(),
+      charging_profile: Some(invalid_profile),
+    },
+  ));
+  let authorize_call = simulator.queue.pop_front().expect("queued authorize");
+  simulator.pending = Some(PendingCall {
+    message_id: "auth-invalid-profile".to_string(),
+    sent_at: Instant::now(),
+    call: authorize_call,
+  });
+
+  simulator
+    .handle_call_result(
+      "auth-invalid-profile",
+      &json!({
+        "idTagInfo": { "status": "Accepted" }
+      }),
+    )
+    .expect("authorization acknowledgement should apply");
+
+  assert!(simulator.pending.is_none());
+  assert!(simulator.queue.is_empty());
+  assert!(simulator.charging_profiles.is_empty());
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+}
+
+#[test]
 fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
   let mut simulator = simulator_for_tests();
   simulator

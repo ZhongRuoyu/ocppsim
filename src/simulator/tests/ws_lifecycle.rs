@@ -729,6 +729,92 @@ async fn remote_start_v1_6_authorizes_before_start_when_configured() {
 }
 
 #[tokio::test]
+async fn remote_start_v1_6_rejects_invalid_profile_before_authorize() {
+  let profile = json!({
+    "chargingProfileId": 1,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "chargingSchedule": {
+      "chargingRateUnit": "A",
+      "chargingSchedulePeriod": [{ "startPeriod": 0 }]
+    }
+  });
+  let (frame, simulator) = capture_inbound_call_response(
+    OcppVersion::V1_6,
+    "RemoteStartTransaction",
+    json!({
+      "idTag": "TOKEN",
+      "chargingProfile": profile
+    }),
+  )
+  .await;
+
+  let OcppFrame::CallResult { payload, .. } = frame else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+  assert!(simulator.queue.is_empty());
+  assert!(simulator.charging_profiles.is_empty());
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+}
+
+#[tokio::test]
+async fn remote_start_v1_6_rejects_invalid_profile_before_immediate_start() {
+  let profile = json!({
+    "chargingProfileId": 1,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "chargingSchedule": {
+      "chargingRateUnit": "A",
+      "chargingSchedulePeriod": [{ "startPeriod": 0 }]
+    }
+  });
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  assert_eq!(
+    simulator.set_configuration_value(
+      ConfigurationKey::AuthorizeRemoteTxRequests,
+      "false",
+    ),
+    ResponseStatus::Accepted
+  );
+
+  simulator
+    .handle_incoming_call(
+      &mut write,
+      "test-message",
+      "RemoteStartTransaction",
+      json!({
+        "idTag": "TOKEN",
+        "chargingProfile": profile
+      }),
+    )
+    .await
+    .expect("handle remote start");
+
+  let OcppFrame::CallResult { payload, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+  assert!(simulator.queue.is_empty());
+  assert!(simulator.charging_profiles.is_empty());
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+}
+
+#[tokio::test]
 async fn remote_start_stop_v1_6_rejected_until_boot_accepted() {
   let (mut write, _read, _server_write, mut server_read) =
     in_memory_ws_pair().await;
@@ -1071,6 +1157,52 @@ async fn request_start_v2_x_applies_charging_profile() {
     );
     let status_payload = queued_payload(&simulator, "StatusNotification");
     assert_eq!(status_payload["connectorStatus"], json!("Occupied"));
+  }
+}
+
+#[tokio::test]
+async fn request_start_v2_x_rejects_invalid_profile_before_start() {
+  for protocol in v2_x_protocols() {
+    let profile = json!({
+      "id": 1,
+      "stackLevel": 0,
+      "chargingProfilePurpose": "TxProfile",
+      "chargingProfileKind": "Absolute",
+      "chargingSchedule": [
+        {
+          "id": 1,
+          "chargingRateUnit": "A",
+          "chargingSchedulePeriod": [{ "startPeriod": 0 }]
+        }
+      ]
+    });
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "RequestStartTransaction",
+      json!({
+        "remoteStartId": 12,
+        "idToken": {
+          "idToken": "TOKEN",
+          "type": "Central"
+        },
+        "evseId": 1,
+        "chargingProfile": profile
+      }),
+    )
+    .await;
+
+    let OcppFrame::CallResult { payload, .. } = frame else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+    assert!(simulator.queue.is_empty());
+    assert!(simulator.charging_profiles.is_empty());
+    assert!(
+      simulator
+        .connectors
+        .values()
+        .all(|connector| connector.transaction.is_none())
+    );
   }
 }
 

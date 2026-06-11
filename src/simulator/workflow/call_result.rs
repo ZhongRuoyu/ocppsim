@@ -179,6 +179,18 @@ impl Simulator {
       ),
     );
     if status == ResponseStatus::Accepted {
+      if let Err(error) =
+        Self::validate_remote_start_charging_profile(charging_profile)
+      {
+        self.log(
+          UiLogLevel::Warn,
+          format!(
+            "RemoteStartTransaction authorization accepted but charging \
+            profile was rejected on connector {connector}: {error}"
+          ),
+        );
+        return;
+      }
       if let Err(error) = self
         .start_transaction(connector, id_token.to_string(), true, None, true)
         .and_then(|()| {

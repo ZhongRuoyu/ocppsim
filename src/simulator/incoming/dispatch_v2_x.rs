@@ -277,7 +277,18 @@ impl Simulator {
       id_token,
       charging_profile,
     } = request;
-    let status = if self
+    let status = if let Err(error) =
+      Self::validate_remote_start_charging_profile(charging_profile.as_ref())
+    {
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "RequestStartTransaction charging profile rejected on EVSE \
+          {connector}: {error}"
+        ),
+      );
+      ResponseStatus::Rejected
+    } else if self
       .start_transaction(connector, id_token, true, Some(remote_start_id), true)
       .and_then(|()| {
         self.apply_remote_start_charging_profile(
