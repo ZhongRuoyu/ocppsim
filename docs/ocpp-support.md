@@ -331,8 +331,9 @@ transport settings clears cached registration state so the next connection
 sends `BootNotification` even when the boot payload is otherwise unchanged.
 Manual `boot` commands and trigger-message boot requests still send
 `BootNotification` immediately.
-Inbound `RequestStartTransaction` and `RequestStopTransaction` requests are
-rejected while boot registration is pending, rejected, or awaiting a response.
+Inbound `RemoteStartTransaction`, `RemoteStopTransaction`,
+`RequestStartTransaction`, and `RequestStopTransaction` requests are rejected
+while boot registration is pending, rejected, or awaiting a response.
 
 Transaction starts are accepted only on known, startable connectors.
 Unavailable, faulted, reserved, occupied, and finishing connectors reject

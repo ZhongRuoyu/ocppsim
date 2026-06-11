@@ -729,6 +729,67 @@ async fn remote_start_v1_6_authorizes_before_start_when_configured() {
 }
 
 #[tokio::test]
+async fn remote_start_stop_v1_6_rejected_until_boot_accepted() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.boot_registration_status = BootRegistrationStatus::Pending;
+
+  simulator
+    .handle_incoming_call_v1_6(
+      &mut write,
+      "start-before-boot",
+      "RemoteStartTransaction",
+      json!({ "connectorId": 1, "idTag": "TOKEN" }),
+    )
+    .await
+    .expect("handle remote start");
+
+  let OcppFrame::CallResult { payload, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| connector.transaction.is_none())
+  );
+  assert!(simulator.queue.is_empty());
+
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, false)
+    .expect("local transaction");
+
+  simulator
+    .handle_incoming_call_v1_6(
+      &mut write,
+      "stop-before-boot",
+      "RemoteStopTransaction",
+      json!({ "transactionId": 1 }),
+    )
+    .await
+    .expect("handle remote stop");
+
+  let OcppFrame::CallResult { payload, .. } =
+    read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected CALLRESULT frame");
+  };
+  assert_eq!(payload["status"], json!(ResponseStatus::Rejected.as_str()));
+  assert!(
+    simulator
+      .connectors
+      .get(&1)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some()
+  );
+  assert!(simulator.queue.is_empty());
+}
+
+#[tokio::test]
 async fn remote_start_v1_6_rejects_unstartable_connectors() {
   for connector_id in [0, 999] {
     let (frame, simulator) = capture_inbound_call_response(
