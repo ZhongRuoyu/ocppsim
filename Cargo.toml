@@ -1,6 +1,6 @@
 [package]
 name = "ocppsim"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Ruoyu Zhong <zhongruoyu@outlook.com>"]
 edition = "2024"
 description = "A terminal OCPP-J charge point simulator."
