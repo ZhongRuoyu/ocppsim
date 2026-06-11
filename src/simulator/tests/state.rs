@@ -271,6 +271,50 @@ fn reserve_and_cancel_updates_connector_status() {
 }
 
 #[test]
+fn cancel_reservation_preserves_inoperative_connector_status() {
+  let mut simulator = simulator_for_tests();
+  let reserve_payload = json!({
+    "connectorId": 1,
+    "expiryDate": now_timestamp(),
+    "idTag": "TOKEN",
+    "reservationId": 42
+  });
+  let inoperative_payload = json!({
+    "connectorId": 1,
+    "type": "Inoperative"
+  });
+  let cancel_payload = json!({
+    "reservationId": 42
+  });
+
+  assert_eq!(
+    simulator
+      .reserve_now_v1_6(&reserve_payload)
+      .expect("reserve should succeed"),
+    ResponseStatus::Accepted
+  );
+  assert_eq!(
+    simulator
+      .change_availability_v1_6(&inoperative_payload)
+      .expect("inoperative should succeed"),
+    ResponseStatus::Accepted
+  );
+  assert_eq!(
+    simulator
+      .cancel_reservation_v1_6(&cancel_payload)
+      .expect("cancel should succeed"),
+    ResponseStatus::Accepted
+  );
+  assert_eq!(
+    simulator
+      .connectors
+      .get(&1)
+      .map(|item| item.status.display()),
+    Some("Unavailable")
+  );
+}
+
+#[test]
 fn duplicate_reservation_id_is_rejected() {
   let mut simulator = simulator_for_tests();
   let first = json!({

@@ -129,8 +129,10 @@ impl Simulator {
       .is_some();
     if !has_active_tx {
       let state = self.connector_mut(connector)?;
-      state.status = ConnectorStatus::Available;
-      self.enqueue_status_notification(connector)?;
+      if state.status == ConnectorStatus::Reserved {
+        state.status = ConnectorStatus::Available;
+        self.enqueue_status_notification(connector)?;
+      }
     }
     self.emit_snapshot();
     Ok(ResponseStatus::Accepted)
