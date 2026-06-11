@@ -6,6 +6,16 @@ const OCPP_V2_X_BASIC_AUTH_PASSWORD_MIN_LENGTH: usize = 16;
 const OCPP_V2_0_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 40;
 const OCPP_V2_1_BASIC_AUTH_PASSWORD_MAX_LENGTH: usize = 64;
 const OCPP_MESSAGE_ID_MAX_CHARS: usize = 36;
+const OCPP_V1_6_BOOT_VENDOR_MAX_CHARS: usize = 20;
+const OCPP_V1_6_BOOT_MODEL_MAX_CHARS: usize = 20;
+const OCPP_V2_X_BOOT_VENDOR_MAX_CHARS: usize = 50;
+const OCPP_V2_X_BOOT_MODEL_MAX_CHARS: usize = 20;
+const OCPP_BOOT_FIRMWARE_MAX_CHARS: usize = 50;
+const OCPP_V1_6_ID_TOKEN_MAX_CHARS: usize = 20;
+const OCPP_V2_0_1_ID_TOKEN_MAX_CHARS: usize = 36;
+const OCPP_V2_1_ID_TOKEN_MAX_CHARS: usize = 255;
+const OCPP_DATA_TRANSFER_VENDOR_ID_MAX_CHARS: usize = 255;
+const OCPP_DATA_TRANSFER_MESSAGE_ID_MAX_CHARS: usize = 50;
 
 /// Returns the human-readable Basic Auth password requirement for a protocol.
 pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
@@ -32,6 +42,65 @@ pub fn is_valid_basic_auth_password(
   }
 }
 
+/// Validates configured `BootNotification` identity fields against schemas.
+pub fn validate_boot_notification_fields(
+  protocol: OcppVersion,
+  vendor: &str,
+  model: &str,
+  firmware: &str,
+) -> Result<(), String> {
+  let (vendor_field, vendor_max, model_field, model_max) = match protocol {
+    OcppVersion::V1_6 => (
+      "chargePointVendor",
+      OCPP_V1_6_BOOT_VENDOR_MAX_CHARS,
+      "chargePointModel",
+      OCPP_V1_6_BOOT_MODEL_MAX_CHARS,
+    ),
+    OcppVersion::V2_0_1 | OcppVersion::V2_1 => (
+      "chargingStation.vendorName",
+      OCPP_V2_X_BOOT_VENDOR_MAX_CHARS,
+      "chargingStation.model",
+      OCPP_V2_X_BOOT_MODEL_MAX_CHARS,
+    ),
+  };
+  validate_max_chars(vendor_field, vendor, vendor_max)?;
+  validate_max_chars(model_field, model, model_max)?;
+  validate_max_chars("firmwareVersion", firmware, OCPP_BOOT_FIRMWARE_MAX_CHARS)
+}
+
+/// Validates an authorization token before emitting it in outbound requests.
+pub fn validate_outbound_id_token(
+  protocol: OcppVersion,
+  value: &str,
+) -> Result<(), String> {
+  let (field, max) = match protocol {
+    OcppVersion::V1_6 => ("idTag", OCPP_V1_6_ID_TOKEN_MAX_CHARS),
+    OcppVersion::V2_0_1 => ("idToken.idToken", OCPP_V2_0_1_ID_TOKEN_MAX_CHARS),
+    OcppVersion::V2_1 => ("idToken.idToken", OCPP_V2_1_ID_TOKEN_MAX_CHARS),
+  };
+  validate_max_chars(field, value, max)
+}
+
+/// Validates charge-point-initiated `DataTransfer` fields.
+pub fn validate_data_transfer_fields(
+  vendor_id: &str,
+  message_id: Option<&str>,
+) -> Result<(), String> {
+  validate_max_chars(
+    "vendorId",
+    vendor_id,
+    OCPP_DATA_TRANSFER_VENDOR_ID_MAX_CHARS,
+  )?;
+  if let Some(message_id) = message_id {
+    validate_max_chars(
+      "messageId",
+      message_id,
+      OCPP_DATA_TRANSFER_MESSAGE_ID_MAX_CHARS,
+    )?;
+  }
+  Ok(())
+}
+
 fn is_valid_v1_6_authorization_key(value: &str) -> bool {
   let bytes = value.as_bytes();
   (OCPP_V1_6_AUTHORIZATION_KEY_MIN_LENGTH
@@ -50,6 +119,20 @@ fn is_valid_v2_0_1_basic_auth_password(value: &str) -> bool {
 
 fn has_char_length(value: &str, min: usize, max: usize) -> bool {
   (min..=max).contains(&value.chars().count())
+}
+
+fn validate_max_chars(
+  field: &str,
+  value: &str,
+  max: usize,
+) -> Result<(), String> {
+  let actual = value.chars().count();
+  if actual > max {
+    return Err(format!(
+      "{field} must be at most {max} characters, got {actual}."
+    ));
+  }
+  Ok(())
 }
 
 fn is_v2_0_1_password_string_char(character: char) -> bool {

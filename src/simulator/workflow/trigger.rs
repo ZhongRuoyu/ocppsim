@@ -13,7 +13,7 @@ impl Simulator {
   ) -> Result<ResponseStatus> {
     match requested {
       TriggerMessage_V1_6::BootNotification => {
-        self.enqueue_triggered_boot_notification();
+        self.enqueue_triggered_boot_notification()?;
       }
       TriggerMessage_V1_6::DiagnosticsStatusNotification => {
         self.enqueue_diagnostics_status_notification(
@@ -44,7 +44,7 @@ impl Simulator {
   ) -> Result<ResponseStatus> {
     match requested {
       ExtendedTriggerMessage_V1_6::BootNotification => {
-        self.enqueue_triggered_boot_notification();
+        self.enqueue_triggered_boot_notification()?;
       }
       ExtendedTriggerMessage_V1_6::FirmwareStatusNotification => {
         self.enqueue_firmware_status_notification("Idle", None);
@@ -76,7 +76,7 @@ impl Simulator {
   ) -> Result<ResponseStatus> {
     match requested {
       TriggerMessage_V2_X::BootNotification => {
-        self.enqueue_boot_notification();
+        self.enqueue_boot_notification()?;
       }
       TriggerMessage_V2_X::FirmwareStatusNotification => {
         self.enqueue_firmware_status_notification("Idle", None);

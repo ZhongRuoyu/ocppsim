@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::ocpp::{
   OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
+  validate_boot_notification_fields,
 };
 
 /// Built-in defaults used when profile/global config entries are omitted.
@@ -165,13 +166,7 @@ pub fn resolve_profile(
     required_profile_value(profile.id, profile_name, config_path, "id")?;
 
   let connectors = profile.connectors.unwrap_or(defaults.connectors);
-  if connectors == 0 {
-    bail!(
-      "Profile `{}` has invalid `connectors=0` in {}.",
-      profile_name,
-      config_path.display()
-    );
-  }
+  validate_profile_connectors(profile_name, config_path, connectors)?;
 
   let protocol_label =
     profile.protocol.as_deref().or(global.protocol.as_deref());
@@ -213,19 +208,28 @@ pub fn resolve_profile(
     );
   }
 
+  let vendor = merged_string(profile.vendor, global.vendor, &defaults.vendor);
+  let model = merged_string(profile.model, global.model, &defaults.model);
+  let firmware =
+    merged_string(profile.firmware, global.firmware, &defaults.firmware);
+  validate_profile_boot_identity(
+    profile_name,
+    config_path,
+    protocol,
+    &vendor,
+    &model,
+    &firmware,
+  )?;
+
   Ok(ResolvedProfileConfig {
     ws_url,
     cp_id,
     append_cp_id: profile.append_cp_id.unwrap_or(true),
     connectors,
     protocol,
-    vendor: merged_string(profile.vendor, global.vendor, &defaults.vendor),
-    model: merged_string(profile.model, global.model, &defaults.model),
-    firmware: merged_string(
-      profile.firmware,
-      global.firmware,
-      &defaults.firmware,
-    ),
+    vendor,
+    model,
+    firmware,
     log_path: profile.log_path.or(global.log_path),
     trace_frames: profile
       .trace_frames
@@ -261,6 +265,41 @@ fn merged_string(
   default: &str,
 ) -> String {
   profile.or(global).unwrap_or_else(|| default.to_string())
+}
+
+fn validate_profile_connectors(
+  profile_name: &str,
+  config_path: &Path,
+  connectors: u16,
+) -> Result<()> {
+  if connectors != 0 {
+    return Ok(());
+  }
+  bail!(
+    "Profile `{}` has invalid `connectors=0` in {}.",
+    profile_name,
+    config_path.display()
+  );
+}
+
+fn validate_profile_boot_identity(
+  profile_name: &str,
+  config_path: &Path,
+  protocol: OcppVersion,
+  vendor: &str,
+  model: &str,
+  firmware: &str,
+) -> Result<()> {
+  validate_boot_notification_fields(protocol, vendor, model, firmware).map_err(
+    |message| {
+      anyhow!(
+        "Profile `{}` has invalid BootNotification identity in {}. {}",
+        profile_name,
+        config_path.display(),
+        message
+      )
+    },
+  )
 }
 
 fn required_profile_value(
@@ -498,6 +537,39 @@ basic-auth-password = "not-a-hex-passwd"
     assert_eq!(
       resolved.basic_auth_password.as_deref(),
       Some("not-a-hex-passwd")
+    );
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies profile `BootNotification` identity strings honor schema limits.
+  fn resolve_profile_rejects_schema_invalid_boot_identity() {
+    let path = write_temp_config(
+      r#"
+vendor = "too-long-for-ocpp-one-six"
+
+[charge-points.demo]
+ws-url = "wss://example.com/ocpp"
+id = "CP-DEMO"
+"#,
+    );
+    let defaults = super::ProfileDefaults {
+      connectors: 1,
+      protocol: super::OcppVersion::V1_6,
+      vendor: "ocppsim".to_string(),
+      model: "ocppsim".to_string(),
+      firmware: "test".to_string(),
+      request_timeout_seconds: 30,
+      outbound_queue_limit: 1000,
+      security_event_limit: 1000,
+    };
+
+    let error = super::resolve_profile(&path, "demo", &defaults)
+      .expect_err("invalid vendor should not resolve");
+    assert!(
+      error.to_string().contains("BootNotification identity"),
+      "unexpected error: {error}"
     );
 
     let _ = fs::remove_file(path);

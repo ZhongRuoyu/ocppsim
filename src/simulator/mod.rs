@@ -27,6 +27,8 @@ use crate::ocpp::{
   StatusNotificationErrorCode, StopReason, TransactionTriggerReason,
   TriggerMessage_V1_6, TriggerMessage_V2_X, VariableAttributeType, build_call,
   build_call_error, build_call_result, build_call_result_error, parse_frame,
+  validate_boot_notification_fields, validate_data_transfer_fields,
+  validate_outbound_id_token,
 };
 use crate::sensitive::redact_url_secrets;
 
@@ -487,14 +489,14 @@ impl Simulator {
     self.ensure_outbound_queue_capacity(
       OutgoingAction::BootNotification.as_str(),
     )?;
-    self.queue_boot_with_registration_state();
-    Ok(())
+    self.queue_boot_with_registration_state()
   }
 
-  fn queue_boot_with_registration_state(&mut self) {
+  fn queue_boot_with_registration_state(&mut self) -> Result<()> {
+    self.enqueue_boot_notification()?;
     self.boot_registration_status = BootRegistrationStatus::AwaitingResponse;
     self.boot_retry_after = None;
-    self.enqueue_boot_notification();
+    Ok(())
   }
 
   fn outbound_queue_has_capacity(&self) -> bool {
@@ -502,11 +504,13 @@ impl Simulator {
     limit == 0 || self.queue.len() < limit
   }
 
-  pub(in crate::simulator) fn enqueue_triggered_boot_notification(&mut self) {
+  pub(in crate::simulator) fn enqueue_triggered_boot_notification(
+    &mut self,
+  ) -> Result<()> {
     if self.outbound_queue_has_capacity() {
-      self.queue_boot_with_registration_state();
+      self.queue_boot_with_registration_state()
     } else {
-      self.enqueue_boot_notification();
+      self.enqueue_boot_notification()
     }
   }
 
@@ -556,7 +560,12 @@ impl Simulator {
       UiLogLevel::Info,
       "BootNotification retry interval expired; retrying.",
     );
-    self.queue_boot_with_registration_state();
+    if let Err(error) = self.queue_boot_with_registration_state() {
+      self.log(
+        UiLogLevel::Error,
+        format!("BootNotification failed: {error}"),
+      );
+    }
   }
 
   pub(in crate::simulator) fn post_boot_ocpp_requests_allowed(&self) -> bool {
@@ -631,7 +640,7 @@ impl Simulator {
         if !self.ensure_can_send_ocpp_command(is_connected, "Authorize") {
           return Ok(());
         }
-        self.enqueue_authorize(id_token);
+        self.enqueue_authorize(id_token)?;
       }
       SimulatorCommand::DataTransfer {
         vendor_id,
@@ -645,7 +654,7 @@ impl Simulator {
           vendor_id.as_str(),
           message_id.as_deref(),
           data.as_deref(),
-        );
+        )?;
       }
       SimulatorCommand::StartTransaction {
         connector,
@@ -896,7 +905,7 @@ impl Simulator {
       format!("Connected. Negotiated WebSocket subprotocol: {negotiated}"),
     );
 
-    if self.should_enqueue_boot_on_connect() {
+    if self.should_enqueue_boot_on_connect()? {
       self.enqueue_boot_with_registration_state()?;
     } else if let Some(remaining) = self.boot_retry_remaining() {
       self.log_boot_retry_wait(remaining);
@@ -912,10 +921,14 @@ impl Simulator {
     Ok(Connection { write, read })
   }
 
-  fn should_enqueue_boot_on_connect(&self) -> bool {
-    self.boot_retry_remaining().is_none()
-      && (self.boot_registration_status != BootRegistrationStatus::Accepted
-        || self.boot_notification_changed())
+  fn should_enqueue_boot_on_connect(&self) -> Result<bool> {
+    if self.boot_retry_remaining().is_some() {
+      return Ok(false);
+    }
+    if self.boot_registration_status != BootRegistrationStatus::Accepted {
+      return Ok(true);
+    }
+    self.boot_notification_changed()
   }
 
   /// Builds the final WebSocket URL, appending charge point ID when enabled.

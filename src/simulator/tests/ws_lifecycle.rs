@@ -616,7 +616,9 @@ async fn mock_csms_boot_lifecycle_updates_heartbeat() {
     in_memory_ws_pair().await;
   let mut simulator = simulator_for_tests();
   simulator.connected = true;
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   assert_eq!(
     simulator
       .queue
@@ -1613,7 +1615,9 @@ async fn strict_mode_sends_call_result_error_for_invalid_v2_1_response() {
   let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
   simulator.config.strict = true;
   simulator.connected = true;
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   simulator
     .try_send_next(&mut write)
     .await

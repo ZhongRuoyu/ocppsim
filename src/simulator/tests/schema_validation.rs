@@ -264,14 +264,18 @@ fn v2_x_dynamic_inbound_response_cases(
 fn representative_v1_6_payloads_validate_against_schemas() {
   let mut simulator = simulator_for_tests();
 
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   assert_schema_valid(
     "schemas/1.6/BootNotification.json",
     &queued_payload(&simulator, "BootNotification"),
   );
 
   simulator.queue.clear();
-  simulator.enqueue_authorize("TOKEN".to_string());
+  simulator
+    .enqueue_authorize("TOKEN".to_string())
+    .expect("authorize should validate");
   assert_schema_valid(
     "schemas/1.6/Authorize.json",
     &queued_payload(&simulator, "Authorize"),
@@ -284,7 +288,9 @@ fn representative_v1_6_payloads_validate_against_schemas() {
     &queued_payload(&simulator, "Heartbeat"),
   );
 
-  simulator.enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"));
+  simulator
+    .enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"))
+    .expect("data transfer should validate");
   assert_schema_valid(
     "schemas/1.6/DataTransfer.json",
     &queued_payload(&simulator, "DataTransfer"),
@@ -379,6 +385,76 @@ fn assert_representative_v1_6_security_payloads_validate(
 }
 
 #[test]
+fn outbound_payload_validation_rejects_schema_invalid_user_values() {
+  let mut simulator = simulator_for_tests();
+  simulator.config.vendor = "V".repeat(21);
+  let error = simulator
+    .enqueue_boot_notification()
+    .expect_err("invalid boot identity should reject");
+  assert!(
+    error.to_string().contains("chargePointVendor"),
+    "unexpected error: {error}"
+  );
+  assert!(simulator.queue.is_empty());
+
+  let mut simulator = simulator_for_tests();
+  let error = simulator
+    .enqueue_authorize("T".repeat(21))
+    .expect_err("invalid idTag should reject");
+  assert!(
+    error.to_string().contains("idTag"),
+    "unexpected error: {error}"
+  );
+  assert!(simulator.queue.is_empty());
+
+  let mut simulator = simulator_for_tests();
+  let error = simulator
+    .enqueue_data_transfer(&"V".repeat(256), Some("Message"), Some("hello"))
+    .expect_err("invalid vendorId should reject");
+  assert!(
+    error.to_string().contains("vendorId"),
+    "unexpected error: {error}"
+  );
+  assert!(simulator.queue.is_empty());
+
+  let mut simulator = simulator_for_tests();
+  let long_message_id = "M".repeat(51);
+  let error = simulator
+    .enqueue_data_transfer(
+      "ocppsim",
+      Some(long_message_id.as_str()),
+      Some("hello"),
+    )
+    .expect_err("invalid messageId should reject");
+  assert!(
+    error.to_string().contains("messageId"),
+    "unexpected error: {error}"
+  );
+  assert!(simulator.queue.is_empty());
+}
+
+#[test]
+fn start_transaction_rejects_schema_invalid_id_tokens_before_mutation() {
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_0_1);
+  let error = simulator
+    .start_transaction(1, "T".repeat(37), false, None, true)
+    .expect_err("invalid idToken should reject");
+
+  assert!(
+    error.to_string().contains("idToken.idToken"),
+    "unexpected error: {error}"
+  );
+  assert!(simulator.queue.is_empty());
+  assert!(
+    simulator
+      .connector_ref(1)
+      .expect("connector")
+      .transaction
+      .is_none()
+  );
+}
+
+#[test]
 fn representative_v2_x_payloads_validate_against_schemas() {
   for_each_v2_x_simulator(|protocol, simulator| {
     assert_representative_v2_x_payloads_validate(
@@ -392,14 +468,18 @@ fn assert_representative_v2_x_payloads_validate(
   mut simulator: Simulator,
   schema_dir: &str,
 ) {
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   assert_schema_valid(
     &schema_path(schema_dir, "BootNotificationRequest.json"),
     &queued_payload(&simulator, "BootNotification"),
   );
 
   simulator.queue.clear();
-  simulator.enqueue_authorize("TOKEN".to_string());
+  simulator
+    .enqueue_authorize("TOKEN".to_string())
+    .expect("authorize should validate");
   assert_schema_valid(
     &schema_path(schema_dir, "AuthorizeRequest.json"),
     &queued_payload(&simulator, "Authorize"),
@@ -413,7 +493,9 @@ fn assert_representative_v2_x_payloads_validate(
   );
 
   simulator.queue.clear();
-  simulator.enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"));
+  simulator
+    .enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"))
+    .expect("data transfer should validate");
   assert_schema_valid(
     &schema_path(schema_dir, "DataTransferRequest.json"),
     &queued_payload(&simulator, "DataTransfer"),

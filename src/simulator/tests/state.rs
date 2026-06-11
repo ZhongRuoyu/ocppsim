@@ -165,7 +165,9 @@ fn outbound_queue_limit_drops_new_calls() {
   simulator.config.outbound_queue_limit = 1;
 
   simulator.enqueue_heartbeat();
-  simulator.enqueue_authorize("TOKEN".to_string());
+  simulator
+    .enqueue_authorize("TOKEN".to_string())
+    .expect("authorize should validate");
 
   assert_eq!(simulator.queue.len(), 1);
   assert_eq!(
@@ -204,30 +206,54 @@ fn boot_state_is_unchanged_when_queue_is_full() {
 #[test]
 fn reconnect_boot_depends_on_registration_and_payload_changes() {
   let mut simulator = simulator_for_tests();
-  assert!(simulator.should_enqueue_boot_on_connect());
+  assert!(
+    simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   simulator.queue.clear();
   simulator.boot_registration_status = BootRegistrationStatus::Accepted;
 
-  assert!(!simulator.should_enqueue_boot_on_connect());
+  assert!(
+    !simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 
   simulator.boot_registration_status = BootRegistrationStatus::Pending;
-  assert!(simulator.should_enqueue_boot_on_connect());
+  assert!(
+    simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 
   simulator.boot_registration_status = BootRegistrationStatus::Accepted;
   simulator.config.firmware = "1.2.3".to_string();
-  assert!(simulator.should_enqueue_boot_on_connect());
+  assert!(
+    simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 }
 
 #[test]
 fn connection_scope_change_resets_boot_registration_state() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   simulator.queue.clear();
   simulator.boot_registration_status = BootRegistrationStatus::Accepted;
 
-  assert!(!simulator.should_enqueue_boot_on_connect());
+  assert!(
+    !simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 
   simulator.apply_connection_config(connection_config_for_state_tests(
     OcppVersion::V1_6,
@@ -237,7 +263,11 @@ fn connection_scope_change_resets_boot_registration_state() {
     simulator.boot_registration_status,
     BootRegistrationStatus::Accepted
   );
-  assert!(!simulator.should_enqueue_boot_on_connect());
+  assert!(
+    !simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 
   let mut next_config = connection_config_for_state_tests(OcppVersion::V1_6);
   next_config.cp_id = "CP-OTHER".to_string();
@@ -248,13 +278,19 @@ fn connection_scope_change_resets_boot_registration_state() {
     BootRegistrationStatus::Rejected
   );
   assert!(simulator.last_boot_notification_payload.is_none());
-  assert!(simulator.should_enqueue_boot_on_connect());
+  assert!(
+    simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 }
 
 #[test]
 fn protocol_security_scope_changes_reset_boot_registration_state() {
   let mut simulator = simulator_for_tests();
-  simulator.enqueue_boot_notification();
+  simulator
+    .enqueue_boot_notification()
+    .expect("boot should validate");
   simulator.queue.clear();
   simulator.boot_registration_status = BootRegistrationStatus::Accepted;
 
@@ -269,7 +305,11 @@ fn protocol_security_scope_changes_reset_boot_registration_state() {
     BootRegistrationStatus::Rejected
   );
   assert!(simulator.last_boot_notification_payload.is_none());
-  assert!(simulator.should_enqueue_boot_on_connect());
+  assert!(
+    simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
 }
 
 #[test]
@@ -670,7 +710,11 @@ fn rejected_boot_result_does_not_enqueue_initial_status_notifications() {
     BootRegistrationStatus::Rejected
   );
   assert!(simulator.boot_retry_after.is_some());
-  assert!(!simulator.should_enqueue_boot_on_connect());
+  assert!(
+    !simulator
+      .should_enqueue_boot_on_connect()
+      .expect("boot check")
+  );
   assert!(simulator.queue.is_empty());
 
   simulator
@@ -1010,8 +1054,12 @@ fn repeated_pending_timeouts_unblock_queued_calls() {
   let mut simulator = simulator_for_tests();
   simulator.config.request_timeout = std::time::Duration::from_millis(1);
   simulator.enqueue_heartbeat();
-  simulator.enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"));
-  simulator.enqueue_authorize("TOKEN".to_string());
+  simulator
+    .enqueue_data_transfer("ocppsim", Some("Message"), Some("hello"))
+    .expect("data transfer should validate");
+  simulator
+    .enqueue_authorize("TOKEN".to_string())
+    .expect("authorize should validate");
 
   let mut timed_out_actions = Vec::new();
   while let Some(call) = simulator.queue.pop_front() {

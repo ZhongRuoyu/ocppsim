@@ -6,7 +6,7 @@ use super::super::{
   REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
   TransactionEventRequest, TransactionState, TransactionTriggerReason,
   TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
-  now_timestamp,
+  now_timestamp, validate_outbound_id_token,
 };
 
 impl Simulator {
@@ -20,6 +20,7 @@ impl Simulator {
     is_connected: bool,
   ) -> Result<()> {
     self.validate_start_connector(connector)?;
+    self.validate_transaction_id_token(&id_token)?;
 
     if is_connected {
       let action = match self.config.protocol {
@@ -125,6 +126,11 @@ impl Simulator {
       }
     }
     Ok(())
+  }
+
+  fn validate_transaction_id_token(&self, id_token: &str) -> Result<()> {
+    validate_outbound_id_token(self.config.protocol, id_token)
+      .map_err(anyhow::Error::msg)
   }
 
   /// Stops an active transaction and enqueues protocol-specific stop messages.

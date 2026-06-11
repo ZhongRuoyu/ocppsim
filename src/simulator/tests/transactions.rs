@@ -32,7 +32,9 @@ fn local_start_logs_redacted_id_token() {
 fn authorize_result_logs_redacted_id_token() {
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
-  simulator.enqueue_authorize("SECRET-TOKEN".to_string());
+  simulator
+    .enqueue_authorize("SECRET-TOKEN".to_string())
+    .expect("authorize should validate");
   let authorize_call = simulator.queue.pop_front().expect("queued authorize");
   simulator.pending = Some(PendingCall {
     message_id: "auth-ack".to_string(),

@@ -11,6 +11,7 @@ use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 use crate::config::{ProfileDefaults, profile_names, resolve_profile};
 use crate::ocpp::{
   OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
+  validate_boot_notification_fields,
 };
 
 const DEFAULT_CONNECTORS: u16 = 1;
@@ -346,6 +347,13 @@ impl CliArgs {
       resolved.cp_id.as_deref(),
       resolved.security_profile,
     )?;
+    validate_boot_notification_fields(
+      resolved.protocol,
+      &resolved.vendor,
+      &resolved.model,
+      &resolved.firmware,
+    )
+    .map_err(anyhow::Error::msg)?;
     Ok(resolved)
   }
 
@@ -728,6 +736,33 @@ mod tests {
     assert_eq!(resolved.heartbeat_seconds, Some(5));
     assert_eq!(resolved.outbound_queue_limit, 12);
     assert_eq!(resolved.security_event_limit, 34);
+  }
+
+  #[test]
+  /// Verifies outbound `BootNotification` identity limits are enforced early.
+  fn rejects_schema_invalid_boot_notification_identity() {
+    let v1_6_args = CliArgs {
+      vendor: Some("V".repeat(21)),
+      ..base_args()
+    };
+    let error = v1_6_args
+      .resolve()
+      .expect_err("should reject vendor length");
+    assert!(
+      error.to_string().contains("chargePointVendor"),
+      "unexpected error: {error}"
+    );
+
+    let v2_x_args = CliArgs {
+      protocol: Some(super::ProtocolArg::V2_0_1),
+      model: Some("M".repeat(21)),
+      ..base_args()
+    };
+    let error = v2_x_args.resolve().expect_err("should reject model length");
+    assert!(
+      error.to_string().contains("chargingStation.model"),
+      "unexpected error: {error}"
+    );
   }
 
   #[test]

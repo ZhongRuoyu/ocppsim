@@ -13,7 +13,8 @@ use super::super::{
   MeterUnit, OcppVersion, OutgoingAction, PendingContext, QueuedCall,
   ReadingContext, Result, Simulator, StatusNotificationErrorCode,
   TransactionEventRequest, TransactionState, TxEventType, UiLogLevel, Value,
-  anyhow, now_timestamp,
+  anyhow, now_timestamp, validate_boot_notification_fields,
+  validate_data_transfer_fields, validate_outbound_id_token,
 };
 
 impl Simulator {
@@ -94,8 +95,10 @@ impl Simulator {
   }
 
   /// Enqueues a protocol-version-specific `BootNotification` request.
-  pub(in crate::simulator) fn enqueue_boot_notification(&mut self) {
-    let payload = self.boot_notification_payload();
+  pub(in crate::simulator) fn enqueue_boot_notification(
+    &mut self,
+  ) -> Result<()> {
+    let payload = self.boot_notification_payload()?;
     if self.enqueue_call(
       OutgoingAction::BootNotification.as_str(),
       payload.clone(),
@@ -103,18 +106,26 @@ impl Simulator {
     ) {
       self.last_boot_notification_payload = Some(payload);
     }
+    Ok(())
   }
 
-  pub(in crate::simulator) fn boot_notification_changed(&self) -> bool {
-    let payload = self.boot_notification_payload();
-    self
-      .last_boot_notification_payload
-      .as_ref()
-      .is_none_or(|last_payload| last_payload != &payload)
+  pub(in crate::simulator) fn boot_notification_changed(&self) -> Result<bool> {
+    let payload = self.boot_notification_payload()?;
+    Ok(
+      self
+        .last_boot_notification_payload
+        .as_ref()
+        .is_none_or(|last_payload| last_payload != &payload),
+    )
   }
 
   /// Enqueues an `Authorize` request for the provided ID token.
-  pub(in crate::simulator) fn enqueue_authorize(&mut self, id_token: String) {
+  pub(in crate::simulator) fn enqueue_authorize(
+    &mut self,
+    id_token: String,
+  ) -> Result<()> {
+    validate_outbound_id_token(self.config.protocol, &id_token)
+      .map_err(anyhow::Error::msg)?;
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => Self::authorize_v1_6_payload(&id_token),
       OcppVersion::V2_0_1 => Self::authorize_v2_0_1_payload(&id_token),
@@ -125,6 +136,7 @@ impl Simulator {
       payload,
       PendingContext::Authorize { id_token },
     );
+    Ok(())
   }
 
   /// Enqueues the authorization step required before OCPP 1.6 remote start.
@@ -134,6 +146,8 @@ impl Simulator {
     id_token: String,
     charging_profile: Option<Value>,
   ) -> Result<()> {
+    validate_outbound_id_token(self.config.protocol, &id_token)
+      .map_err(anyhow::Error::msg)?;
     Self::validate_remote_start_charging_profile(charging_profile.as_ref())?;
     let payload = Self::authorize_v1_6_payload(&id_token);
     self.try_enqueue_call(
@@ -162,7 +176,9 @@ impl Simulator {
     vendor_id: &str,
     message_id: Option<&str>,
     data: Option<&str>,
-  ) {
+  ) -> Result<()> {
+    validate_data_transfer_fields(vendor_id, message_id)
+      .map_err(anyhow::Error::msg)?;
     let payload = match self.config.protocol {
       OcppVersion::V1_6 => {
         Self::data_transfer_v1_6_payload(vendor_id, message_id, data)
@@ -179,6 +195,7 @@ impl Simulator {
       payload,
       PendingContext::DataTransfer,
     );
+    Ok(())
   }
 
   /// Enqueues an OCPP 1.6 `DiagnosticsStatusNotification` request.
@@ -412,12 +429,19 @@ impl Simulator {
     })
   }
 
-  fn boot_notification_payload(&self) -> Value {
-    match self.config.protocol {
+  fn boot_notification_payload(&self) -> Result<Value> {
+    validate_boot_notification_fields(
+      self.config.protocol,
+      &self.config.vendor,
+      &self.config.model,
+      &self.config.firmware,
+    )
+    .map_err(anyhow::Error::msg)?;
+    Ok(match self.config.protocol {
       OcppVersion::V1_6 => self.boot_notification_v1_6_payload(),
       OcppVersion::V2_0_1 => self.boot_notification_v2_0_1_payload(),
       OcppVersion::V2_1 => self.boot_notification_v2_1_payload(),
-    }
+    })
   }
 
   fn boot_notification_v2_0_1_payload(&self) -> Value {
