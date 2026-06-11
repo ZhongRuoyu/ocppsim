@@ -326,6 +326,9 @@ For OCPP 1.6, `Pending` and `Rejected` registration states block
 station-initiated requests until a later accepted boot response.
 Reconnects send `BootNotification` only when registration is not accepted yet or
 the current boot payload differs from the last queued boot payload.
+Changing the connection URL, charge point identity, protocol, or security
+transport settings clears cached registration state so the next connection
+sends `BootNotification` even when the boot payload is otherwise unchanged.
 Manual `boot` commands and trigger-message boot requests still send
 `BootNotification` immediately.
 Inbound `RequestStartTransaction` and `RequestStopTransaction` requests are

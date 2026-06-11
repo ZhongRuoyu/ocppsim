@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use super::{
   BootRegistrationStatus, ConfigurationKey, ConnectorStatus, OcppVersion,
   PendingCall, PendingContext, ResponseStatus, SecurityProfileFallback,
-  Simulator, SimulatorCommand, SimulatorConfig, TxEventType, UiEvent,
-  UiLogLevel, now_timestamp, sanitized_trace_frame_text,
+  Simulator, SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig,
+  TxEventType, UiEvent, UiLogLevel, now_timestamp, sanitized_trace_frame_text,
   validate_negotiated_subprotocol,
 };
 

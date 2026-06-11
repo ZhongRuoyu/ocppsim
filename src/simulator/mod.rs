@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
@@ -60,6 +61,19 @@ type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
+
+#[derive(PartialEq, Eq)]
+struct BootRegistrationScope {
+  ws_url: Option<String>,
+  cp_id: Option<String>,
+  append_cp_id: bool,
+  protocol: OcppVersion,
+  security_profile: Option<u8>,
+  basic_auth_password: Option<String>,
+  ca_cert_path: Option<PathBuf>,
+  client_cert_path: Option<PathBuf>,
+  client_key_path: Option<PathBuf>,
+}
 
 pub(in crate::simulator) trait WsMessageSink:
   Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
@@ -625,6 +639,7 @@ impl Simulator {
 
   /// Applies an interactive connection target before opening the WebSocket.
   fn apply_connection_config(&mut self, config: SimulatorConnectionConfig) {
+    let previous_boot_scope = self.boot_registration_scope();
     self.config.profile = config.profile;
     self.config.ws_url = Some(config.ws_url);
     self.config.cp_id = Some(config.cp_id);
@@ -645,11 +660,33 @@ impl Simulator {
     self.config.client_key_path = config.client_key_path;
     self.security.security_profile = self.config.security_profile;
     self.security.basic_auth_password = self.config.basic_auth_password.clone();
+    if previous_boot_scope != self.boot_registration_scope() {
+      self.reset_boot_registration_state();
+    }
     self.enforce_security_event_limit();
     self.resize_connectors(config.connectors);
     self.apply_heartbeat_config(config.heartbeat_seconds);
     self.refresh_runtime_configuration_entries();
     self.emit_snapshot();
+  }
+
+  fn boot_registration_scope(&self) -> BootRegistrationScope {
+    BootRegistrationScope {
+      ws_url: self.config.ws_url.clone(),
+      cp_id: self.config.cp_id.clone(),
+      append_cp_id: self.config.append_cp_id,
+      protocol: self.config.protocol,
+      security_profile: self.config.security_profile,
+      basic_auth_password: self.config.basic_auth_password.clone(),
+      ca_cert_path: self.config.ca_cert_path.clone(),
+      client_cert_path: self.config.client_cert_path.clone(),
+      client_key_path: self.config.client_key_path.clone(),
+    }
+  }
+
+  fn reset_boot_registration_state(&mut self) {
+    self.boot_registration_status = BootRegistrationStatus::Rejected;
+    self.last_boot_notification_payload = None;
   }
 
   fn has_connection_target(&self) -> bool {

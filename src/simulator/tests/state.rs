@@ -1,8 +1,35 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 
 use super::*;
+
+fn connection_config_for_state_tests(
+  protocol: OcppVersion,
+) -> SimulatorConnectionConfig {
+  SimulatorConnectionConfig {
+    profile: None,
+    ws_url: "ws://localhost:9000/ocpp".to_string(),
+    cp_id: "CP-TEST".to_string(),
+    append_cp_id: false,
+    connectors: 2,
+    protocol,
+    vendor: "ocppsim".to_string(),
+    model: "test".to_string(),
+    firmware: "0.0.0".to_string(),
+    trace_frames: false,
+    strict: false,
+    request_timeout: Duration::from_secs(30),
+    heartbeat_seconds: Some(10),
+    outbound_queue_limit: 1_000,
+    security_event_limit: 1_000,
+    security_profile: None,
+    basic_auth_password: None,
+    ca_cert_path: None,
+    client_cert_path: None,
+    client_key_path: None,
+  }
+}
 
 #[tokio::test]
 async fn connect_without_target_warns_and_stays_offline() {
@@ -190,6 +217,58 @@ fn reconnect_boot_depends_on_registration_and_payload_changes() {
 
   simulator.boot_registration_status = BootRegistrationStatus::Accepted;
   simulator.config.firmware = "1.2.3".to_string();
+  assert!(simulator.should_enqueue_boot_on_connect());
+}
+
+#[test]
+fn connection_scope_change_resets_boot_registration_state() {
+  let mut simulator = simulator_for_tests();
+  simulator.enqueue_boot_notification();
+  simulator.queue.clear();
+  simulator.boot_registration_status = BootRegistrationStatus::Accepted;
+
+  assert!(!simulator.should_enqueue_boot_on_connect());
+
+  simulator.apply_connection_config(connection_config_for_state_tests(
+    OcppVersion::V1_6,
+  ));
+
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Accepted
+  );
+  assert!(!simulator.should_enqueue_boot_on_connect());
+
+  let mut next_config = connection_config_for_state_tests(OcppVersion::V1_6);
+  next_config.cp_id = "CP-OTHER".to_string();
+  simulator.apply_connection_config(next_config);
+
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Rejected
+  );
+  assert!(simulator.last_boot_notification_payload.is_none());
+  assert!(simulator.should_enqueue_boot_on_connect());
+}
+
+#[test]
+fn protocol_security_scope_changes_reset_boot_registration_state() {
+  let mut simulator = simulator_for_tests();
+  simulator.enqueue_boot_notification();
+  simulator.queue.clear();
+  simulator.boot_registration_status = BootRegistrationStatus::Accepted;
+
+  let mut next_config = connection_config_for_state_tests(OcppVersion::V2_0_1);
+  next_config.security_profile = Some(2);
+  next_config.basic_auth_password = Some("abcdefghijklmnop".to_string());
+
+  simulator.apply_connection_config(next_config);
+
+  assert_eq!(
+    simulator.boot_registration_status,
+    BootRegistrationStatus::Rejected
+  );
+  assert!(simulator.last_boot_notification_payload.is_none());
   assert!(simulator.should_enqueue_boot_on_connect());
 }
 
