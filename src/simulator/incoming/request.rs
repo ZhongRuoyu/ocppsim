@@ -82,7 +82,7 @@ impl AvailabilityRequest {
   pub(in crate::simulator) fn parse_v1_6(payload: &Value) -> Result<Self> {
     let requested = required_string_field(payload, "type")?;
     Ok(Self {
-      connector: optional_u16_field(payload, "connectorId")?,
+      connector: Some(required_u16_field(payload, "connectorId")?),
       target_status: parse_operational_status(requested),
     })
   }

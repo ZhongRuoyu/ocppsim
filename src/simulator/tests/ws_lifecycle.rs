@@ -1346,6 +1346,11 @@ async fn malformed_supported_requests_return_format_violation_code() {
     ),
     (
       OcppVersion::V1_6,
+      "ChangeAvailability",
+      json!({ "type": "Inoperative" }),
+    ),
+    (
+      OcppVersion::V1_6,
       "SetChargingProfile",
       json!({ "csChargingProfiles": {} }),
     ),

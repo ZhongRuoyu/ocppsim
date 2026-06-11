@@ -610,6 +610,23 @@ fn change_availability_v1_6_connector_zero_updates_all_connectors() {
 }
 
 #[test]
+fn change_availability_v1_6_requires_connector_id() {
+  let mut simulator = simulator_for_tests();
+  let result = simulator.change_availability_v1_6(&json!({
+    "type": "Inoperative"
+  }));
+
+  assert!(result.is_err());
+  assert!(simulator.queue.is_empty());
+  assert!(
+    simulator
+      .connectors
+      .values()
+      .all(|connector| { connector.status == ConnectorStatus::Available })
+  );
+}
+
+#[test]
 fn accepted_boot_result_enqueues_v1_6_status_for_charge_point_and_connectors() {
   let mut simulator = simulator_for_tests();
 
