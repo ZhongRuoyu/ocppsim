@@ -217,7 +217,7 @@ fn v2_x_dynamic_inbound_response_cases(
   );
   let certificate_ids_response = simulator
     .get_installed_certificate_ids_v2_x(&json!({
-      "certificateType": "CSMSRootCertificate"
+      "certificateType": ["CSMSRootCertificate"]
     }))
     .expect("certificate ids response");
 

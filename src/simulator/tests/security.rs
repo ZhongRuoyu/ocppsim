@@ -96,7 +96,7 @@ fn certificate_install_list_and_delete_v2_x() {
 
     let listed = simulator
       .get_installed_certificate_ids_v2_x(&json!({
-        "certificateType": "CSMSRootCertificate"
+        "certificateType": ["CSMSRootCertificate"]
       }))
       .expect("certificate ids");
     assert_eq!(listed["status"], ResponseStatus::Accepted.as_str());
@@ -104,6 +104,23 @@ fn certificate_install_list_and_delete_v2_x() {
       listed["certificateHashDataChain"].as_array().map(Vec::len),
       Some(1)
     );
+
+    let all = simulator
+      .get_installed_certificate_ids_v2_x(&json!({}))
+      .expect("all certificate ids");
+    assert_eq!(all["status"], ResponseStatus::Accepted.as_str());
+    assert_eq!(
+      all["certificateHashDataChain"].as_array().map(Vec::len),
+      Some(1)
+    );
+    assert!(
+      simulator
+        .get_installed_certificate_ids_v2_x(&json!({
+          "certificateType": "CSMSRootCertificate"
+        }))
+        .is_err()
+    );
+
     assert_schema_valid(
       &schema_path(
         v2_x_schema_dir(protocol),
@@ -119,6 +136,11 @@ fn certificate_install_list_and_delete_v2_x() {
       }))
       .expect("delete certificate");
     assert_eq!(delete_status, ResponseStatus::Accepted);
+
+    let empty = simulator
+      .get_installed_certificate_ids_v2_x(&json!({}))
+      .expect("empty certificate ids");
+    assert_eq!(empty["status"], ResponseStatus::NotFound.as_str());
   });
 }
 

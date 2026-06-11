@@ -419,8 +419,9 @@ impl Simulator {
     &self,
     payload: &Value,
   ) -> Result<Value> {
-    let certificate_type = required_string_field(payload, "certificateType")?;
-    let certificates = self.certificates_of_type(certificate_type);
+    let certificate_types = certificate_types_v2_x(payload)?;
+    let certificates =
+      self.certificates_matching_types(certificate_types.as_deref());
     let status = if certificates.is_empty() {
       ResponseStatus::NotFound
     } else {
@@ -789,6 +790,22 @@ impl Simulator {
       .collect()
   }
 
+  fn certificates_matching_types(
+    &self,
+    certificate_types: Option<&[&str]>,
+  ) -> Vec<&InstalledCertificate> {
+    self
+      .security
+      .certificates
+      .iter()
+      .filter(|item| {
+        certificate_types.is_none_or(|types| {
+          types.iter().any(|value| *value == item.certificate_type)
+        })
+      })
+      .collect()
+  }
+
   pub(in crate::simulator) fn supports_file_transfer_location(
     &self,
     location: &str,
@@ -825,6 +842,30 @@ fn parse_certificate_hash_data(payload: &Value) -> Result<CertificateHashData> {
       .to_string(),
     serial_number: required_string_field(payload, "serialNumber")?.to_string(),
   })
+}
+
+fn certificate_types_v2_x(payload: &Value) -> Result<Option<Vec<&str>>> {
+  let Some(value) = payload.get("certificateType") else {
+    return Ok(None);
+  };
+  let items = value
+    .as_array()
+    .ok_or_else(|| anyhow!("certificateType must be an array."))?;
+  if items.is_empty() {
+    return Err(anyhow!("certificateType must not be empty."));
+  }
+
+  let mut certificate_types = Vec::with_capacity(items.len());
+  for item in items {
+    let certificate_type = item
+      .as_str()
+      .filter(|value| !value.is_empty())
+      .ok_or_else(|| {
+        anyhow!("certificateType items must be non-empty strings.")
+      })?;
+    certificate_types.push(certificate_type);
+  }
+  Ok(Some(certificate_types))
 }
 
 fn synthetic_certificate_hash(
