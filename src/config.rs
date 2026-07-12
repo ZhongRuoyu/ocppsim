@@ -400,7 +400,7 @@ fn parse_protocol_label(label: &str) -> Result<OcppVersion> {
 ///
 /// A value of `0` disables heartbeats and becomes `None`.
 fn normalize_heartbeat_seconds(value: Option<u64>) -> Option<u64> {
-  value.and_then(|seconds| if seconds == 0 { None } else { Some(seconds) })
+  value.filter(|&seconds| seconds != 0)
 }
 
 #[cfg(test)]

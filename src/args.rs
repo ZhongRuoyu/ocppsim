@@ -586,7 +586,7 @@ fn validate_charge_point_identity(
 ///
 /// A value of `0` disables periodic heartbeats and becomes `None`.
 fn normalize_heartbeat_seconds(value: Option<u64>) -> Option<u64> {
-  value.and_then(|seconds| if seconds == 0 { None } else { Some(seconds) })
+  value.filter(|&seconds| seconds != 0)
 }
 
 /// Expands `~` and `~/...` paths against the current `HOME` directory.
