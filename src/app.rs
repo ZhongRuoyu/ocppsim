@@ -37,6 +37,7 @@ use history::CommandHistory;
 
 const MAX_LOG_LINES: usize = 10_000;
 const PROMPT_PREFIX_WIDTH: usize = 2;
+const PROMPT_PLACEHOLDER: &str = "Command";
 const EXIT_CONFIRMATION_PROMPT: &str =
   "Active CSMS state may remain unfinished. Confirm exit? [y/N]";
 
@@ -72,7 +73,7 @@ impl TerminalSession {
       return Ok(());
     }
 
-    self.clear_prompt()?;
+    self.clear_prompt(width)?;
     if should_clear_screen {
       execute!(self.stdout, Clear(ClearType::All), MoveTo(0, 0))?;
     }
@@ -86,26 +87,37 @@ impl TerminalSession {
   }
 
   /// Clears the rendered prompt block before logs or a fresh prompt redraw.
-  fn clear_prompt(&mut self) -> io::Result<()> {
+  fn clear_prompt(&mut self, width: usize) -> io::Result<()> {
     if !self.prompt_visible {
       return Ok(());
     }
-    queue!(
-      self.stdout,
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      MoveUp(1),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      MoveDown(2),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      MoveDown(1),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      MoveUp(PROMPT_BLOCK_LINES - 1),
-      MoveToColumn(0)
-    )?;
+    let layout = self
+      .last_prompt
+      .as_ref()
+      .map_or_else(PromptClearLayout::default, |prompt| {
+        prompt.clear_layout(width)
+      });
+
+    queue!(self.stdout, MoveToColumn(0))?;
+    if layout.lines_above_cursor > 0 {
+      queue!(
+        self.stdout,
+        MoveUp(u16::try_from(layout.lines_above_cursor).unwrap_or(u16::MAX))
+      )?;
+    }
+    for index in 0..layout.block_lines {
+      queue!(self.stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+      if index + 1 < layout.block_lines {
+        queue!(self.stdout, MoveDown(1))?;
+      }
+    }
+    if layout.block_lines > 1 {
+      queue!(
+        self.stdout,
+        MoveUp(u16::try_from(layout.block_lines - 1).unwrap_or(u16::MAX))
+      )?;
+    }
+    queue!(self.stdout, MoveToColumn(0))?;
     self.prompt_visible = false;
     self.last_prompt = None;
     Ok(())
@@ -168,7 +180,7 @@ impl TerminalSession {
       queue!(
         self.stdout,
         SetAttribute(Attribute::Dim),
-        Print("Command"),
+        Print(fit_to_width(PROMPT_PLACEHOLDER, input_width)),
         SetAttribute(Attribute::Reset)
       )?;
     } else {
@@ -250,7 +262,7 @@ impl TerminalSession {
 impl Drop for TerminalSession {
   /// Restores terminal state when the session leaves scope.
   fn drop(&mut self) {
-    let _ = self.clear_prompt();
+    let _ = self.clear_prompt(terminal_width());
     restore_console();
     let _ = execute!(
       self.stdout,
@@ -298,6 +310,69 @@ impl PromptSnapshot {
       prompt_shadow: app.prompt_shadow().map(str::to_string),
     }
   }
+
+  fn clear_layout(&self, width: usize) -> PromptClearLayout {
+    let metrics = self.render_metrics();
+    let width = width.max(1);
+    let input_rows = terminal_rows(metrics.input_line_width, width);
+    let taskbar_rows = terminal_rows(metrics.taskbar_line_width, width);
+    PromptClearLayout {
+      lines_above_cursor: 1 + metrics.cursor_column / width,
+      block_lines: 1 + input_rows + 1 + taskbar_rows,
+    }
+  }
+
+  fn render_metrics(&self) -> PromptRenderMetrics {
+    let content_width = self.width.saturating_sub(1);
+    let input_width = content_width.saturating_sub(PROMPT_PREFIX_WIDTH);
+    let prompt_text = self.prompt_shadow.as_deref().unwrap_or(&self.input);
+    let cursor = self.prompt_shadow.as_ref().map_or(self.cursor, String::len);
+    let view = visible_input_view(prompt_text, cursor, input_width);
+    let input_text_width =
+      if self.prompt_shadow.is_none() && self.input.is_empty() {
+        display_width(&fit_to_width(PROMPT_PLACEHOLDER, input_width))
+      } else {
+        display_width(view.text)
+      };
+    let taskbar_width = display_width(&fit_to_width(
+      &format_taskbar_line(
+        self.profile_name.as_deref(),
+        &self.ws_url,
+        self.connected,
+      ),
+      self.width.saturating_sub(1),
+    ));
+
+    PromptRenderMetrics {
+      input_line_width: PROMPT_PREFIX_WIDTH.saturating_add(input_text_width),
+      taskbar_line_width: taskbar_width,
+      cursor_column: PROMPT_PREFIX_WIDTH
+        .saturating_add(view.cursor_width)
+        .min(content_width),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PromptClearLayout {
+  lines_above_cursor: usize,
+  block_lines: usize,
+}
+
+impl Default for PromptClearLayout {
+  fn default() -> Self {
+    Self {
+      lines_above_cursor: 1,
+      block_lines: usize::from(PROMPT_BLOCK_LINES),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PromptRenderMetrics {
+  input_line_width: usize,
+  taskbar_line_width: usize,
+  cursor_column: usize,
 }
 
 struct VisibleInputView<'a> {
@@ -362,6 +437,11 @@ fn fit_to_width(input: &str, width: usize) -> String {
   }
   output.push_str(suffix);
   output
+}
+
+fn terminal_rows(display_width: usize, terminal_width: usize) -> usize {
+  let terminal_width = terminal_width.max(1);
+  display_width.div_ceil(terminal_width).max(1)
 }
 
 fn terminal_width() -> usize {
@@ -958,16 +1038,11 @@ impl TerminalApp {
 
   /// Builds the compact taskbar text shown below the command composer.
   fn taskbar_line(&self) -> String {
-    let target = self.profile_name.as_ref().map_or_else(
-      || format!("url {}", display_taskbar_value(&self.ws_url)),
-      |name| format!("profile {}", display_taskbar_value(name)),
-    );
-    let status = if self.connected {
-      "connected"
-    } else {
-      "disconnected"
-    };
-    format!(" {target} | {status}")
+    format_taskbar_line(
+      self.profile_name.as_deref(),
+      &self.ws_url,
+      self.connected,
+    )
   }
 
   /// Pushes one or more log lines to memory and optional file sink.
@@ -1069,6 +1144,23 @@ fn display_taskbar_value(value: &str) -> &str {
   if value.is_empty() { "-" } else { value }
 }
 
+fn format_taskbar_line(
+  profile_name: Option<&str>,
+  ws_url: &str,
+  connected: bool,
+) -> String {
+  let target = profile_name.map_or_else(
+    || format!("url {}", display_taskbar_value(ws_url)),
+    |name| format!("profile {}", display_taskbar_value(name)),
+  );
+  let status = if connected {
+    "connected"
+  } else {
+    "disconnected"
+  };
+  format!(" {target} | {status}")
+}
+
 /// Formats heartbeat interval for display.
 fn display_heartbeat(value: Option<u64>) -> String {
   value.map_or_else(|| "-".to_string(), |seconds| format!("{seconds}s"))
@@ -1119,7 +1211,10 @@ mod tests {
   use crate::ocpp::OcppVersion;
   use crate::simulator::{SimulatorRuntimeState, UiEvent};
 
-  use super::{InputAction, TerminalApp, visible_input_view};
+  use super::{
+    InputAction, PromptClearLayout, PromptSnapshot, TerminalApp,
+    visible_input_view,
+  };
 
   static TEMP_LOG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1351,6 +1446,35 @@ mod tests {
 
     assert_eq!(view.text, "cde");
     assert_eq!(view.cursor_width, 3);
+  }
+
+  #[test]
+  /// Verifies prompt clearing accounts for terminal reflow after resize.
+  fn prompt_clear_layout_tracks_wrapped_cursor_after_resize() {
+    let snapshot = PromptSnapshot {
+      input: "a".repeat(200),
+      cursor: 200,
+      width: 100,
+      profile_name: None,
+      ws_url: String::new(),
+      connected: false,
+      prompt_shadow: None,
+    };
+
+    assert_eq!(
+      snapshot.clear_layout(100),
+      PromptClearLayout {
+        lines_above_cursor: 1,
+        block_lines: 4,
+      }
+    );
+    assert_eq!(
+      snapshot.clear_layout(50),
+      PromptClearLayout {
+        lines_above_cursor: 2,
+        block_lines: 5,
+      }
+    );
   }
 
   #[test]
