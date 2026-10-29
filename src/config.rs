@@ -444,7 +444,7 @@ vendor = "ocppsim"
     );
 
     let names = super::profile_names(&path).expect("profile names");
-    assert!(names.is_empty());
+    assert_eq!(names, [] as [std::string::String; 0]);
 
     let _ = fs::remove_file(path);
   }
