@@ -16,7 +16,7 @@ const USAGE_START: &str = "Usage: start <connector> <idToken>";
 const USAGE_STOP: &str = "Usage: stop <connector> [reason]";
 const USAGE_CONNECTOR_STATUS: &str =
   "Usage: connector-status <connector> <status>";
-const USAGE_METER: &str = "Usage: meter <connector> <wh>";
+const USAGE_METER: &str = "Usage: meter [<connector> [<wh>]]";
 const USAGE_SEND_METER: &str = "Usage: send-meter <connector> [<wh>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
@@ -49,6 +49,9 @@ pub enum UserCommand {
   Stop {
     connector: u16,
     reason: Option<String>,
+  },
+  GetMeter {
+    connector: Option<u16>,
   },
   Meter {
     connector: u16,
@@ -255,8 +258,16 @@ fn parse_connector_status_command(
 }
 
 fn parse_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
-  ensure_exact(parts, 3, USAGE_METER)?;
+  ensure_range(parts, 1..=3, USAGE_METER)?;
+  if parts.len() == 1 {
+    return Ok(UserCommand::GetMeter { connector: None });
+  }
   let connector = parse_u16(parts.get(1), USAGE_METER)?;
+  if parts.len() == 2 {
+    return Ok(UserCommand::GetMeter {
+      connector: Some(connector),
+    });
+  }
   let value_wh = parse_i64(parts.get(2), USAGE_METER)?;
   Ok(UserCommand::Meter {
     connector,
@@ -319,6 +330,10 @@ pub fn help_text() -> &'static str {
     Valid statuses: Available, Preparing, Charging, SuspendedEVSE,
     SuspendedEV, Finishing, Reserved, Unavailable, Faulted, Occupied.
     Status is mapped to a valid status for the active protocol before sending.
+  meter
+    Show local meter counters (Wh) for all connectors.
+  meter <connector>
+    Show the local meter counter (Wh) for one connector.
   meter <connector> <wh>
     Set local meter counter (Wh) for connector.
   send-meter <connector> [<wh>]
@@ -491,6 +506,23 @@ mod tests {
         assert!(reason.is_none());
       }
       _ => panic!("unexpected command variant"),
+    }
+  }
+
+  #[test]
+  fn rejects_invalid_meter_query_and_set_arguments() {
+    for input in [
+      "meter invalid",
+      "meter 65536",
+      "meter 1 invalid",
+      "meter 1 12.5",
+      "meter 1 100 extra",
+    ] {
+      assert_eq!(
+        parse_command(input).unwrap_err(),
+        super::USAGE_METER,
+        "{input}",
+      );
     }
   }
 

@@ -269,17 +269,13 @@ fn handle_user_command(
       SimulatorCommand::SetConnectorStatus { connector, status },
       app,
     ),
+    UserCommand::GetMeter { connector } => {
+      send_command(cmd_tx, SimulatorCommand::GetMeter { connector }, app)
+    }
     UserCommand::Meter {
       connector,
       value_wh,
-    } => send_command(
-      cmd_tx,
-      SimulatorCommand::SetMeter {
-        connector,
-        value_wh,
-      },
-      app,
-    ),
+    } => set_meter_command(cmd_tx, connector, value_wh, app),
     UserCommand::SendMeter {
       connector,
       value_wh,
@@ -325,6 +321,23 @@ fn resolve_connect_config(
   Ok(SimulatorConnectionConfig::from_resolved(&resolved))
 }
 
+/// Queues a local meter update, returning true if the simulator is unavailable.
+fn set_meter_command(
+  cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
+  connector: u16,
+  value_wh: i64,
+  app: &mut TerminalApp,
+) -> bool {
+  send_command(
+    cmd_tx,
+    SimulatorCommand::SetMeter {
+      connector,
+      value_wh,
+    },
+    app,
+  )
+}
+
 /// Queues an optional local meter update followed by a meter send.
 ///
 /// Returns `true` when the simulator task is unavailable.
@@ -335,14 +348,7 @@ fn send_meter_command(
   app: &mut TerminalApp,
 ) -> bool {
   if let Some(value_wh) = value_wh
-    && send_command(
-      cmd_tx,
-      SimulatorCommand::SetMeter {
-        connector,
-        value_wh,
-      },
-      app,
-    )
+    && set_meter_command(cmd_tx, connector, value_wh, app)
   {
     return true;
   }
@@ -473,6 +479,21 @@ mod tests {
         assert_eq!(reason.as_deref(), Some("EVDisconnected"));
       }
       other => panic!("unexpected command: {other:?}"),
+    }
+  }
+
+  #[test]
+  fn meter_queries_dispatch_without_setting_or_sending() {
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    for (input, expected_connector) in [("meter", None), ("meter 2", Some(2))] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      match next_command(&mut cmd_rx) {
+        SimulatorCommand::GetMeter { connector } => {
+          assert_eq!(connector, expected_connector);
+        }
+        other => panic!("unexpected command: {other:?}"),
+      }
+      assert!(cmd_rx.try_recv().is_err());
     }
   }
 

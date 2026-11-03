@@ -177,6 +177,8 @@ the mouse and remain available after `ocppsim` exits.
 - `start <connector> <idToken>`: start a local transaction.
 - `stop <connector> [reason]`: stop a local transaction.
 - `connector-status <connector> <status>`: set local connector status.
+- `meter`: show the local meter counters in Wh for all connectors.
+- `meter <connector>`: show the local meter counter in Wh for one connector.
 - `meter <connector> <wh>`: set the local meter counter.
 - `send-meter <connector> [<wh>]`: send current meter data.
   If `<wh>` is given, first set the local meter counter, equivalent to

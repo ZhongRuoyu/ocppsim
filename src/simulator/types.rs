@@ -204,6 +204,9 @@ pub enum SimulatorCommand {
     connector: u16,
     reason: Option<String>,
   },
+  GetMeter {
+    connector: Option<u16>,
+  },
   SetMeter {
     connector: u16,
     value_wh: i64,

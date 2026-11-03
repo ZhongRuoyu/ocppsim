@@ -386,6 +386,27 @@ impl Simulator {
     );
   }
 
+  /// Displays the local Wh reading for one connector or all connectors.
+  ///
+  /// Returns an error for an unknown connector without changing or sending data.
+  pub(in crate::simulator) fn show_meter(
+    &self,
+    connector: Option<u16>,
+  ) -> Result<()> {
+    let connectors = connector.map_or_else(
+      || self.connectors.keys().copied().collect(),
+      |connector| vec![connector],
+    );
+    for connector in connectors {
+      let value_wh = self.connector_ref(connector)?.meter_wh;
+      self.log(
+        UiLogLevel::Info,
+        format!("Connector {connector} meter={value_wh}Wh"),
+      );
+    }
+    Ok(())
+  }
+
   /// Sets a connector meter reading in watt-hours.
   pub(in crate::simulator) fn set_meter(
     &mut self,

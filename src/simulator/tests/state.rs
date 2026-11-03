@@ -66,6 +66,72 @@ async fn connect_without_target_warns_and_stays_offline() {
 }
 
 #[test]
+fn meter_queries_show_local_readings_online_and_offline() {
+  for connected in [false, true] {
+    let (mut simulator, mut ui_rx) =
+      simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+    simulator.connected = connected;
+    simulator.boot_registration_status = BootRegistrationStatus::Pending;
+    simulator.set_meter(1, 1234).unwrap();
+    drain_log_messages(&mut ui_rx);
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::GetMeter { connector: None },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(
+      drain_log_messages(&mut ui_rx),
+      ["Connector 1 meter=1234Wh", "Connector 2 meter=0Wh",]
+    );
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::GetMeter { connector: Some(2) },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(drain_log_messages(&mut ui_rx), ["Connector 2 meter=0Wh"]);
+
+    simulator.set_meter(1, 5678).unwrap();
+    drain_log_messages(&mut ui_rx);
+    simulator
+      .handle_common_command(
+        SimulatorCommand::GetMeter { connector: Some(1) },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(drain_log_messages(&mut ui_rx), ["Connector 1 meter=5678Wh"]);
+    assert_eq!(simulator.connectors[&1].meter_wh, 5678);
+    assert_eq!(simulator.connectors[&2].meter_wh, 0);
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[test]
+fn meter_query_rejects_unknown_connectors() {
+  let (mut simulator, mut ui_rx) =
+    simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+  for connector in [0, 3] {
+    let error = simulator
+      .handle_common_command(
+        SimulatorCommand::GetMeter {
+          connector: Some(connector),
+        },
+        false,
+      )
+      .unwrap_err();
+    assert_eq!(
+      error.to_string(),
+      format!("Connector {connector} does not exist.")
+    );
+    assert_eq!(drain_log_messages(&mut ui_rx), Vec::<String>::new());
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[test]
 fn emit_snapshot_redacts_connection_url_secrets() {
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);

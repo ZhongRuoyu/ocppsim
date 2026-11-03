@@ -697,6 +697,9 @@ impl Simulator {
           is_connected,
         )?;
       }
+      SimulatorCommand::GetMeter { connector } => {
+        self.show_meter(connector)?;
+      }
       SimulatorCommand::SetMeter {
         connector,
         value_wh,
