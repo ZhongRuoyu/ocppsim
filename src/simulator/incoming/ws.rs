@@ -448,7 +448,7 @@ impl Simulator {
     let errors = validator
       .iter_errors(payload)
       .take(5)
-      .map(|error| error.to_string())
+      .map(|error| error.masked_with("<redacted>").to_string())
       .collect::<Vec<_>>();
     if errors.is_empty() {
       return Ok(IncomingRequestSchemaValidation::Valid);
@@ -515,7 +515,7 @@ impl Simulator {
     let errors = validator
       .iter_errors(payload)
       .take(5)
-      .map(|error| error.to_string())
+      .map(|error| error.masked_with("<redacted>").to_string())
       .collect::<Vec<_>>();
     if errors.is_empty() {
       return Ok(IncomingResponseSchemaValidation::Valid);

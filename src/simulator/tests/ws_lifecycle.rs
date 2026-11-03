@@ -1466,6 +1466,100 @@ async fn v1_6_update_firmware_returns_not_supported_for_whitepaper() {
 }
 
 #[tokio::test]
+async fn strict_validation_redacts_invalid_request_credentials() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for secret in ["0123456789abcdef".to_string(), "1".repeat(2_501)] {
+      let value = if secret.len() == 2_501 {
+        json!(secret)
+      } else {
+        json!([secret])
+      };
+      let (action, payload) = if protocol == OcppVersion::V1_6 {
+        (
+          "ChangeConfiguration",
+          json!({
+            "key": "AuthorizationKey",
+            "value": value,
+          }),
+        )
+      } else {
+        (
+          "SetVariables",
+          json!({
+            "setVariableData": [{
+              "component": { "name": "SecurityCtrlr" },
+              "variable": { "name": "BasicAuthPassword" },
+              "attributeValue": value,
+            }]
+          }),
+        )
+      };
+      let (frame, simulator, events) =
+        capture_inbound_call_response_with_events(
+          protocol, true, action, payload,
+        )
+        .await;
+      let OcppFrame::CallError { description, .. } = frame else {
+        panic!("expected CALLERROR frame");
+      };
+      assert!(!description.contains(&secret));
+      assert!(description.contains("<redacted>"));
+      assert_trace_redacted(&events, &secret);
+      assert!(simulator.security.basic_auth_password.is_none());
+    }
+  }
+}
+
+#[tokio::test]
+async fn strict_validation_redacts_invalid_response_credentials() {
+  let secret = "0123456789abcdef";
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let (mut simulator, mut ui_rx) =
+      simulator_for_tests_with_protocol_and_ui(protocol);
+    simulator.config.strict = true;
+    simulator.enqueue_authorize("TOKEN".to_string()).unwrap();
+    simulator.try_send_next(&mut write).await.unwrap();
+    let OcppFrame::Call { message_id, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALL frame");
+    };
+    let info_key = if protocol == OcppVersion::V1_6 {
+      "idTagInfo"
+    } else {
+      "idTokenInfo"
+    };
+    simulator
+      .handle_ws_text(
+        build_call_result(
+          &message_id,
+          &json!({
+            info_key: { "status": [secret] }
+          }),
+        ),
+        &mut write,
+      )
+      .await
+      .unwrap();
+    if protocol == OcppVersion::V2_1 {
+      let OcppFrame::CallResultError { description, .. } =
+        read_ocpp_frame(&mut server_read).await
+      else {
+        panic!("expected CALLRESULTERROR frame");
+      };
+      assert!(!description.contains(secret));
+      assert!(description.contains("<redacted>"));
+    }
+    let messages = drain_log_messages(&mut ui_rx).join("\n");
+    assert!(!messages.contains(secret));
+    assert!(messages.contains("<redacted>"));
+    assert!(simulator.pending.is_none());
+  }
+}
+
+#[tokio::test]
 async fn strict_mode_rejects_schema_invalid_v1_6_requests() {
   let (frame, simulator) = capture_inbound_call_response_with_strict(
     OcppVersion::V1_6,
