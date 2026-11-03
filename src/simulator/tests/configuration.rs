@@ -3,6 +3,27 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn get_configuration_empty_keys_returns_all_settings() {
+  let simulator = simulator_for_tests();
+  let all_settings =
+    serde_json::to_value(simulator.configuration_response_v1_6(&json!({})))
+      .expect("serialize all settings");
+  assert_eq!(
+    all_settings["configurationKey"].as_array().unwrap().len(),
+    simulator.configuration.len()
+  );
+
+  for request in [json!({}), json!({ "key": [] })] {
+    assert_schema_valid("schemas/1.6/GetConfiguration.json", &request);
+    let response =
+      serde_json::to_value(simulator.configuration_response_v1_6(&request))
+        .expect("serialize configuration response");
+    assert_schema_valid("schemas/1.6/GetConfigurationResponse.json", &response);
+    assert_eq!(response, all_settings);
+  }
+}
+
+#[test]
 fn get_configuration_reports_unknown_keys() {
   let simulator = simulator_for_tests();
   let payload = json!({ "key": ["HeartbeatInterval", "MissingKey"] });

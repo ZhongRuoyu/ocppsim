@@ -33,7 +33,7 @@ impl Simulator {
     let mut configuration_key = Vec::new();
     let mut unknown_key = Vec::new();
 
-    if let Some(keys) = requested_keys {
+    if let Some(keys) = requested_keys.filter(|keys| !keys.is_empty()) {
       for key in keys {
         if let Some(config_key) = ConfigurationKey::parse(&key)
           && let Some(entry) = self.configuration.get(&config_key)
