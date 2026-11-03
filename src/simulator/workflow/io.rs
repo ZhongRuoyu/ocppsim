@@ -2,7 +2,7 @@ use super::super::{
   ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
   OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
   SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel,
-  Value, WsMessageSink, build_call_error, build_call_result,
+  Value, WsMessageSink, anyhow, build_call_error, build_call_result,
   build_call_result_error, json, sanitized_trace_frame_text,
 };
 use crate::sensitive::{redact_url_secrets, sanitize_log_text};
@@ -38,8 +38,7 @@ impl Simulator {
 
   /// Stops the periodic heartbeat task if one is active.
   pub(in crate::simulator) fn stop_heartbeat(&mut self) {
-    if let Some(task) = self.heartbeat.take() {
-      task.handle.abort();
+    if self.heartbeat.take().is_some() {
       self.log(UiLogLevel::Info, "Periodic heartbeat stopped.");
       self.emit_snapshot();
     }
@@ -129,12 +128,34 @@ impl Simulator {
     level: UiLogLevel,
     summary: String,
   ) -> Result<()> {
-    write.send(Message::Text(text.clone().into())).await?;
+    self
+      .send_ws_message(write, Message::Text(text.clone().into()))
+      .await?;
     if self.config.trace_frames {
       self.log(level, sanitized_trace_frame_text(&text));
     } else {
       self.log(level, summary);
     }
+    Ok(())
+  }
+
+  /// Flushes one WebSocket message within the configured request deadline.
+  ///
+  /// A timeout can interrupt a partial write, so callers must discard the
+  /// connection instead of retrying this message on the same transport.
+  pub(in crate::simulator) async fn send_ws_message(
+    &self,
+    write: &mut impl WsMessageSink,
+    message: Message,
+  ) -> Result<()> {
+    tokio::time::timeout(self.config.request_timeout, write.send(message))
+      .await
+      .map_err(|_| {
+        anyhow!(
+          "WebSocket write timed out after {}s.",
+          self.config.request_timeout.as_secs_f64()
+        )
+      })??;
     Ok(())
   }
 

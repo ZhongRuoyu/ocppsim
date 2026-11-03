@@ -4,7 +4,7 @@ use crate::ocpp::OcppMessageTypeId;
 
 use super::super::{
   BootRegistrationStatus, Message, OcppErrorCode, OcppFrame, OcppVersion,
-  Result, Simulator, SinkExt, UiLogLevel, Value, WsMessageSink, anyhow,
+  Result, Simulator, UiLogLevel, Value, WsMessageSink, anyhow,
   build_call_error, json, parse_frame, sanitized_trace_details,
   sanitized_trace_frame, sanitized_trace_payload,
 };
@@ -41,7 +41,7 @@ impl Simulator {
         return Err(anyhow!("Connection closed by CSMS: {reason}"));
       }
       Message::Ping(payload) => {
-        write.send(Message::Pong(payload)).await?;
+        self.send_ws_message(write, Message::Pong(payload)).await?;
       }
       Message::Pong(_) | Message::Binary(_) | Message::Frame(_) => {}
     }

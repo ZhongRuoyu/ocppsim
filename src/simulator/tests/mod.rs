@@ -19,6 +19,7 @@ mod schema_validation;
 mod security;
 mod state;
 mod transactions;
+mod transport;
 mod ws_lifecycle;
 
 fn simulator_test_config(protocol: OcppVersion) -> SimulatorConfig {

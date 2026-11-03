@@ -14,6 +14,7 @@ use std::backtrace::Backtrace;
 use std::panic;
 use std::process;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Result;
 use app::{InputAction, TerminalApp, TerminalSession, restore_console};
@@ -116,8 +117,21 @@ pub async fn run() -> Result<()> {
 
   terminal.draw(&mut app)?;
   let _ = cmd_tx.send(SimulatorCommand::Shutdown);
-  let _ = simulator_task.await;
+  finish_simulator_shutdown(simulator_task).await;
   Ok(())
+}
+
+/// Gives graceful shutdown one second before canceling a blocked simulator.
+async fn finish_simulator_shutdown(mut task: tokio::task::JoinHandle<()>) {
+  if tokio::time::timeout(Duration::from_secs(1), &mut task)
+    .await
+    .is_err()
+  {
+    // A peer can stop reading during any write, including the close frame.
+    // Dropping the task also drops the connection and its heartbeat ticker.
+    task.abort();
+    let _ = task.await;
+  }
 }
 
 /// Installs the `ring` rustls crypto provider for TLS WebSocket connections.
@@ -541,6 +555,29 @@ mod tests {
     assert!(cmd_rx.try_recv().is_err());
     assert!(!dispatch("quit", &cli_args, &cmd_tx, &mut app));
     assert!(cmd_rx.try_recv().is_err());
+  }
+
+  #[tokio::test]
+  async fn shutdown_cancels_and_joins_a_stalled_simulator() {
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+      let _dropped_on_cancel = dropped_tx;
+      started_tx.send(()).unwrap();
+      std::future::pending::<()>().await;
+    });
+    started_rx.await.unwrap();
+
+    tokio::time::timeout(
+      Duration::from_secs(2),
+      finish_simulator_shutdown(task),
+    )
+    .await
+    .expect("shutdown must not wait for a stalled transport");
+    assert!(
+      dropped_rx.await.is_err(),
+      "task must be dropped before return"
+    );
   }
 
   fn dispatch(

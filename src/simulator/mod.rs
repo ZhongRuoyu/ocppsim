@@ -1033,7 +1033,7 @@ impl Simulator {
 
   /// Sends a WebSocket close frame.
   async fn close_connection(&mut self, write: &mut impl WsMessageSink) {
-    let _ = write.send(Message::Close(None)).await;
+    let _ = self.send_ws_message(write, Message::Close(None)).await;
   }
 
   /// Marks simulator as disconnected, clears pending queue, and logs reason.

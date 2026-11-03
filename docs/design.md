@@ -24,6 +24,11 @@ state when a CALLRESULT or CALLERROR arrives.
 Request timeouts clear stale pending state so later queued messages can move.
 Failed boot requests leave the response-waiting state and retry after a short
 backoff, including timeouts, CALLERRORs, and schema-invalid responses.
+All WebSocket writes, including pong and close frames, use the same configured
+request deadline.
+A write timeout discards the connection because the frame may be partly sent.
+Application shutdown allows one second for graceful closure, then cancels and
+joins the simulator task; dropping its heartbeat task cancels the ticker.
 Start and stop transaction requests keep enough pending context to roll back or
 finish local transaction state when the CSMS rejects, times out, or accepts the
 request.

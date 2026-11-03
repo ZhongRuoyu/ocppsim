@@ -63,10 +63,13 @@ Some other useful flags include:
 - `--ca-cert <path>`
 - `--client-cert <path>` and `--client-key <path>`
 
-`--request-timeout-seconds` limits each connection attempt and each OCPP
-response wait independently.
+`--request-timeout-seconds` limits each connection attempt, WebSocket write,
+and OCPP response wait independently.
 It defaults to 30 seconds; values below five seconds are raised to five.
 Commands received during connection setup do not reset its deadline.
+A stalled write disconnects when its deadline expires.
+After exit is confirmed, the simulator allows one second for graceful shutdown,
+then cancels any remaining connection work.
 
 Run `ocppsim --help` for a full list of CLI options.
 

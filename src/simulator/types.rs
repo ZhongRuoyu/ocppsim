@@ -517,6 +517,14 @@ pub(in crate::simulator) struct HeartbeatTask {
   pub(in crate::simulator) handle: JoinHandle<()>,
 }
 
+impl Drop for HeartbeatTask {
+  fn drop(&mut self) {
+    // Dropping a JoinHandle alone detaches the ticker. Cancel it when an
+    // aborted simulator task drops its remaining state during shutdown.
+    self.handle.abort();
+  }
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct ConfigurationEntry {
   pub(in crate::simulator) value: String,
