@@ -322,6 +322,9 @@ and duplicate `SEND` ids are logged and dropped without mutating state.
 
 For OCPP 1.6 and OCPP 2.x, station-initiated OCPP messages are held until
 `BootNotification` is accepted.
+Reports explicitly requested through `TriggerMessage` or
+`ExtendedTriggerMessage` can be sent during `Pending` registration.
+Those reports may pass queued station-initiated messages, which remain held.
 For OCPP 1.6, `Pending` and `Rejected` registration states block
 station-initiated requests until a later accepted boot response.
 Reconnects send `BootNotification` only when registration is not accepted yet or

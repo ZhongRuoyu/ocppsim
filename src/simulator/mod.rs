@@ -1057,15 +1057,15 @@ impl Simulator {
     let Some(call) = self.queue.pop_front() else {
       return Ok(());
     };
-    if !self.post_boot_ocpp_requests_allowed()
-      && call.action != OutgoingAction::BootNotification.as_str()
-    {
-      if let Some(index) = self.queue.iter().position(|queued| {
-        queued.action == OutgoingAction::BootNotification.as_str()
-      }) && let Some(boot_call) = self.queue.remove(index)
+    if !self.queued_call_allowed(&call) {
+      if let Some(index) = self
+        .queue
+        .iter()
+        .position(|queued| self.queued_call_allowed(queued))
+        && let Some(allowed_call) = self.queue.remove(index)
       {
         self.queue.push_front(call);
-        self.queue.push_front(boot_call);
+        self.queue.push_front(allowed_call);
         return Ok(());
       }
       self.queue.push_front(call);
@@ -1091,6 +1091,14 @@ impl Simulator {
     });
     self.emit_runtime_state();
     Ok(())
+  }
+
+  /// Allows CSMS-triggered reports during Pending without releasing local work.
+  fn queued_call_allowed(&self, call: &QueuedCall) -> bool {
+    self.post_boot_ocpp_requests_allowed()
+      || call.action == OutgoingAction::BootNotification.as_str()
+      || (self.boot_registration_status == BootRegistrationStatus::Pending
+        && call.triggered_by_csms)
   }
 
   /// Checks the pending request timeout and clears stale pending state.

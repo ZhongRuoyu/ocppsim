@@ -11,6 +11,7 @@ impl Simulator {
     requested: TriggerMessage_V1_6,
     connector: Option<u16>,
   ) -> Result<ResponseStatus> {
+    let first_triggered = self.queue.len();
     match requested {
       TriggerMessage_V1_6::BootNotification => {
         self.enqueue_triggered_boot_notification()?;
@@ -33,6 +34,7 @@ impl Simulator {
         self.enqueue_status_notifications_for_trigger(connector)?;
       }
     }
+    self.mark_triggered_calls(first_triggered);
     Ok(ResponseStatus::Accepted)
   }
 
@@ -42,6 +44,7 @@ impl Simulator {
     requested: ExtendedTriggerMessage_V1_6,
     connector: Option<u16>,
   ) -> Result<ResponseStatus> {
+    let first_triggered = self.queue.len();
     match requested {
       ExtendedTriggerMessage_V1_6::BootNotification => {
         self.enqueue_triggered_boot_notification()?;
@@ -65,6 +68,7 @@ impl Simulator {
         self.enqueue_sign_certificate(None);
       }
     }
+    self.mark_triggered_calls(first_triggered);
     Ok(ResponseStatus::Accepted)
   }
 
@@ -74,6 +78,7 @@ impl Simulator {
     requested: TriggerMessage_V2_X,
     connector: Option<u16>,
   ) -> Result<ResponseStatus> {
+    let first_triggered = self.queue.len();
     match requested {
       TriggerMessage_V2_X::BootNotification => {
         self.enqueue_triggered_boot_notification()?;
@@ -107,7 +112,9 @@ impl Simulator {
         ));
       }
       TriggerMessage_V2_X::TransactionEvent => {
-        return self.trigger_transaction_event_v2_x(connector);
+        let status = self.trigger_transaction_event_v2_x(connector)?;
+        self.mark_triggered_calls(first_triggered);
+        return Ok(status);
       }
       TriggerMessage_V2_X::PublishFirmwareStatusNotification
       | TriggerMessage_V2_X::SignCombinedCertificate
@@ -115,7 +122,15 @@ impl Simulator {
         return Ok(ResponseStatus::NotImplemented);
       }
     }
+    self.mark_triggered_calls(first_triggered);
     Ok(ResponseStatus::Accepted)
+  }
+
+  /// Marks only requests produced by this trigger as CSMS-initiated work.
+  fn mark_triggered_calls(&mut self, first_triggered: usize) {
+    for call in self.queue.iter_mut().skip(first_triggered) {
+      call.triggered_by_csms = true;
+    }
   }
 
   fn enqueue_meter_values_for_trigger(

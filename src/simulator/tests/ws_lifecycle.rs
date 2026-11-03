@@ -22,7 +22,7 @@ fn format_violation_code(protocol: OcppVersion) -> &'static str {
   }
 }
 
-async fn in_memory_ws_pair()
+pub(super) async fn in_memory_ws_pair()
 -> (TestWsWrite, TestWsRead, TestWsWrite, TestWsRead) {
   let (client, server) = duplex(64 * 1024);
   let client_ws =
@@ -43,7 +43,7 @@ async fn read_ws_text(read: &mut TestWsRead) -> String {
   message.to_text().expect("text frame").to_string()
 }
 
-async fn read_ocpp_frame(read: &mut TestWsRead) -> OcppFrame {
+pub(super) async fn read_ocpp_frame(read: &mut TestWsRead) -> OcppFrame {
   parse_frame(&read_ws_text(read).await).expect("parse response")
 }
 

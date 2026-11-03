@@ -35,6 +35,7 @@ impl Simulator {
       action: action.to_string(),
       payload,
       context,
+      triggered_by_csms: false,
     });
     if limit != 0 && self.queue.len() == limit {
       self.log(

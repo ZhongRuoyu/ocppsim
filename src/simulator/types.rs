@@ -331,6 +331,7 @@ pub(in crate::simulator) struct QueuedCall {
   pub(in crate::simulator) action: String,
   pub(in crate::simulator) payload: Value,
   pub(in crate::simulator) context: PendingContext,
+  pub(in crate::simulator) triggered_by_csms: bool,
 }
 
 #[derive(Debug, Clone)]
