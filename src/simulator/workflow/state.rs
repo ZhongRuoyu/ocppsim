@@ -497,7 +497,7 @@ impl Simulator {
     connector: u16,
     local_tx_id: u64,
   ) -> Result<()> {
-    let protocol = self.config.protocol;
+    let status = self.active_charging_status(connector);
     let connector_state = self.connector_mut(connector)?;
     let Some(transaction) = connector_state.transaction.as_ref() else {
       return Ok(());
@@ -505,13 +505,7 @@ impl Simulator {
     if transaction.local_id != local_tx_id {
       return Ok(());
     }
-    connector_state.status = if transaction.deauthorized {
-      ConnectorStatus::SuspendedEvse
-    } else if protocol == OcppVersion::V1_6 {
-      ConnectorStatus::Charging
-    } else {
-      ConnectorStatus::Occupied
-    };
+    connector_state.status = status;
     Ok(())
   }
 
@@ -605,6 +599,29 @@ impl Simulator {
     Ok(())
   }
 
+  /// Returns the active status allowed by authorization and the stored limit.
+  pub(in crate::simulator) fn active_charging_status(
+    &self,
+    connector: u16,
+  ) -> ConnectorStatus {
+    let offered_limit = self
+      .connectors
+      .get(&connector)
+      .and_then(|state| state.offered_limit);
+    let deauthorized = self
+      .connectors
+      .get(&connector)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some_and(|transaction| transaction.deauthorized);
+    if deauthorized || offered_limit.is_some_and(|limit| limit <= 0.0) {
+      ConnectorStatus::SuspendedEvse
+    } else if self.config.protocol == OcppVersion::V1_6 {
+      ConnectorStatus::Charging
+    } else {
+      ConnectorStatus::Occupied
+    }
+  }
+
   /// Applies connector status transitions implied by charging profile
   /// enable/disable.
   pub(in crate::simulator) fn apply_charging_profile_state(
@@ -615,28 +632,13 @@ impl Simulator {
     else {
       return Ok(());
     };
-    let offered_limit = self
-      .connectors
-      .get(&connector)
-      .and_then(|item| item.offered_limit);
     let has_active_tx = self
       .connectors
       .get(&connector)
       .and_then(|item| item.transaction.as_ref())
       .is_some();
-    let deauthorized = self
-      .connectors
-      .get(&connector)
-      .and_then(|state| state.transaction.as_ref())
-      .is_some_and(|transaction| transaction.deauthorized);
     let target = if has_active_tx {
-      if deauthorized || offered_limit.is_some_and(|limit| limit <= 0.0) {
-        ConnectorStatus::SuspendedEvse
-      } else if self.config.protocol == OcppVersion::V1_6 {
-        ConnectorStatus::Charging
-      } else {
-        ConnectorStatus::Occupied
-      }
+      self.active_charging_status(connector)
     } else {
       match current {
         ConnectorStatus::Reserved

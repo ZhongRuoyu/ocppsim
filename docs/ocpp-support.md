@@ -414,6 +414,8 @@ OCPP 1.6 `GetCompositeSchedule` rejects invalid `chargingRateUnit` values with
 CALLERROR `PropertyConstraintViolation`.
 A stored limit of `0` is different from no profile: it is accepted and drives
 the connector into a suspended state while the transaction remains active.
+Stored limits apply when a later transaction starts and when a failed stop
+restores the active state.
 `ClearChargingProfile` honors connector or EVSE, profile ID, purpose, and stack
 level filters against that simplified store.
 It does not model profile stacking, recurrency, validity windows, phase

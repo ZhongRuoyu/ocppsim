@@ -463,3 +463,125 @@ fn invalid_profile_unit_is_rejected_before_mutation() {
     assert!(simulator.connectors[&1].offered_limit.is_none());
   });
 }
+
+#[test]
+fn stored_zero_profile_suspends_subsequent_transaction_start() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for remote_start in [false, true] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      simulator
+        .apply_set_charging_profile(1, &zero_limit_profile(protocol))
+        .unwrap();
+      assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Available);
+      simulator
+        .start_transaction(1, "TOKEN".into(), remote_start, None, true)
+        .unwrap();
+      assert_eq!(
+        simulator.connectors[&1].status,
+        ConnectorStatus::SuspendedEvse
+      );
+
+      let context = simulator.queue.pop_front().unwrap().context;
+      let response = if protocol == OcppVersion::V1_6 {
+        json!({"transactionId": 42, "idTagInfo": {"status": "Accepted"}})
+      } else {
+        json!({"idTokenInfo": {"status": "Accepted"}})
+      };
+      simulator
+        .apply_call_result_context(&context, &response)
+        .unwrap();
+      let status = queued_payload(&simulator, "StatusNotification");
+      if protocol == OcppVersion::V1_6 {
+        assert_eq!(status["status"], "SuspendedEVSE");
+      } else {
+        assert_eq!(status["connectorStatus"], "Occupied");
+      }
+
+      assert_eq!(
+        simulator.clear_charging_profiles_matching(vec![1], |_| true),
+        ResponseStatus::Accepted
+      );
+      let expected = if protocol == OcppVersion::V1_6 {
+        ConnectorStatus::Charging
+      } else {
+        ConnectorStatus::Occupied
+      };
+      assert_eq!(simulator.connectors[&1].status, expected);
+      assert!(simulator.connectors[&1].transaction.is_some());
+    }
+  }
+}
+
+#[test]
+fn zero_limit_remains_effective_after_stop_failure() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for failure in ["timeout", "error"] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      simulator
+        .apply_set_charging_profile(1, &zero_limit_profile(protocol))
+        .unwrap();
+      simulator
+        .start_transaction(1, "TOKEN".to_string(), false, None, true)
+        .unwrap();
+      let context = simulator.queue.pop_front().unwrap().context;
+      let response = if protocol == OcppVersion::V1_6 {
+        json!({"transactionId": 42, "idTagInfo": {"status": "Accepted"}})
+      } else {
+        json!({"idTokenInfo": {"status": "Accepted"}})
+      };
+      simulator
+        .apply_call_result_context(&context, &response)
+        .unwrap();
+      simulator.queue.clear();
+      simulator.stop_transaction(1, None, false, true).unwrap();
+      simulator.pending = Some(PendingCall {
+        message_id: "stop".to_string(),
+        sent_at: std::time::Instant::now(),
+        call: simulator.queue.pop_front().unwrap(),
+      });
+      if failure == "timeout" {
+        simulator.config.request_timeout = Duration::ZERO;
+        simulator.check_pending_timeout();
+      } else {
+        simulator
+          .handle_call_error("stop", "InternalError", "retry")
+          .unwrap();
+      }
+      assert_eq!(
+        simulator.connectors[&1].status,
+        ConnectorStatus::SuspendedEvse
+      );
+      assert!(simulator.connectors[&1].transaction.is_some());
+    }
+  }
+}
+
+fn zero_limit_profile(protocol: OcppVersion) -> Value {
+  let mut schedule = json!({
+    "startSchedule": "2026-11-03T00:00:00Z",
+    "chargingRateUnit": "W",
+    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 0}],
+  });
+  let mut profile = json!({
+    "stackLevel": 0,
+    "chargingProfilePurpose": "TxDefaultProfile",
+    "chargingProfileKind": "Absolute",
+  });
+  if protocol == OcppVersion::V1_6 {
+    profile["chargingProfileId"] = json!(1);
+    profile["chargingSchedule"] = schedule;
+    assert_schema_valid(
+      "schemas/1.6/SetChargingProfile.json",
+      &json!({"connectorId": 1, "csChargingProfiles": profile}),
+    );
+  } else {
+    schedule["id"] = json!(1);
+    profile["id"] = json!(1);
+    profile["chargingSchedule"] = json!([schedule]);
+    assert_schema_valid(
+      &schema_path(v2_x_schema_dir(protocol), "SetChargingProfileRequest.json"),
+      &json!({"evseId": 1, "chargingProfile": profile}),
+    );
+  }
+  profile
+}

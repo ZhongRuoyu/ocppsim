@@ -52,10 +52,7 @@ impl Simulator {
       self.ensure_outbound_queue_capacity(action)?;
     }
 
-    let status = match self.config.protocol {
-      OcppVersion::V1_6 => ConnectorStatus::Charging,
-      OcppVersion::V2_0_1 | OcppVersion::V2_1 => ConnectorStatus::Occupied,
-    };
+    let status = self.active_charging_status(connector);
 
     let local_tx_id = self.next_tx_id;
     self.next_tx_id = self.next_tx_id.saturating_add(1);
