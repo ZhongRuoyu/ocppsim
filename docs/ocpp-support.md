@@ -345,11 +345,13 @@ transport settings clears cached registration state so the next connection
 sends `BootNotification` even when the boot payload is otherwise unchanged.
 Manual `boot` commands respect the retry interval.
 Trigger-message boot requests bypass the interval as allowed by OCPP.
-While OCPP 1.6 registration is rejected, inbound CSMS calls are ignored without
-an OCPP response.
-Inbound `RemoteStartTransaction`, `RemoteStopTransaction`,
-`RequestStartTransaction`, and `RequestStopTransaction` requests are rejected
-while boot registration is pending, rejected, or awaiting a response.
+For OCPP 1.6, inbound CSMS calls are ignored without an OCPP response while
+boot registration is `Rejected`.
+`RemoteStartTransaction` and `RemoteStopTransaction` receive a `Rejected`
+response while registration is `Pending` or awaiting a boot response.
+For OCPP 2.x, `RequestStartTransaction` and `RequestStopTransaction` receive a
+`Rejected` response while registration is `Pending`, `Rejected`, or awaiting a
+boot response.
 
 Transaction starts are accepted only on known, startable connectors.
 Unavailable, faulted, reserved, occupied, and finishing connectors reject
