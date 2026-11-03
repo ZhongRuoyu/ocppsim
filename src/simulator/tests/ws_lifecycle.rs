@@ -2328,3 +2328,48 @@ async fn call_error_logs_escape_control_characters() {
       .any(|message| message.contains("\\u000d"))
   );
 }
+
+#[tokio::test]
+async fn remote_stop_v1_6_uses_only_the_csms_transaction_id() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.config.strict = true;
+  for (connector, remote_id) in [(1, 101), (2, 1)] {
+    simulator
+      .start_transaction(connector, "TOKEN".to_string(), false, None, false)
+      .expect("start locally");
+    simulator
+      .set_v1_6_transaction_id(connector, u64::from(connector), remote_id)
+      .expect("assign CSMS transaction ID");
+  }
+
+  for (message_id, transaction_id, expected_status) in
+    [("local-only", 2, "Rejected"), ("remote-id", 1, "Accepted")]
+  {
+    simulator
+      .handle_incoming_call(
+        &mut write,
+        message_id,
+        "RemoteStopTransaction",
+        json!({ "transactionId": transaction_id }),
+      )
+      .await
+      .expect("handle remote stop");
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected remote stop response");
+    };
+    assert_eq!(payload["status"], json!(expected_status));
+  }
+
+  let stop = simulator.queue.front().expect("queued stop");
+  assert_eq!(stop.payload["transactionId"], json!(1));
+  assert!(matches!(
+    stop.context,
+    PendingContext::StopTxV1_6 { connector: 2, .. }
+  ));
+  assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Charging);
+  assert_eq!(simulator.connectors[&2].status, ConnectorStatus::Finishing);
+}

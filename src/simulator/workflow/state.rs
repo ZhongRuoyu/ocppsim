@@ -503,16 +503,14 @@ impl Simulator {
     Ok(())
   }
 
-  /// Finds a connector by OCPP 1.6 transaction ID or local fallback ID.
+  /// Finds a connector by the transaction ID assigned by the OCPP 1.6 CSMS.
   pub(in crate::simulator) fn find_v1_6_transaction(
     &self,
     transaction_id: i64,
   ) -> Option<u16> {
     self.connectors.iter().find_map(|(connector, state)| {
       state.transaction.as_ref().and_then(|tx| {
-        if tx.v1_6_transaction_id == Some(transaction_id)
-          || tx.local_id.cast_signed() == transaction_id
-        {
+        if tx.v1_6_transaction_id == Some(transaction_id) {
           Some(*connector)
         } else {
           None
