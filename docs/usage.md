@@ -120,7 +120,7 @@ protocol = "1.6"
 connectors = 2
 
 [charge-points.lab]
-ws-url = "ws://localhost:9000/ocpp/CP-003"
+ws-url = "wss://localhost:9000/ocpp/CP-003"
 id = "CP-003"
 append-cp-id = false
 protocol = "2.0.1"
