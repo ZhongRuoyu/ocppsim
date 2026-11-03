@@ -1,5 +1,6 @@
 use super::super::{
-  ConnectorStatus, ResponseStatus, Result, Simulator, Value, anyhow,
+  ChargingRateUnit, ConnectorStatus, ResponseStatus, Result, Simulator, Value,
+  anyhow,
 };
 use super::request::AvailabilityRequest;
 
@@ -161,6 +162,7 @@ impl Simulator {
       return Ok(ResponseStatus::Rejected);
     };
 
+    Self::profile_charging_rate_unit(profile)?;
     let Some(limit) = Self::extract_profile_limit(profile) else {
       return Err(anyhow!(
         "charging profile must include one numeric limit value."
@@ -201,6 +203,7 @@ impl Simulator {
     let Some(profile) = profile else {
       return Ok(());
     };
+    Self::profile_charging_rate_unit(profile)?;
     if Self::extract_profile_limit(profile).is_some() {
       return Ok(());
     }
@@ -253,6 +256,39 @@ impl Simulator {
       let _ = self.apply_charging_profile_state(connector);
     }
     ResponseStatus::Accepted
+  }
+
+  /// Returns the stored limit only when no unit conversion is necessary.
+  pub(in crate::simulator) fn composite_schedule_limit(
+    &self,
+    connector: u16,
+    requested_unit: Option<ChargingRateUnit>,
+  ) -> Option<(f64, ChargingRateUnit)> {
+    let limit = self.connectors.get(&connector)?.offered_limit?;
+    let profile = self.charging_profiles.get(&connector)?;
+    let unit = Self::profile_charging_rate_unit(profile).ok()?;
+    if requested_unit.is_some_and(|requested| requested != unit) {
+      return None;
+    }
+    Some((limit, unit))
+  }
+
+  fn profile_charging_rate_unit(profile: &Value) -> Result<ChargingRateUnit> {
+    let schedule =
+      profile.get("chargingSchedule").map_or(profile, |schedule| {
+        schedule
+          .as_array()
+          .and_then(|items| items.first())
+          .unwrap_or(schedule)
+      });
+    let Some(value) = schedule.get("chargingRateUnit") else {
+      // Minimal non-strict profiles retain the historical watt default.
+      return Ok(ChargingRateUnit::W);
+    };
+    value
+      .as_str()
+      .and_then(ChargingRateUnit::parse)
+      .ok_or_else(|| anyhow!("chargingRateUnit must be A or W."))
   }
 
   /// Extracts the first charging limit value from supported profile shapes.

@@ -223,17 +223,10 @@ impl Simulator {
         ChargingRateUnit::parse(value)
           .ok_or_else(|| anyhow!("chargingRateUnit must be A or W."))
       })
-      .transpose()?
-      .unwrap_or(ChargingRateUnit::W);
-    let Some(state) = self.connectors.get(&request.connector) else {
-      return Ok(to_value(&GetCompositeScheduleV1_6Response {
-        status: ResponseStatus::Rejected.as_str(),
-        connector_id: None,
-        schedule_start: None,
-        charging_schedule: None,
-      }));
-    };
-    let Some(limit) = state.offered_limit else {
+      .transpose()?;
+    let Some((limit, charging_rate_unit)) =
+      self.composite_schedule_limit(request.connector, charging_rate_unit)
+    else {
       return Ok(to_value(&GetCompositeScheduleV1_6Response {
         status: ResponseStatus::Rejected.as_str(),
         connector_id: None,

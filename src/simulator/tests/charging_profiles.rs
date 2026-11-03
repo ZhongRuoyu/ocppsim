@@ -389,3 +389,77 @@ fn clear_charging_profile_v2_x_honors_criteria_filters() {
     assert!(!simulator.charging_profiles.contains_key(&2));
   });
 }
+
+#[test]
+fn composite_schedule_preserves_profile_units() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for (unit, other_unit) in [("A", "W"), ("W", "A")] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      let schedule = json!({
+        "id": 1,
+        "chargingRateUnit": unit,
+        "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16}]
+      });
+      let profile = if protocol == OcppVersion::V1_6 {
+        json!({"chargingSchedule": schedule})
+      } else {
+        json!({"chargingSchedule": [schedule]})
+      };
+      simulator.apply_set_charging_profile(1, &profile).unwrap();
+
+      for requested_unit in [None, Some(unit), Some(other_unit)] {
+        let mut request = json!({
+          "connectorId": 1,
+          "evseId": 1,
+          "duration": 60
+        });
+        if let Some(requested_unit) = requested_unit {
+          request["chargingRateUnit"] = json!(requested_unit);
+        }
+        let response = if protocol == OcppVersion::V1_6 {
+          simulator.get_composite_schedule_v1_6(&request).unwrap()
+        } else {
+          simulator.get_composite_schedule_v2_x(&request).unwrap()
+        };
+        if requested_unit == Some(other_unit) {
+          assert_eq!(response["status"], "Rejected");
+          assert!(response.get("schedule").is_none());
+          assert!(response.get("chargingSchedule").is_none());
+        } else {
+          assert_eq!(response["status"], "Accepted");
+          let schedule = if protocol == OcppVersion::V1_6 {
+            &response["chargingSchedule"]
+          } else {
+            &response["schedule"]
+          };
+          assert_eq!(schedule["chargingRateUnit"], unit);
+          assert_eq!(schedule["chargingSchedulePeriod"][0]["limit"], 16.0);
+        }
+        let schema = if protocol == OcppVersion::V1_6 {
+          "schemas/1.6/GetCompositeScheduleResponse.json".to_string()
+        } else {
+          schema_path(
+            v2_x_schema_dir(protocol),
+            "GetCompositeScheduleResponse.json",
+          )
+        };
+        assert_schema_valid(&schema, &response);
+      }
+    }
+  }
+}
+
+#[test]
+fn invalid_profile_unit_is_rejected_before_mutation() {
+  for_each_v2_x_simulator(|_, mut simulator| {
+    let profile = json!({
+      "chargingSchedule": [{
+        "chargingRateUnit": "Wh",
+        "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16}]
+      }]
+    });
+    assert!(simulator.apply_set_charging_profile(1, &profile).is_err());
+    assert!(simulator.charging_profiles.is_empty());
+    assert!(simulator.connectors[&1].offered_limit.is_none());
+  });
+}

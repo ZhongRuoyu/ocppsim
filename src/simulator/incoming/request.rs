@@ -363,10 +363,11 @@ impl CompositeScheduleRequestV1_6 {
   }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(in crate::simulator) struct CompositeScheduleRequest_V2_X {
   pub connector: u16,
   pub duration: u64,
+  pub charging_rate_unit: Option<String>,
 }
 
 impl CompositeScheduleRequest_V2_X {
@@ -374,6 +375,7 @@ impl CompositeScheduleRequest_V2_X {
     Ok(Self {
       connector: required_u16_field(payload, "evseId")?,
       duration: required_u64_field(payload, "duration")?,
+      charging_rate_unit: optional_string_field(payload, "chargingRateUnit")?,
     })
   }
 }

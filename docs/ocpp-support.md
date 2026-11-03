@@ -405,6 +405,11 @@ Charging profiles supplied with accepted `RemoteStartTransaction` and
 store.
 A connector with no stored profile returns `Rejected` for composite schedule
 requests.
+Composite schedules retain the effective profile's `A` or `W` unit.
+Requests for a different unit return `Rejected`; voltage and phase assumptions
+for conversion are not modeled.
+Minimal non-strict profiles that omit the unit retain the simulator's `W`
+default.
 OCPP 1.6 `GetCompositeSchedule` rejects invalid `chargingRateUnit` values with
 CALLERROR `PropertyConstraintViolation`.
 A stored limit of `0` is different from no profile: it is accepted and drives

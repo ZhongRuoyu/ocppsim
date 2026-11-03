@@ -251,13 +251,17 @@ impl Simulator {
     payload: &Value,
   ) -> Result<Value> {
     let request = CompositeScheduleRequest_V2_X::parse(payload)?;
-    let Some(state) = self.connectors.get(&request.connector) else {
-      return Ok(to_value(&GetCompositeSchedule_V2_X_Response {
-        status: ResponseStatus::Rejected.as_str(),
-        schedule: None,
-      }));
-    };
-    let Some(limit) = state.offered_limit else {
+    let requested_unit = request
+      .charging_rate_unit
+      .as_deref()
+      .map(|value| {
+        ChargingRateUnit::parse(value)
+          .ok_or_else(|| anyhow!("chargingRateUnit must be A or W."))
+      })
+      .transpose()?;
+    let Some((limit, unit)) =
+      self.composite_schedule_limit(request.connector, requested_unit)
+    else {
       return Ok(to_value(&GetCompositeSchedule_V2_X_Response {
         status: ResponseStatus::Rejected.as_str(),
         schedule: None,
@@ -271,7 +275,7 @@ impl Simulator {
         evse_id: request.connector,
         duration: request.duration,
         schedule_start: &timestamp,
-        charging_rate_unit: ChargingRateUnit::W.as_str(),
+        charging_rate_unit: unit.as_str(),
         charging_schedule_period: vec![ChargingSchedulePeriod {
           start_period: 0,
           limit,
