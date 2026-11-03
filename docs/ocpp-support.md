@@ -16,8 +16,8 @@ Supported behavior includes:
 - clear cache,
 - availability changes,
 - local authorization list version and updates,
-- reservation and cancellation,
-- connector unlock,
+- partial reservation support and cancellation,
+- idle connector unlock,
 - simplified smart-charging profile set, filtered clear, and composite
   schedule,
 - trigger message for implemented message types,
@@ -152,7 +152,7 @@ affect that behavior unless strict mode is enabled.
 | `MeterValues`                | Supported  | Supported  |
 | `RequestStartTransaction`    | Supported  | Supported  |
 | `RequestStopTransaction`     | Supported  | Supported  |
-| `ReserveNow`                 | Supported  | Supported  |
+| `ReserveNow`                 | Partial    | Partial    |
 | `Reset`                      | Supported  | Supported  |
 | `SecurityEventNotification`  | Supported  | Supported  |
 | `SendLocalList`              | Supported  | Supported  |
@@ -168,6 +168,8 @@ affect that behavior unless strict mode is enabled.
 All other schema actions are explicitly unsupported until implemented.
 The `TriggerMessage` action is field-level support; see the trigger scope above
 for version-specific values.
+`ReserveNow` supports reserving and canceling a connector, with the ownership
+and expiry limitations described below.
 
 ## Unsupported OCPP 2.0.1 Actions
 
@@ -370,8 +372,18 @@ The scheduled `Unavailable` state is applied after the stop or transaction-end
 event is acknowledged.
 
 Reservations are keyed by reservation ID and duplicate IDs are rejected.
+Reservation support is partial in every version: token ownership and expiry
+fields are checked for presence but are not retained or enforced.
+Reservations do not expire automatically, and even the reservation owner cannot
+start a transaction while the connector remains reserved.
+Cancel the reservation before starting a transaction.
 The local authorization list version is stored, but local authorization list
 contents are not used to make authorization decisions.
+
+OCPP 1.6 `UnlockConnector` supports idle connectors only.
+It returns `UnlockFailed` when a transaction is active and does not implement
+the transaction-stop sequence required by the complete unlock workflow.
+Stop the transaction and wait for its acknowledgement before requesting unlock.
 
 Smart charging is an effective-limit simulation, not a full profile engine.
 One profile is stored per connector.
