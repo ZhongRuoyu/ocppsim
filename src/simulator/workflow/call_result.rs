@@ -2,10 +2,10 @@ use std::time::Instant;
 
 use super::super::{
   BootRegistrationStatus, ConfigurationKey, ConnectorStatus,
-  DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, OcppVersion,
-  PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator,
-  StopReason, TransactionEventRequest, TransactionTriggerReason, TxEventType,
-  UiLogLevel, Value, authorize_status,
+  DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, PendingContext,
+  REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator, StopReason,
+  TransactionEventRequest, TransactionTriggerReason, TxEventType, UiLogLevel,
+  Value, authorize_status,
 };
 
 impl Simulator {
@@ -116,7 +116,7 @@ impl Simulator {
       }
       self.enqueue_boot_status_notifications()?;
       self.enqueue_pending_security_event_notifications();
-    } else if self.config.protocol == OcppVersion::V1_6 {
+    } else {
       self.apply_boot_retry_interval(interval);
     }
     Ok(())

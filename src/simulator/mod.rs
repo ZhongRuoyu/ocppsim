@@ -65,7 +65,8 @@ type WsRead = SplitStream<WsStream>;
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
 const DEFAULT_BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_BOOT_RETRY_INTERVAL: Duration = Duration::from_hours(24);
+// Preserve the full OCPP signed 32-bit interval range without overflowing timers.
+const MAX_BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(0x7fff_ffff);
 
 #[derive(PartialEq, Eq)]
 struct BootRegistrationScope {

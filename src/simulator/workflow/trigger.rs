@@ -76,7 +76,7 @@ impl Simulator {
   ) -> Result<ResponseStatus> {
     match requested {
       TriggerMessage_V2_X::BootNotification => {
-        self.enqueue_boot_notification()?;
+        self.enqueue_triggered_boot_notification()?;
       }
       TriggerMessage_V2_X::FirmwareStatusNotification => {
         self.enqueue_firmware_status_notification("Idle", None);

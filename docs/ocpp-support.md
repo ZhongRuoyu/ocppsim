@@ -326,12 +326,14 @@ For OCPP 1.6, `Pending` and `Rejected` registration states block
 station-initiated requests until a later accepted boot response.
 Reconnects send `BootNotification` only when registration is not accepted yet or
 the current boot payload differs from the last queued boot payload, and only
-after any OCPP 1.6 non-accepted boot retry interval has expired.
+after any non-accepted boot retry interval has expired.
+All supported versions honor the CSMS interval for `Pending` and `Rejected`
+responses, with a short fallback delay when the interval is zero.
 Changing the connection URL, charge point identity, protocol, or security
 transport settings clears cached registration state so the next connection
 sends `BootNotification` even when the boot payload is otherwise unchanged.
 Manual `boot` commands respect the retry interval.
-Trigger-message boot requests bypass the interval as allowed by OCPP 1.6.
+Trigger-message boot requests bypass the interval as allowed by OCPP.
 While OCPP 1.6 registration is rejected, inbound CSMS calls are ignored without
 an OCPP response.
 Inbound `RemoteStartTransaction`, `RemoteStopTransaction`,
