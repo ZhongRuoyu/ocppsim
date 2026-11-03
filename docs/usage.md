@@ -180,9 +180,9 @@ the mouse and remain available after `ocppsim` exits.
 - `meter`: show the local meter counters in Wh for all connectors.
 - `meter <connector>`: show the local meter counter in Wh for one connector.
 - `meter <connector> <wh>`: set the local meter counter.
-  Prefix the value with `+` or `-` to increase or decrease the current
-  reading instead.
-  For example, `meter 1 +100` adds 100 Wh and `meter 1 -50` subtracts 50 Wh.
+  Use `+=<wh>` or `-=<wh>` to increase or decrease the current reading.
+  For example, `meter 1 +=100` adds 100 Wh and `meter 1 -=50` subtracts 50 Wh.
+  A plain sign is part of an absolute value: `meter 1 -50` sets -50 Wh.
 - `send-meter <connector> [<wh>]`: send the stored energy reading.
   If a value is given, first set or adjust the reading as with `meter`.
 - `soc`: show local EV state of charge for all connectors.
@@ -190,8 +190,9 @@ the mouse and remain available after `ocppsim` exits.
   Unknown readings are shown as `unset`.
 - `soc <connector> <percent>`: set local EV state of charge from 0 to 100.
   Decimal percentages are accepted, so `75.5` means 75.5%.
-  Prefix the value with `+` or `-` to adjust it by percentage points.
-  For example, `soc 1 +5` increases 75% to 80%.
+  Use `+=<percent>` or `-=<percent>` to adjust it by percentage points.
+  For example, `soc 1 +=5` increases 75% to 80%.
+  `soc 1 +5` sets 5%; a negative absolute SoC is rejected.
   A value set while idle becomes the initial SoC of the next transaction.
 - `send-soc <connector> [<percent>]`: send the stored SoC reading.
   If a value is given, first set or adjust the reading as with `soc`.
@@ -208,6 +209,8 @@ the mouse and remain available after `ocppsim` exits.
   confirmation. Press `y` or `Y` to exit; any other non-control key cancels.
   Ctrl-C and Ctrl-D leave the confirmation active.
 
+Adjustment operators and their operands form one token, such as `-=2.5`.
+Both send commands accept the same absolute and adjustment forms.
 An invalid adjustment leaves the reading unchanged and cancels the send.
 The `meter` and `soc` query forms work online or offline and do not change
 readings or send OCPP messages.

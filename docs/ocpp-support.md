@@ -321,7 +321,9 @@ Readings are stored independently per connector and measurand.
 The energy register starts at zero; SoC is absent until explicitly set.
 `send-meter` sends the energy reading, and `send-soc` sends the SoC reading.
 Both accept an optional value to store before sending.
-A leading `+` or `-` adjusts the stored value in Wh or percentage points.
+The prefixes `+=` and `-=` adjust the stored value in Wh or percentage points.
+Plain signed numbers are absolute values, subject to the measurand's bounds.
+The operator and its operand form one token, such as `+=100` or `-=2.5`.
 Adjustments require a known reading; overflow or a resulting SoC outside
 0 to 100 leaves state unchanged and cancels sending.
 The `meter` and `soc` query forms display one connector or all connectors,

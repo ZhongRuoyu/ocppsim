@@ -531,14 +531,14 @@ mod tests {
     for (input, update) in [
       ("meter 2 1234", MeterUpdate::Set(MeterReading::energy(1234))),
       (
-        "meter 2 +100",
+        "meter 2 +=100",
         MeterUpdate::Adjust(
           Measurand::EnergyActiveImportRegister,
           (100).into(),
         ),
       ),
       (
-        "meter 2 -50",
+        "meter 2 -=50",
         MeterUpdate::Adjust(
           Measurand::EnergyActiveImportRegister,
           (-50).into(),
@@ -559,14 +559,14 @@ mod tests {
         Some(MeterUpdate::Set(MeterReading::energy(5678))),
       ),
       (
-        "send-meter 2 +100",
+        "send-meter 2 +=100",
         Some(MeterUpdate::Adjust(
           Measurand::EnergyActiveImportRegister,
           (100).into(),
         )),
       ),
       (
-        "send-meter 2 -50",
+        "send-meter 2 -=50",
         Some(MeterUpdate::Adjust(
           Measurand::EnergyActiveImportRegister,
           (-50).into(),
@@ -638,7 +638,7 @@ mod tests {
         MeterUpdate::Set(MeterReading::soc(75.5).unwrap()),
       ),
       (
-        "soc 2 -2.5",
+        "soc 2 -=2.5",
         MeterUpdate::Adjust(Measurand::Soc, delta.clone()),
       ),
     ] {
@@ -656,7 +656,7 @@ mod tests {
         Some(MeterUpdate::Set(MeterReading::soc(80.0).unwrap())),
       ),
       (
-        "send-soc 2 -2.5",
+        "send-soc 2 -=2.5",
         Some(MeterUpdate::Adjust(Measurand::Soc, delta)),
       ),
     ] {

@@ -20,13 +20,13 @@ const USAGE_START: &str = "Usage: start <connector> <idToken>";
 const USAGE_STOP: &str = "Usage: stop <connector> [reason]";
 const USAGE_CONNECTOR_STATUS: &str =
   "Usage: connector-status <connector> <status>";
-const USAGE_METER: &str = "Usage: meter [<connector> [<wh>|+<wh>|-<wh>]]";
+const USAGE_METER: &str = "Usage: meter [<connector> [<wh>|+=<wh>|-=<wh>]]";
 const USAGE_SEND_METER: &str =
-  "Usage: send-meter <connector> [<wh>|+<wh>|-<wh>]";
+  "Usage: send-meter <connector> [<wh>|+=<wh>|-=<wh>]";
 const USAGE_SOC: &str =
-  "Usage: soc [<connector> [<percent>|+<percent>|-<percent>]]";
+  "Usage: soc [<connector> [<percent>|+=<percent>|-=<percent>]]";
 const USAGE_SEND_SOC: &str =
-  "Usage: send-soc <connector> [<percent>|+<percent>|-<percent>]";
+  "Usage: send-soc <connector> [<percent>|+=<percent>|-=<percent>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
   "Usage: heartbeat | heartbeat start <seconds> | heartbeat stop";
@@ -316,27 +316,30 @@ fn parse_meter_command(
   }
 }
 
-/// Interprets signed values as adjustments in the measurand's native unit.
+/// Parses explicit adjustments while preserving signs on absolute readings.
 fn parse_meter_update(
   measurand: Measurand,
   value: Option<&&str>,
   usage: &str,
 ) -> Result<MeterUpdate, String> {
   let raw = parse_required(value, usage)?;
-  let relative = raw.starts_with('+') || raw.starts_with('-');
+  let adjustment = raw.strip_prefix("+=").or_else(|| raw.strip_prefix("-="));
+  let operand = adjustment.unwrap_or(raw);
+  let subtract = raw.starts_with("-=");
   match measurand {
     Measurand::EnergyActiveImportRegister => {
-      let value = parse_i64(value, usage)?;
-      Ok(if relative {
-        MeterUpdate::Adjust(measurand, value.into())
+      if adjustment.is_some() {
+        let delta = parse_energy_adjustment(operand, subtract, usage)?;
+        Ok(MeterUpdate::Adjust(measurand, delta.into()))
       } else {
-        MeterUpdate::Set(MeterReading::energy(value))
-      })
+        parse_i64(value, usage)
+          .map(|value| MeterUpdate::Set(MeterReading::energy(value)))
+      }
     }
     Measurand::Soc => {
-      let value = raw.parse::<f64>().map_err(|_| usage.to_string())?;
-      if relative {
-        let delta = Number::from_f64(value)
+      let value = operand.parse::<f64>().map_err(|_| usage.to_string())?;
+      if adjustment.is_some() {
+        let delta = Number::from_f64(if subtract { -value } else { value })
           .ok_or_else(|| "SoC adjustment must be finite.".to_string())?;
         Ok(MeterUpdate::Adjust(measurand, delta))
       } else {
@@ -345,6 +348,22 @@ fn parse_meter_update(
     }
     _ => unreachable!("built-in meter commands use energy or SoC"),
   }
+}
+
+/// Parses an integer adjustment with checked negation and signed Wh bounds.
+fn parse_energy_adjustment(
+  operand: &str,
+  subtract: bool,
+  usage: &str,
+) -> Result<i64, String> {
+  // A wider intermediate lets -=9223372036854775808 represent i64::MIN.
+  let value = operand.parse::<i128>().map_err(|_| usage.to_string())?;
+  let delta = if subtract {
+    value.checked_neg().ok_or_else(|| usage.to_string())?
+  } else {
+    value
+  };
+  i64::try_from(delta).map_err(|_| usage.to_string())
 }
 
 fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
@@ -394,18 +413,19 @@ pub fn help_text() -> &'static str {
   meter <connector>
     Show the local meter counter (Wh) for one connector.
   meter <connector> <wh>
-    Set local meter counter (Wh) for connector.
-    Use +<wh> or -<wh> to adjust the current reading.
+    Set local meter counter (Wh) for connector; plain signs are absolute.
+    Use +=<wh> or -=<wh> to adjust the current reading.
   send-meter <connector> [<wh>]
     Optionally update the local meter counter, then send the energy reading.
-    Use +<wh> or -<wh> to adjust the reading before sending.
+    Use +=<wh> or -=<wh> to adjust the reading before sending.
   soc
     Show local EV state of charge for all connectors, or unset if unknown.
   soc <connector>
     Show local EV state of charge for one connector.
   soc <connector> <percent>
     Set local EV state of charge (0-100 percent, decimals allowed).
-    Use +<percent> or -<percent> to adjust it by percentage points.
+    Plain signed numbers set an absolute value.
+    Use +=<percent> or -=<percent> to adjust it by percentage points.
   send-soc <connector> [<percent>]
     Optionally set or adjust state of charge, then send the stored SoC.
   heartbeat
@@ -583,57 +603,46 @@ mod tests {
 
   #[test]
   fn meter_updates_distinguish_relative_and_absolute_values() {
-    use crate::metering::MeterUpdate;
-
+    let set = |value| MeterUpdate::Set(MeterReading::energy(value));
+    let adjust = |value: i64| {
+      MeterUpdate::Adjust(Measurand::EnergyActiveImportRegister, value.into())
+    };
     for (value, expected) in [
-      ("100", MeterUpdate::Set(MeterReading::energy(100))),
-      (
-        "+100",
-        MeterUpdate::Adjust(
-          Measurand::EnergyActiveImportRegister,
-          (100).into(),
-        ),
-      ),
-      (
-        "-50",
-        MeterUpdate::Adjust(
-          Measurand::EnergyActiveImportRegister,
-          (-50).into(),
-        ),
-      ),
-      ("0", MeterUpdate::Set(MeterReading::energy(0))),
-      (
-        "+0",
-        MeterUpdate::Adjust(Measurand::EnergyActiveImportRegister, (0).into()),
-      ),
-      (
-        "-0",
-        MeterUpdate::Adjust(Measurand::EnergyActiveImportRegister, (0).into()),
-      ),
-      (
-        "+9223372036854775807",
-        MeterUpdate::Adjust(
-          Measurand::EnergyActiveImportRegister,
-          (i64::MAX).into(),
-        ),
-      ),
-      (
-        "-9223372036854775808",
-        MeterUpdate::Adjust(
-          Measurand::EnergyActiveImportRegister,
-          (i64::MIN).into(),
-        ),
-      ),
+      ("100", set(100)),
+      ("+100", set(100)),
+      ("-50", set(-50)),
+      ("0", set(0)),
+      ("+0", set(0)),
+      ("-0", set(0)),
+      ("+9223372036854775807", set(i64::MAX)),
+      ("-9223372036854775808", set(i64::MIN)),
+      ("+=100", adjust(100)),
+      ("-=50", adjust(-50)),
+      ("+=0", adjust(0)),
+      ("-=0", adjust(0)),
+      ("+=-50", adjust(-50)),
+      ("-=-50", adjust(50)),
+      ("-=+50", adjust(-50)),
+      ("+=9223372036854775807", adjust(i64::MAX)),
+      ("+=-9223372036854775808", adjust(i64::MIN)),
+      ("-=9223372036854775808", adjust(i64::MIN)),
     ] {
-      assert!(matches!(
-        parse_command(&format!("meter 1 {value}")).unwrap(),
-        UserCommand::UpdateMeterValue { connector: 1, update } if update == expected
-      ));
-      assert!(matches!(
-        parse_command(&format!("send-meter 1 {value}")).unwrap(),
-        UserCommand::SendMeterValue { measurand: Measurand::EnergyActiveImportRegister,  connector: 1, update: Some(update) }
-          if update == expected
-      ));
+      for name in ["meter", "send-meter"] {
+        let update = match parse_command(&format!("{name} 1 {value}")).unwrap()
+        {
+          UserCommand::UpdateMeterValue {
+            connector: 1,
+            update,
+          }
+          | UserCommand::SendMeterValue {
+            connector: 1,
+            measurand: Measurand::EnergyActiveImportRegister,
+            update: Some(update),
+          } => update,
+          other => panic!("unexpected command: {other:?}"),
+        };
+        assert_eq!(update, expected, "{name} 1 {value}");
+      }
     }
   }
 
@@ -648,11 +657,23 @@ mod tests {
         "+-1",
         "-+1",
         "+1.5",
+        "+=",
+        "-=",
+        "+=--1",
+        "-=--1",
+        "+==1",
+        "*=1",
+        "+=1.5",
         "+9223372036854775808",
         "-9223372036854775809",
+        "+=9223372036854775808",
+        "-=9223372036854775809",
+        "-=-9223372036854775808",
+        "-=-170141183460469231731687303715884105728",
       ] {
         assert!(parse_command(&format!("{command} 1 {value}")).is_err());
       }
+      assert!(parse_command(&format!("{command} 1 += 5")).is_err());
     }
   }
 
@@ -694,7 +715,7 @@ mod tests {
 
   #[test]
   fn soc_commands_accept_percentages_and_optional_send_values() {
-    for percent in ["0", "75.5", "100"] {
+    for percent in ["0", "+0", "-0", "75.5", "+75.5", "100"] {
       for name in ["soc", "send-soc"] {
         let command = parse_command(&format!("{name} 2 {percent}"))
           .expect("valid percentage");
@@ -725,13 +746,15 @@ mod tests {
   }
 
   #[test]
-  fn soc_commands_parse_signed_decimal_adjustments() {
+  fn soc_commands_parse_explicit_decimal_adjustments() {
     for (input, delta) in [
-      ("soc 1 +2.5", 2.5),
-      ("soc 1 -1", -1.0),
-      ("soc 1 +0", 0.0),
-      ("soc 1 -0", 0.0),
-      ("send-soc 1 -2.5", -2.5),
+      ("soc 1 +=2.5", 2.5),
+      ("soc 1 -=1", -1.0),
+      ("soc 1 +=0", 0.0),
+      ("soc 1 -=0", 0.0),
+      ("soc 1 +=-2.5", -2.5),
+      ("soc 1 -=-2.5", 2.5),
+      ("send-soc 1 -=2.5", -2.5),
     ] {
       let update = match parse_command(input).unwrap() {
         UserCommand::UpdateMeterValue { update, .. }
@@ -745,7 +768,10 @@ mod tests {
         if actual.as_f64() == Some(delta)));
     }
     for name in ["soc", "send-soc"] {
-      for value in ["+", "-", "++1", "--1", "+-1", "-+1", "+NaN", "+inf"] {
+      for value in [
+        "+", "-", "++1", "--1", "+-1", "-+1", "+NaN", "+inf", "+=", "-=",
+        "+=--1", "-=--1", "+==1", "*=1", "+=NaN", "-=inf", "+=1e999",
+      ] {
         assert!(parse_command(&format!("{name} 1 {value}")).is_err());
       }
     }
@@ -754,7 +780,9 @@ mod tests {
   #[test]
   fn soc_commands_reject_invalid_or_out_of_range_values() {
     for name in ["soc", "send-soc"] {
-      for value in ["100.1", "NaN", "inf", "-inf", "1e999", "75%", "abc"] {
+      for value in [
+        "-1", "-0.1", "100.1", "NaN", "inf", "-inf", "1e999", "75%", "abc",
+      ] {
         assert!(
           parse_command(&format!("{name} 1 {value}")).is_err(),
           "{name} {value}"
