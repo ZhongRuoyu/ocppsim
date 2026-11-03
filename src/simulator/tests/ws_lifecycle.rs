@@ -1466,6 +1466,69 @@ async fn v1_6_update_firmware_returns_not_supported_for_whitepaper() {
 }
 
 #[tokio::test]
+async fn malformed_set_variables_batch_has_no_side_effects() {
+  for protocol in v2_x_protocols() {
+    for malformed in [
+      json!({}),
+      json!({
+        "component": { "name": "ChargingStation" },
+        "variable": { "name": "HeartbeatInterval" },
+        "attributeValue": 5,
+      }),
+      json!({
+        "component": { "name": 1 },
+        "variable": { "name": "HeartbeatInterval" },
+        "attributeValue": "5",
+      }),
+      json!({
+        "component": { "name": "ChargingStation" },
+        "variable": {},
+        "attributeValue": "5",
+      }),
+    ] {
+      let (mut write, _read, _server_write, mut server_read) =
+        in_memory_ws_pair().await;
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      simulator.connected = true;
+      simulator.start_heartbeat(10);
+      let previous = simulator.configuration
+        [&ConfigurationKey::HeartbeatInterval]
+        .value
+        .clone();
+      simulator
+        .handle_incoming_call(
+          &mut write,
+          "malformed-batch",
+          "SetVariables",
+          json!({ "setVariableData": [
+          set_variable_data("BasicAuthPassword", "0123456789abcdef"),
+          set_variable_data("HeartbeatInterval", "20"),
+          malformed,
+        ] }),
+        )
+        .await
+        .unwrap();
+      let OcppFrame::CallError { code, .. } =
+        read_ocpp_frame(&mut server_read).await
+      else {
+        panic!("expected CALLERROR frame");
+      };
+      assert_eq!(code, "FormatViolation");
+      assert!(simulator.security.basic_auth_password.is_none());
+      assert!(simulator.security.pending_reconnect.is_none());
+      assert!(simulator.security.events.is_empty());
+      assert!(simulator.queue.is_empty());
+      assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
+      assert_eq!(
+        simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+        previous
+      );
+      simulator.stop_heartbeat();
+    }
+  }
+}
+
+#[tokio::test]
 async fn strict_validation_redacts_invalid_request_credentials() {
   for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
     for secret in ["0123456789abcdef".to_string(), "1".repeat(2_501)] {

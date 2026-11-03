@@ -116,11 +116,16 @@ impl Simulator {
     if entries.is_empty() {
       return Err(anyhow!("setVariableData must not be empty."));
     }
-    let mut results = Vec::with_capacity(entries.len());
-
-    for entry in entries {
-      results.push(self.set_variable_result_v2_x(entry)?);
-    }
+    // Validate every entry before applying writes that can restart transport
+    // or heartbeat tasks. A malformed batch must leave configuration intact.
+    let entries = entries
+      .iter()
+      .map(SetVariableEntry::parse)
+      .collect::<Result<Vec<_>>>()?;
+    let results = entries
+      .into_iter()
+      .map(|entry| self.set_variable_result_v2_x(entry))
+      .collect();
 
     Ok(to_value(&SetVariables_V2_X_Response {
       set_variable_result: results,
@@ -320,43 +325,65 @@ impl Simulator {
 
   fn set_variable_result_v2_x(
     &mut self,
-    entry: &Value,
-  ) -> Result<VariableResult_V2_X> {
-    let component = variable_component(entry)?;
-    let variable = variable_name(entry)?;
-    let attribute_type = variable_attribute_type(entry);
-    let attribute_value = entry
-      .get("attributeValue")
-      .and_then(Value::as_str)
-      .ok_or_else(|| {
-      anyhow!("setVariableData.attributeValue is required.")
-    })?;
-    let base = VariableResult_V2_X::from_entry(
-      entry,
-      ResponseStatus::UnknownVariable.as_str(),
-    )?;
+    entry: SetVariableEntry<'_>,
+  ) -> VariableResult_V2_X {
+    let SetVariableEntry {
+      component,
+      variable,
+      attribute_type,
+      attribute_value,
+      result: base,
+    } = entry;
 
     if !is_supported_variable_component(component) {
-      return Ok(VariableResult_V2_X {
+      return VariableResult_V2_X {
         attribute_status: ResponseStatus::UnknownComponent.as_str(),
         ..base
-      });
+      };
     }
     if !is_supported_variable_attribute(attribute_type) {
-      return Ok(VariableResult_V2_X {
+      return VariableResult_V2_X {
         attribute_status: ResponseStatus::NotSupportedAttributeType.as_str(),
         ..base
-      });
+      };
     }
 
     let Some(configuration_key) = self.configuration_key(variable) else {
-      return Ok(base);
+      return base;
     };
-    Ok(VariableResult_V2_X {
+    VariableResult_V2_X {
       attribute_status: self
         .set_configuration_value(configuration_key, attribute_value)
         .as_str(),
       ..base
+    }
+  }
+}
+
+struct SetVariableEntry<'a> {
+  component: &'a str,
+  variable: &'a str,
+  attribute_type: Option<VariableAttributeType>,
+  attribute_value: &'a str,
+  result: VariableResult_V2_X,
+}
+
+impl<'a> SetVariableEntry<'a> {
+  fn parse(entry: &'a Value) -> Result<Self> {
+    Ok(Self {
+      component: variable_component(entry)?,
+      variable: variable_name(entry)?,
+      attribute_type: variable_attribute_type(entry),
+      attribute_value: entry
+        .get("attributeValue")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+          anyhow!("setVariableData.attributeValue is required.")
+        })?,
+      result: VariableResult_V2_X::from_entry(
+        entry,
+        ResponseStatus::UnknownVariable.as_str(),
+      )?,
     })
   }
 }
