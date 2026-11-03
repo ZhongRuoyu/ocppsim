@@ -17,7 +17,7 @@ const USAGE_STOP: &str = "Usage: stop <connector> [reason]";
 const USAGE_CONNECTOR_STATUS: &str =
   "Usage: connector-status <connector> <status>";
 const USAGE_METER: &str = "Usage: meter <connector> <wh>";
-const USAGE_SEND_METER: &str = "Usage: send-meter <connector>";
+const USAGE_SEND_METER: &str = "Usage: send-meter <connector> [<wh>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
   "Usage: heartbeat | heartbeat start <seconds> | heartbeat stop";
@@ -56,6 +56,7 @@ pub enum UserCommand {
   },
   SendMeter {
     connector: u16,
+    value_wh: Option<i64>,
   },
   Heartbeat,
   HeartbeatStart {
@@ -264,9 +265,16 @@ fn parse_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
 }
 
 fn parse_send_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
-  ensure_exact(parts, 2, USAGE_SEND_METER)?;
+  ensure_range(parts, 2..=3, USAGE_SEND_METER)?;
   let connector = parse_u16(parts.get(1), USAGE_SEND_METER)?;
-  Ok(UserCommand::SendMeter { connector })
+  let value_wh = parts
+    .get(2)
+    .map(|value| parse_i64(Some(value), USAGE_SEND_METER))
+    .transpose()?;
+  Ok(UserCommand::SendMeter {
+    connector,
+    value_wh,
+  })
 }
 
 fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
@@ -313,8 +321,8 @@ pub fn help_text() -> &'static str {
     Status is mapped to a valid status for the active protocol before sending.
   meter <connector> <wh>
     Set local meter counter (Wh) for connector.
-  send-meter <connector>
-    Send MeterValues for connector using current local meter value.
+  send-meter <connector> [<wh>]
+    Optionally set the local meter counter (Wh), then send current meter data.
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
@@ -418,7 +426,7 @@ fn ensure_range(
 #[cfg(test)]
 mod tests {
   use super::{
-    ConnectTarget, UserCommand, help_text, parse_command,
+    ConnectTarget, USAGE_SEND_METER, UserCommand, help_text, parse_command,
     redact_sensitive_command,
   };
 
@@ -483,6 +491,25 @@ mod tests {
         assert!(reason.is_none());
       }
       _ => panic!("unexpected command variant"),
+    }
+  }
+
+  #[test]
+  /// Verifies malformed meter shorthand is rejected before dispatch.
+  fn rejects_invalid_send_meter_arguments() {
+    for input in [
+      "send-meter",
+      "send-meter invalid",
+      "send-meter 1 invalid",
+      "send-meter 1 12.5",
+      "send-meter 1 9223372036854775808",
+      "send-meter 1 100 extra",
+    ] {
+      assert_eq!(
+        parse_command(input).unwrap_err(),
+        USAGE_SEND_METER,
+        "{input}"
+      );
     }
   }
 

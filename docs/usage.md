@@ -178,7 +178,9 @@ the mouse and remain available after `ocppsim` exits.
 - `stop <connector> [reason]`: stop a local transaction.
 - `connector-status <connector> <status>`: set local connector status.
 - `meter <connector> <wh>`: set the local meter counter.
-- `send-meter <connector>`: send current meter data.
+- `send-meter <connector> [<wh>]`: send current meter data.
+  If `<wh>` is given, first set the local meter counter, equivalent to
+  `meter <connector> <wh>` followed by `send-meter <connector>`.
 - `heartbeat`: send one heartbeat.
 - `heartbeat start <seconds>`: start periodic heartbeats.
 - `heartbeat stop`: stop periodic heartbeats.

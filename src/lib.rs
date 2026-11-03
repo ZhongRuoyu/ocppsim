@@ -280,9 +280,10 @@ fn handle_user_command(
       },
       app,
     ),
-    UserCommand::SendMeter { connector } => {
-      send_command(cmd_tx, SimulatorCommand::SendMeter { connector }, app)
-    }
+    UserCommand::SendMeter {
+      connector,
+      value_wh,
+    } => send_meter_command(cmd_tx, connector, value_wh, app),
     UserCommand::Heartbeat => {
       send_command(cmd_tx, SimulatorCommand::Heartbeat, app)
     }
@@ -322,6 +323,30 @@ fn resolve_connect_config(
     }
   };
   Ok(SimulatorConnectionConfig::from_resolved(&resolved))
+}
+
+/// Queues an optional local meter update followed by a meter send.
+///
+/// Returns `true` when the simulator task is unavailable.
+fn send_meter_command(
+  cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
+  connector: u16,
+  value_wh: Option<i64>,
+  app: &mut TerminalApp,
+) -> bool {
+  if let Some(value_wh) = value_wh
+    && send_command(
+      cmd_tx,
+      SimulatorCommand::SetMeter {
+        connector,
+        value_wh,
+      },
+      app,
+    )
+  {
+    return true;
+  }
+  send_command(cmd_tx, SimulatorCommand::SendMeter { connector }, app)
 }
 
 /// Sends a simulator command over the command channel.
@@ -473,6 +498,23 @@ mod tests {
       SimulatorCommand::SendMeter { connector } => assert_eq!(connector, 2),
       other => panic!("unexpected command: {other:?}"),
     }
+
+    assert!(!dispatch("send-meter 2 5678", &cli_args, &cmd_tx, &mut app));
+    match next_command(&mut cmd_rx) {
+      SimulatorCommand::SetMeter {
+        connector,
+        value_wh,
+      } => {
+        assert_eq!(connector, 2);
+        assert_eq!(value_wh, 5678);
+      }
+      other => panic!("unexpected command: {other:?}"),
+    }
+    match next_command(&mut cmd_rx) {
+      SimulatorCommand::SendMeter { connector } => assert_eq!(connector, 2),
+      other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(cmd_rx.try_recv().is_err());
 
     assert!(!dispatch(
       "heartbeat start 12",
