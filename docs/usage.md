@@ -222,8 +222,9 @@ Profile 2 requires `wss://` plus HTTP Basic authentication.
 Profile 3 requires `wss://` plus `--client-cert` and `--client-key`.
 
 Basic Auth password validation follows the selected OCPP version.
-OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
-characters.
+OCPP 1.6 `AuthorizationKey` values must contain an even number of ASCII
+hexadecimal characters, from 32 to 40, representing a 16- to 20-byte key.
+The simulator decodes that key before encoding the HTTP Basic credentials.
 OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
 `passwordString` characters.
 OCPP 2.1 `BasicAuthPassword` values must be 16 to 64 UTF-8 `passwordString`
@@ -232,6 +233,7 @@ For OCPP 2.1 this is a compatibility variable exposed through
 `SecurityCtrlr`.
 The simulator does not implement the full 2.1 `NetworkConfiguration`
 component or network-profile model.
+OCPP 2.x passwords are used as UTF-8 text without hexadecimal decoding.
 
 Profile 1 sends Basic Auth over an unencrypted WebSocket; the password is only
 Base64 encoded on the wire.

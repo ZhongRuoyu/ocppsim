@@ -29,11 +29,13 @@ Supported behavior includes:
 Security support is intentionally simulator-level.
 The transport layer supports security profiles 1 and 2 with HTTP Basic
 authentication and profile 3 with configured client certificate/key paths.
-OCPP 1.6 `AuthorizationKey` values must be 32 to 40 ASCII hexadecimal
-characters.
+OCPP 1.6 `AuthorizationKey` values must contain an even number of ASCII
+hexadecimal characters, from 32 to 40, representing a 16- to 20-byte key.
+HTTP Basic authentication uses the decoded key bytes.
 OCPP 2.0.1 `BasicAuthPassword` values must be 16 to 40 OCPP
 `passwordString` characters, and OCPP 2.1 `BasicAuthPassword` values must be
 16 to 64 UTF-8 `passwordString` characters.
+OCPP 2.x passwords are used as UTF-8 text without hexadecimal decoding.
 For OCPP 2.1 this is compatibility support through `SecurityCtrlr`.
 The simulator does not implement the full 2.1 `NetworkConfiguration`
 component, `ActiveNetworkProfile`, or `SetNetworkProfile` behavior.

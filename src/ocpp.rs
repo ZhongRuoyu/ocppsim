@@ -20,7 +20,9 @@ const OCPP_DATA_TRANSFER_MESSAGE_ID_MAX_CHARS: usize = 50;
 /// Returns the human-readable Basic Auth password requirement for a protocol.
 pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
   match protocol {
-    OcppVersion::V1_6 => "32 to 40 ASCII hexadecimal characters",
+    OcppVersion::V1_6 => {
+      "32 to 40 ASCII hexadecimal characters in complete byte pairs"
+    }
     OcppVersion::V2_0_1 => "16 to 40 OCPP passwordString characters",
     OcppVersion::V2_1 => "16 to 64 UTF-8 passwordString characters",
   }
@@ -106,6 +108,7 @@ fn is_valid_v1_6_authorization_key(value: &str) -> bool {
   (OCPP_V1_6_AUTHORIZATION_KEY_MIN_LENGTH
     ..=OCPP_V1_6_AUTHORIZATION_KEY_MAX_LENGTH)
     .contains(&bytes.len())
+    && bytes.len().is_multiple_of(2)
     && bytes.iter().all(u8::is_ascii_hexdigit)
 }
 

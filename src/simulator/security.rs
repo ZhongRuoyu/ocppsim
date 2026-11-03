@@ -28,6 +28,9 @@ use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::error::TlsError;
 use url::Url;
 
+use crate::ocpp::{
+  basic_auth_password_requirement, is_valid_basic_auth_password,
+};
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 
 const SIMULATED_CSR: &str = concat!(
@@ -93,7 +96,25 @@ impl Simulator {
       return Ok(None);
     };
     let cp_id = self.validated_basic_auth_identity(profile)?;
-    let credentials = format!("{cp_id}:{password}");
+    let mut credentials = cp_id.as_bytes().to_vec();
+    credentials.push(b':');
+    if self.config.protocol == OcppVersion::V1_6 {
+      if !is_valid_basic_auth_password(self.config.protocol, password) {
+        return Err(anyhow!(
+          "AuthorizationKey must be {}.",
+          basic_auth_password_requirement(self.config.protocol)
+        ));
+      }
+      // OCPP 1.6 stores the key as hex, but authenticates with its raw bytes.
+      // Validation above guarantees complete pairs of ASCII hex digits.
+      for &[high, low] in password.as_bytes().as_chunks::<2>().0 {
+        let high = hex_value(high).expect("validated hex digit");
+        let low = hex_value(low).expect("validated hex digit");
+        credentials.push((high << 4) | low);
+      }
+    } else {
+      credentials.extend_from_slice(password.as_bytes());
+    }
     let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
     HeaderValue::from_str(&format!("Basic {encoded}"))
       .map(Some)

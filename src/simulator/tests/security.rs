@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::simulator::SimulatorConnectionConfig;
@@ -970,6 +971,88 @@ fn secure_connection_non_tls_failure_does_not_record_security_event() {
   simulator.record_secure_connection_failure(&error);
 
   assert!(simulator.security.events.is_empty());
+}
+
+#[test]
+fn basic_auth_v1_6_encodes_binary_authorization_keys() {
+  let key = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x80, 0xff, 0xab, 0xcd,
+    0xef, 0x3a, 0x7f, 0xcc, 0x10, 0x20, 0x30, 0x40,
+  ];
+  for profile in [1, 2] {
+    for length in 16..=20 {
+      let mut simulator = simulator_for_tests();
+      simulator.security.security_profile = Some(profile);
+      let password = &"000102030405060780ffabcdef3a7fcc10203040"[..length * 2];
+      let uppercase = password.to_ascii_uppercase();
+      for password in [password, uppercase.as_str()] {
+        assert_change_configuration_status(
+          &mut simulator,
+          "AuthorizationKey",
+          password,
+          ResponseStatus::Accepted,
+        );
+        let mut expected = b"CP-TEST:".to_vec();
+        expected.extend_from_slice(&key[..length]);
+        assert_eq!(basic_auth_credentials(&simulator), expected);
+      }
+    }
+  }
+}
+
+#[test]
+fn basic_auth_v2_x_preserves_password_text() {
+  for protocol in v2_x_protocols() {
+    for profile in [1, 2] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      simulator.security.security_profile = Some(profile);
+      let mut passwords =
+        vec!["0123456789abcdef0123456789abcdef", "not-a-hex-passwd_+:"];
+      if protocol == OcppVersion::V2_1 {
+        passwords.push("password-\u{e9}-123456");
+      }
+      for password in passwords {
+        simulator.security.basic_auth_password = Some(password.to_string());
+        assert_eq!(
+          basic_auth_credentials(&simulator),
+          format!("CP-TEST:{password}").as_bytes()
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn basic_auth_v1_6_rejects_partial_key_bytes() {
+  for length in [33, 35, 37, 39] {
+    let mut simulator = simulator_for_tests();
+    let password = "a".repeat(length);
+    assert_change_configuration_status(
+      &mut simulator,
+      "AuthorizationKey",
+      &password,
+      ResponseStatus::Rejected,
+    );
+    assert!(simulator.security.basic_auth_password.is_none());
+    simulator.security.security_profile = Some(1);
+    simulator.security.basic_auth_password = Some(password);
+    assert!(simulator.basic_auth_header().is_err());
+  }
+}
+
+fn basic_auth_credentials(simulator: &Simulator) -> Vec<u8> {
+  let header = simulator
+    .basic_auth_header()
+    .expect("valid authentication header")
+    .expect("Basic authentication is configured");
+  let encoded = header
+    .to_str()
+    .expect("ASCII header")
+    .strip_prefix("Basic ")
+    .expect("Basic authentication scheme");
+  base64::engine::general_purpose::STANDARD
+    .decode(encoded)
+    .expect("Base64 credentials")
 }
 
 #[test]
