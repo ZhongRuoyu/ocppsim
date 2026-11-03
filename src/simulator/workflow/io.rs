@@ -175,7 +175,8 @@ impl Simulator {
       .map(|(id, state)| ConnectorSnapshot {
         id: *id,
         status: state.status.display().to_string(),
-        meter_wh: state.meter_wh,
+        meter_wh: state.meter_values.energy_wh(),
+        meter_values: state.meter_values.snapshot(),
         transaction: state.transaction.as_ref().map(|tx| {
           match self.config.protocol {
             OcppVersion::V1_6 => format!(

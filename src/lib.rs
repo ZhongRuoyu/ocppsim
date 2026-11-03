@@ -5,6 +5,7 @@ mod args;
 mod commands;
 mod config;
 mod embedded_schemas;
+mod metering;
 mod ocpp;
 mod sensitive;
 mod simulator;
@@ -24,10 +25,11 @@ use commands::{
   ConnectTarget, UserCommand, help_text, parse_command,
   redact_sensitive_command, standards_text,
 };
+use metering::MeterUpdate;
+use ocpp::Measurand;
 use sensitive::redact_text_secrets;
 use simulator::{
-  MeterUpdate, SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig,
-  run_simulator,
+  SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig, run_simulator,
 };
 use tokio::sync::mpsc;
 use version::version_string;
@@ -270,15 +272,18 @@ fn handle_user_command(
       SimulatorCommand::SetConnectorStatus { connector, status },
       app,
     ),
-    UserCommand::GetMeter { connector } => {
-      send_command(cmd_tx, SimulatorCommand::GetMeter { connector }, app)
-    }
-    UserCommand::Meter { connector, update } => {
+    UserCommand::GetMeterValue {
+      connector,
+      measurand,
+    } => get_meter_command(cmd_tx, connector, measurand, app),
+    UserCommand::UpdateMeterValue { connector, update } => {
       update_meter_command(cmd_tx, connector, update, app)
     }
-    UserCommand::SendMeter { connector, update } => {
-      send_meter_command(cmd_tx, connector, update, app)
-    }
+    UserCommand::SendMeterValue {
+      connector,
+      measurand,
+      update,
+    } => send_meter_command(cmd_tx, connector, measurand, update, app),
     UserCommand::Heartbeat => {
       send_command(cmd_tx, SimulatorCommand::Heartbeat, app)
     }
@@ -320,6 +325,23 @@ fn resolve_connect_config(
   Ok(SimulatorConnectionConfig::from_resolved(&resolved))
 }
 
+/// Queues a local reading query, returning true if the simulator is unavailable.
+fn get_meter_command(
+  cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
+  connector: Option<u16>,
+  measurand: Measurand,
+  app: &mut TerminalApp,
+) -> bool {
+  send_command(
+    cmd_tx,
+    SimulatorCommand::GetMeterValue {
+      connector,
+      measurand,
+    },
+    app,
+  )
+}
+
 /// Queues a local meter update, returning true if the simulator is unavailable.
 fn update_meter_command(
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
@@ -329,7 +351,7 @@ fn update_meter_command(
 ) -> bool {
   send_command(
     cmd_tx,
-    SimulatorCommand::UpdateMeter { connector, update },
+    SimulatorCommand::UpdateMeterValue { connector, update },
     app,
   )
 }
@@ -340,12 +362,17 @@ fn update_meter_command(
 fn send_meter_command(
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
   connector: u16,
+  measurand: Measurand,
   update: Option<MeterUpdate>,
   app: &mut TerminalApp,
 ) -> bool {
   send_command(
     cmd_tx,
-    SimulatorCommand::SendMeter { connector, update },
+    SimulatorCommand::SendMeterValue {
+      connector,
+      measurand,
+      update,
+    },
     app,
   )
 }
@@ -371,6 +398,7 @@ mod tests {
   use tokio::sync::mpsc;
 
   use super::*;
+  use crate::metering::MeterReading;
 
   #[test]
   /// Verifies connection-oriented commands dispatch the expected variants.
@@ -483,7 +511,10 @@ mod tests {
     for (input, expected_connector) in [("meter", None), ("meter 2", Some(2))] {
       assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
       match next_command(&mut cmd_rx) {
-        SimulatorCommand::GetMeter { connector } => {
+        SimulatorCommand::GetMeterValue {
+          measurand: Measurand::EnergyActiveImportRegister,
+          connector,
+        } => {
           assert_eq!(connector, expected_connector);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -498,26 +529,53 @@ mod tests {
     let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
     for (input, update) in [
-      ("meter 2 1234", MeterUpdate::Set(1234)),
-      ("meter 2 +100", MeterUpdate::Adjust(100)),
-      ("meter 2 -50", MeterUpdate::Adjust(-50)),
+      ("meter 2 1234", MeterUpdate::Set(MeterReading::energy(1234))),
+      (
+        "meter 2 +100",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (100).into(),
+        ),
+      ),
+      (
+        "meter 2 -50",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (-50).into(),
+        ),
+      ),
     ] {
       assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
       assert!(matches!(next_command(&mut cmd_rx),
-        SimulatorCommand::UpdateMeter { connector: 2, update: actual }
+        SimulatorCommand::UpdateMeterValue { connector: 2, update: actual }
           if actual == update
       ));
     }
 
     for (input, update) in [
       ("send-meter 2", None),
-      ("send-meter 2 5678", Some(MeterUpdate::Set(5678))),
-      ("send-meter 2 +100", Some(MeterUpdate::Adjust(100))),
-      ("send-meter 2 -50", Some(MeterUpdate::Adjust(-50))),
+      (
+        "send-meter 2 5678",
+        Some(MeterUpdate::Set(MeterReading::energy(5678))),
+      ),
+      (
+        "send-meter 2 +100",
+        Some(MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (100).into(),
+        )),
+      ),
+      (
+        "send-meter 2 -50",
+        Some(MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (-50).into(),
+        )),
+      ),
     ] {
       assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
       assert!(matches!(next_command(&mut cmd_rx),
-        SimulatorCommand::SendMeter { connector: 2, update: actual }
+        SimulatorCommand::SendMeterValue { measurand: Measurand::EnergyActiveImportRegister,  connector: 2, update: actual }
           if actual == update
       ));
       assert!(cmd_rx.try_recv().is_err());
@@ -558,6 +616,57 @@ mod tests {
         assert_eq!(status, "Faulted");
       }
       other => panic!("unexpected command: {other:?}"),
+    }
+  }
+
+  #[test]
+  fn soc_commands_dispatch_queries_updates_and_atomic_sends() {
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    for (input, connector) in [("soc", None), ("soc 2", Some(2))] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::GetMeterValue {
+          connector: actual, measurand: Measurand::Soc,
+        } if actual == connector
+      ));
+      assert!(cmd_rx.try_recv().is_err());
+    }
+    let delta = serde_json::Number::from_f64(-2.5).unwrap();
+    for (input, update) in [
+      (
+        "soc 2 75.5",
+        MeterUpdate::Set(MeterReading::soc(75.5).unwrap()),
+      ),
+      (
+        "soc 2 -2.5",
+        MeterUpdate::Adjust(Measurand::Soc, delta.clone()),
+      ),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::UpdateMeterValue { connector: 2, update: actual }
+          if actual == update
+      ));
+      assert!(cmd_rx.try_recv().is_err());
+    }
+    for (input, update) in [
+      ("send-soc 2", None),
+      (
+        "send-soc 2 80",
+        Some(MeterUpdate::Set(MeterReading::soc(80.0).unwrap())),
+      ),
+      (
+        "send-soc 2 -2.5",
+        Some(MeterUpdate::Adjust(Measurand::Soc, delta)),
+      ),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::SendMeterValue {
+          connector: 2, measurand: Measurand::Soc, update: actual,
+        } if actual == update
+      ));
+      assert!(cmd_rx.try_recv().is_err());
     }
   }
 

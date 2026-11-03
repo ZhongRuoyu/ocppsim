@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::{self, BufWriter, Stdout, Write};
 use std::path::{Path, PathBuf};
@@ -1133,9 +1134,23 @@ impl TerminalApp {
 /// Formats one connector snapshot line for UI logging.
 fn format_connector_line(connector: ConnectorSnapshot) -> String {
   let tx = connector.transaction.unwrap_or_else(|| "-".to_string());
+  let mut measurements = String::new();
+  for reading in &connector.meter_values {
+    if reading.measurand == crate::ocpp::Measurand::EnergyActiveImportRegister {
+      continue;
+    }
+    write!(
+      measurements,
+      " {}={}{}",
+      reading.measurand.as_str(),
+      reading.value,
+      reading.unit,
+    )
+    .expect("formatting a string cannot fail");
+  }
   format!(
-    "Connector {} status={} meter={}Wh tx={}",
-    connector.id, connector.status, connector.meter_wh, tx,
+    "Connector {} status={} meter={}Wh{} tx={}",
+    connector.id, connector.status, connector.meter_wh, measurements, tx,
   )
 }
 

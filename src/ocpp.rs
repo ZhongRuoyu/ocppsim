@@ -1090,6 +1090,70 @@ wire_enum! {
   }
 }
 
+impl Measurand {
+  const V1_6: &'static [Self] = &[
+    Self::EnergyActiveExportRegister,
+    Self::EnergyActiveImportRegister,
+    Self::EnergyReactiveExportRegister,
+    Self::EnergyReactiveImportRegister,
+    Self::EnergyActiveExportInterval,
+    Self::EnergyActiveImportInterval,
+    Self::EnergyReactiveExportInterval,
+    Self::EnergyReactiveImportInterval,
+    Self::PowerActiveExport,
+    Self::PowerActiveImport,
+    Self::PowerOffered,
+    Self::PowerReactiveExport,
+    Self::PowerReactiveImport,
+    Self::PowerFactor,
+    Self::CurrentImport,
+    Self::CurrentExport,
+    Self::CurrentOffered,
+    Self::Voltage,
+    Self::Frequency,
+    Self::Temperature,
+    Self::Soc,
+    Self::Rpm,
+  ];
+
+  const V2_0_1: &'static [Self] = &[
+    Self::CurrentExport,
+    Self::CurrentImport,
+    Self::CurrentOffered,
+    Self::EnergyActiveExportRegister,
+    Self::EnergyActiveImportRegister,
+    Self::EnergyReactiveExportRegister,
+    Self::EnergyReactiveImportRegister,
+    Self::EnergyActiveExportInterval,
+    Self::EnergyActiveImportInterval,
+    Self::EnergyActiveNet,
+    Self::EnergyReactiveExportInterval,
+    Self::EnergyReactiveImportInterval,
+    Self::EnergyReactiveNet,
+    Self::EnergyApparentNet,
+    Self::EnergyApparentImport,
+    Self::EnergyApparentExport,
+    Self::Frequency,
+    Self::PowerActiveExport,
+    Self::PowerActiveImport,
+    Self::PowerFactor,
+    Self::PowerOffered,
+    Self::PowerReactiveExport,
+    Self::PowerReactiveImport,
+    Self::Soc,
+    Self::Voltage,
+  ];
+
+  /// Returns whether the measurand is defined by the selected OCPP version.
+  pub fn is_supported(self, protocol: OcppVersion) -> bool {
+    match protocol {
+      OcppVersion::V1_6 => Self::V1_6.contains(&self),
+      OcppVersion::V2_0_1 => Self::V2_0_1.contains(&self),
+      OcppVersion::V2_1 => !matches!(self, Self::Temperature | Self::Rpm),
+    }
+  }
+}
+
 wire_enum! {
   pub enum MeterValuePhase {
     L1 => "L1",
@@ -2132,6 +2196,30 @@ mod tests {
       TransactionTriggerReason::parse,
       TransactionTriggerReason::as_str,
     );
+  }
+
+  #[test]
+  fn measurand_support_matches_each_protocol_schema() {
+    for (protocol, schema) in [
+      (OcppVersion::V1_6, "schemas/1.6/MeterValues.json"),
+      (OcppVersion::V2_0_1, "schemas/2.0.1/MeterValuesRequest.json"),
+      (OcppVersion::V2_1, "schemas/2.1/MeterValuesRequest.json"),
+    ] {
+      let tokens = if protocol == OcppVersion::V1_6 {
+        enum_tokens_at_path(schema, &meter_sampled_value_path("measurand"))
+      } else {
+        definition_enum_tokens(schema, "MeasurandEnumType")
+      };
+      for measurand in Measurand::ALL {
+        assert_eq!(
+          measurand.is_supported(protocol),
+          tokens.contains(measurand.as_str()),
+          "{} in OCPP {}",
+          measurand.as_str(),
+          protocol.label(),
+        );
+      }
+    }
   }
 
   #[test]

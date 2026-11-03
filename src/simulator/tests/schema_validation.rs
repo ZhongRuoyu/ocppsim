@@ -604,9 +604,11 @@ fn transaction_event_update_and_end_v2_x_validate_against_schema() {
       .expect("start should succeed");
     simulator.queue.clear();
 
-    simulator.set_meter(1, 1200).expect("set meter");
     simulator
-      .send_meter(1, true)
+      .set_meter_value(1, MeterReading::energy(1200))
+      .expect("set meter");
+    simulator
+      .send_meter_value(1, Measurand::EnergyActiveImportRegister, true)
       .expect("meter update should enqueue");
     let update_payload = queued_payload(&simulator, "TransactionEvent");
     assert_eq!(update_payload["eventType"], json!("Updated"));

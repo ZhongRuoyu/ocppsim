@@ -7,9 +7,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::args::ResolvedCliArgs;
+use crate::metering::{MeterReading, MeterReadings, MeterUpdate};
 use crate::ocpp::{
-  ConfigurationKey, ConnectorStatus as OcppConnectorStatus, OcppVersion,
-  StopReason, TransactionTriggerReason,
+  ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
+  OcppVersion, StopReason, TransactionTriggerReason,
 };
 
 #[derive(Debug, Clone)]
@@ -177,14 +178,8 @@ pub struct ConnectorSnapshot {
   pub id: u16,
   pub status: String,
   pub meter_wh: i64,
+  pub meter_values: Vec<MeterReading>,
   pub transaction: Option<String>,
-}
-
-/// An absolute meter reading or a relative adjustment in watt-hours.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeterUpdate {
-  Set(i64),
-  Adjust(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -211,15 +206,17 @@ pub enum SimulatorCommand {
     connector: u16,
     reason: Option<String>,
   },
-  GetMeter {
+  GetMeterValue {
     connector: Option<u16>,
+    measurand: Measurand,
   },
-  UpdateMeter {
+  UpdateMeterValue {
     connector: u16,
     update: MeterUpdate,
   },
-  SendMeter {
+  SendMeterValue {
     connector: u16,
+    measurand: Measurand,
     update: Option<MeterUpdate>,
   },
   Heartbeat,
@@ -320,7 +317,7 @@ impl ConnectorStatus {
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct ConnectorState {
   pub(in crate::simulator) status: ConnectorStatus,
-  pub(in crate::simulator) meter_wh: i64,
+  pub(in crate::simulator) meter_values: MeterReadings,
   pub(in crate::simulator) offered_limit: Option<f64>,
   pub(in crate::simulator) scheduled_availability: Option<ConnectorStatus>,
   pub(in crate::simulator) transaction: Option<TransactionState>,

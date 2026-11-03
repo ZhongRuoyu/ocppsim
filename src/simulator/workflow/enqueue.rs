@@ -1,3 +1,5 @@
+use crate::metering::MeterReading;
+
 use super::super::payloads::{
   Authorize_V2_X_Request, AuthorizeV1_6Request, BootNotification_V2_X_Request,
   BootNotificationV1_6Request, ChargingStationInfo, DataTransferRequestPayload,
@@ -6,15 +8,15 @@ use super::super::payloads::{
   MeterValuesV1_6Request, SampledValue_V2_X, SampledValueV1_6,
   StatusNotification_V2_X_Request, StatusNotificationV1_6Request,
   StatusPayload, TransactionEvent_V2_X_Request, TransactionInfoPayload,
-  UnitOfMeasure, to_value,
+  to_value,
 };
 use super::super::{
-  BootReason, ConnectorState, ConnectorStatus, IdTokenType, Measurand,
-  MeterUnit, OcppVersion, OutgoingAction, PendingContext, QueuedCall,
-  ReadingContext, Result, Simulator, StatusNotificationErrorCode,
-  TransactionEventRequest, TransactionState, TxEventType, UiLogLevel, Value,
-  anyhow, now_timestamp, validate_boot_notification_fields,
-  validate_data_transfer_fields, validate_outbound_id_token,
+  BootReason, ConnectorState, ConnectorStatus, IdTokenType, OcppVersion,
+  OutgoingAction, PendingContext, QueuedCall, ReadingContext, Result,
+  Simulator, StatusNotificationErrorCode, TransactionEventRequest,
+  TransactionState, TxEventType, UiLogLevel, Value, anyhow, now_timestamp,
+  validate_boot_notification_fields, validate_data_transfer_fields,
+  validate_outbound_id_token,
 };
 
 impl Simulator {
@@ -329,43 +331,42 @@ impl Simulator {
     }
   }
 
-  /// Enqueues a `MeterValues` request for one connector.
+  /// Enqueues all known readings for a connector in a `MeterValues` request.
   pub(in crate::simulator) fn enqueue_meter_values(
     &mut self,
     connector: u16,
   ) -> Result<()> {
+    let readings = self
+      .connector_ref(connector)?
+      .meter_values
+      .for_protocol(self.config.protocol);
+    self.enqueue_meter_values_with_readings(connector, &readings)
+  }
+
+  /// Enqueues selected readings in a protocol-specific `MeterValues` request.
+  pub(in crate::simulator) fn enqueue_meter_values_with_readings(
+    &mut self,
+    connector: u16,
+    readings: &[MeterReading],
+  ) -> Result<()> {
     let state = self.connector_ref(connector)?;
     let timestamp = now_timestamp();
-    match self.config.protocol {
+    let payload = match self.config.protocol {
       OcppVersion::V1_6 => {
-        let payload =
-          Self::meter_values_v1_6_payload(connector, state, &timestamp);
-        self.enqueue_call(
-          OutgoingAction::MeterValues.as_str(),
-          payload,
-          PendingContext::MeterValues { connector },
-        );
+        Self::meter_values_v1_6_payload(connector, state, readings, &timestamp)
       }
       OcppVersion::V2_0_1 => {
-        let payload =
-          Self::meter_values_v2_0_1_payload(connector, state, &timestamp);
-        self.enqueue_call(
-          OutgoingAction::MeterValues.as_str(),
-          payload,
-          PendingContext::MeterValues { connector },
-        );
+        Self::meter_values_v2_0_1_payload(connector, readings, &timestamp)
       }
       OcppVersion::V2_1 => {
-        let payload =
-          Self::meter_values_v2_1_payload(connector, state, &timestamp);
-        self.enqueue_call(
-          OutgoingAction::MeterValues.as_str(),
-          payload,
-          PendingContext::MeterValues { connector },
-        );
+        Self::meter_values_v2_1_payload(connector, readings, &timestamp)
       }
-    }
-    Ok(())
+    };
+    self.try_enqueue_call(
+      OutgoingAction::MeterValues.as_str(),
+      payload,
+      PendingContext::MeterValues { connector },
+    )
   }
 
   /// Enqueues an OCPP 2.x `TransactionEvent` request.
@@ -374,6 +375,19 @@ impl Simulator {
   pub(in crate::simulator) fn enqueue_transaction_event(
     &mut self,
     request: &TransactionEventRequest,
+  ) -> Result<()> {
+    let readings = self
+      .connector_ref(request.connector)?
+      .meter_values
+      .for_protocol(self.config.protocol);
+    self.enqueue_transaction_event_with_readings(request, &readings)
+  }
+
+  /// Enqueues a transaction event with an explicit snapshot of meter readings.
+  pub(in crate::simulator) fn enqueue_transaction_event_with_readings(
+    &mut self,
+    request: &TransactionEventRequest,
+    readings: &[MeterReading],
   ) -> Result<()> {
     let state = self.connector_ref(request.connector)?;
 
@@ -394,7 +408,7 @@ impl Simulator {
       OcppVersion::V2_0_1 => Self::transaction_event_v2_0_1_payload(
         request,
         transaction,
-        state.meter_wh,
+        readings,
         &timestamp,
         context.as_str(),
         event_type_label,
@@ -403,7 +417,7 @@ impl Simulator {
       OcppVersion::V2_1 => Self::transaction_event_v2_1_payload(
         request,
         transaction,
-        state.meter_wh,
+        readings,
         &timestamp,
         context.as_str(),
         event_type_label,
@@ -601,68 +615,77 @@ impl Simulator {
   fn meter_values_v1_6_payload(
     connector: u16,
     state: &ConnectorState,
+    readings: &[MeterReading],
     timestamp: &str,
   ) -> Value {
-    let meter_wh_str = state.meter_wh.to_string();
     to_value(&MeterValuesV1_6Request {
       connector_id: connector,
       transaction_id: state
         .transaction
         .as_ref()
-        .and_then(|tx| tx.v1_6_transaction_id),
+        .and_then(|transaction| transaction.v1_6_transaction_id),
       meter_value: vec![MeterValueEntry {
         timestamp,
-        sampled_value: vec![SampledValueV1_6 {
-          value: &meter_wh_str,
-          context: ReadingContext::SamplePeriodic.as_str(),
-          measurand: Measurand::EnergyActiveImportRegister.as_str(),
-          unit: MeterUnit::Wh.as_str(),
-        }],
+        sampled_value: readings
+          .iter()
+          .map(|reading| {
+            SampledValueV1_6::new(
+              reading,
+              ReadingContext::SamplePeriodic.as_str(),
+            )
+          })
+          .collect(),
       }],
     })
   }
 
   fn meter_values_v2_0_1_payload(
     connector: u16,
-    state: &ConnectorState,
+    readings: &[MeterReading],
     timestamp: &str,
   ) -> Value {
-    Self::meter_values_v2_x_payload(connector, state, timestamp)
+    Self::meter_values_v2_x_payload(connector, readings, timestamp)
   }
 
   fn meter_values_v2_1_payload(
     connector: u16,
-    state: &ConnectorState,
+    readings: &[MeterReading],
     timestamp: &str,
   ) -> Value {
-    Self::meter_values_v2_x_payload(connector, state, timestamp)
+    Self::meter_values_v2_x_payload(connector, readings, timestamp)
   }
 
   fn meter_values_v2_x_payload(
     connector: u16,
-    state: &ConnectorState,
+    readings: &[MeterReading],
     timestamp: &str,
   ) -> Value {
     to_value(&MeterValues_V2_X_Request {
       evse_id: connector,
       meter_value: vec![MeterValueEntry {
         timestamp,
-        sampled_value: vec![SampledValue_V2_X {
-          value: state.meter_wh,
-          context: ReadingContext::SamplePeriodic.as_str(),
-          measurand: Measurand::EnergyActiveImportRegister.as_str(),
-          unit_of_measure: UnitOfMeasure {
-            unit: MeterUnit::Wh.as_str(),
-          },
-        }],
+        sampled_value: Self::sampled_values_v2_x(
+          readings,
+          ReadingContext::SamplePeriodic.as_str(),
+        ),
       }],
     })
+  }
+
+  fn sampled_values_v2_x<'a>(
+    readings: &'a [MeterReading],
+    context: &'a str,
+  ) -> Vec<SampledValue_V2_X<'a>> {
+    readings
+      .iter()
+      .map(|reading| SampledValue_V2_X::new(reading, context))
+      .collect()
   }
 
   fn transaction_event_v2_0_1_payload(
     request: &TransactionEventRequest,
     transaction: &TransactionState,
-    meter_wh: i64,
+    readings: &[MeterReading],
     timestamp: &str,
     context: &str,
     event_type_label: &str,
@@ -671,7 +694,7 @@ impl Simulator {
     Self::transaction_event_v2_x_payload(
       request,
       transaction,
-      meter_wh,
+      readings,
       timestamp,
       context,
       event_type_label,
@@ -682,7 +705,7 @@ impl Simulator {
   fn transaction_event_v2_1_payload(
     request: &TransactionEventRequest,
     transaction: &TransactionState,
-    meter_wh: i64,
+    readings: &[MeterReading],
     timestamp: &str,
     context: &str,
     event_type_label: &str,
@@ -691,7 +714,7 @@ impl Simulator {
     Self::transaction_event_v2_x_payload(
       request,
       transaction,
-      meter_wh,
+      readings,
       timestamp,
       context,
       event_type_label,
@@ -702,7 +725,7 @@ impl Simulator {
   fn transaction_event_v2_x_payload(
     request: &TransactionEventRequest,
     transaction: &TransactionState,
-    meter_wh: i64,
+    readings: &[MeterReading],
     timestamp: &str,
     context: &str,
     event_type_label: &str,
@@ -728,14 +751,7 @@ impl Simulator {
       },
       meter_value: vec![MeterValueEntry {
         timestamp,
-        sampled_value: vec![SampledValue_V2_X {
-          value: meter_wh,
-          context,
-          measurand: Measurand::EnergyActiveImportRegister.as_str(),
-          unit_of_measure: UnitOfMeasure {
-            unit: MeterUnit::Wh.as_str(),
-          },
-        }],
+        sampled_value: Self::sampled_values_v2_x(readings, context),
       }],
       id_token: request.id_token.as_deref().map(|token| IdTokenPayload {
         id_token: token,

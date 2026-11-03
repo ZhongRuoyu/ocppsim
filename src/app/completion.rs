@@ -13,6 +13,8 @@ const COMMAND_WORDS: &[&str] = &[
   "stop",
   "meter",
   "send-meter",
+  "soc",
+  "send-soc",
   "heartbeat",
   "connector-status",
   "clear",
@@ -81,7 +83,7 @@ pub(super) fn completion_seed(
     "connect" => {
       seed_for_connect_targets(&parts, ends_with_space, profile_names)
     }
-    "start" | "meter" | "send-meter" => {
+    "start" | "meter" | "send-meter" | "soc" | "send-soc" => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
     "stop" => seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
@@ -304,6 +306,29 @@ fn completion_base(parts: &[&str], ends_with_space: bool) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn metering_commands_share_connector_completion() {
+    for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1]
+    {
+      for command in ["meter", "send-meter", "soc", "send-soc"] {
+        let (_, candidates) =
+          completion_seed(&format!("{command} "), protocol, &[1, 2], &[])
+            .expect("connector candidates");
+        assert_eq!(candidates, ["1 ", "2 "]);
+        let (_, candidates) =
+          completion_seed(&format!("{command} 2"), protocol, &[1, 2], &[])
+            .expect("matching connector");
+        assert_eq!(candidates, ["2 "]);
+        assert!(
+          completion_seed(&format!("{command} 2 "), protocol, &[1, 2], &[],)
+            .is_none()
+        );
+      }
+    }
+    assert_eq!(complete_static("soc", COMMAND_WORDS), ["soc "]);
+    assert_eq!(complete_static("send-soc", COMMAND_WORDS), ["send-soc "]);
+  }
 
   #[test]
   /// Verifies status completions only suggest values valid for the protocol.

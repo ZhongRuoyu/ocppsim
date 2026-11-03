@@ -309,6 +309,48 @@ OCPP 2.x `UpdateFirmware`.
 The original OCPP 1.6 `UpdateFirmware` request is rejected for whitepaper
 conformance before any URI scheme is considered.
 
+## Meter Readings
+
+The built-in metering commands support `Energy.Active.Import.Register` in
+integer Wh and `SoC` in percent, including decimal percentages from 0 to 100.
+SoC uses `location: "EV"` and the unit `Percent` in all supported versions.
+OCPP 1.6 encodes sample values as strings; OCPP 2.x uses JSON numbers.
+Energy registers retain integer precision.
+
+Readings are stored independently per connector and measurand.
+The energy register starts at zero; SoC is absent until explicitly set.
+`send-meter` sends the energy reading, and `send-soc` sends the SoC reading.
+Both accept an optional value to store before sending.
+A leading `+` or `-` adjusts the stored value in Wh or percentage points.
+Adjustments require a known reading; overflow or a resulting SoC outside
+0 to 100 leaves state unchanged and cancels sending.
+The `meter` and `soc` query forms display one connector or all connectors,
+showing `unset` for unknown SoC readings.
+OCPP 2.x uses `TransactionEvent` for these sends during active transactions.
+
+Triggered `MeterValues` and OCPP 2.x transaction-boundary or triggered
+`TransactionEvent` messages include all stored readings defined by the
+active protocol.
+OCPP 1.6 `meterStart` and `meterStop` continue to use only the Wh register.
+Readings have a shared lifetime policy.
+Connector-scoped readings, including the Wh register, persist until changed
+or the connector is removed.
+SoC is transaction-scoped: setting it while idle prepares the initial value
+for the next transaction.
+Starting that transaction preserves the prepared value.
+Without a prepared value, SoC remains unset.
+
+SoC is cleared when a stop is acknowledged, an offline stop is finalized,
+or a created transaction is cancelled after a failed start.
+A rejected start that never creates a transaction leaves prepared SoC intact.
+Queued terminal messages keep their original reading snapshots.
+Suspension, disconnection, and failed stops retain SoC for the continuing
+transaction.
+After finalization, SoC queries show `unset`, and adjustments or sends
+require a new absolute value.
+Cleanup checks the local transaction ID, so an old response cannot clear a
+new transaction's reading or a value prepared while idle.
+
 ## Behavioral Semantics
 
 The simulator validates required fields before mutating state for supported

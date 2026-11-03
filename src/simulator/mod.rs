@@ -20,16 +20,16 @@ use tokio_tungstenite::{
 };
 use url::Url;
 
+use crate::metering::MeterReadings;
 use crate::ocpp::{
   BootReason, CertificateType, ChargingRateUnit, ConfigurationKey,
   ExtendedTriggerMessage_V1_6, IdTokenType, IncomingAction_V1_6,
-  IncomingAction_V2_X, Measurand, MeterUnit, OcppErrorCode, OcppFrame,
-  OcppVersion, OutgoingAction, ReadingContext, ResponseStatus,
-  StatusNotificationErrorCode, StopReason, TransactionTriggerReason,
-  TriggerMessage_V1_6, TriggerMessage_V2_X, VariableAttributeType, build_call,
-  build_call_error, build_call_result, build_call_result_error, parse_frame,
-  validate_boot_notification_fields, validate_data_transfer_fields,
-  validate_outbound_id_token,
+  IncomingAction_V2_X, OcppErrorCode, OcppFrame, OcppVersion, OutgoingAction,
+  ReadingContext, ResponseStatus, StatusNotificationErrorCode, StopReason,
+  TransactionTriggerReason, TriggerMessage_V1_6, TriggerMessage_V2_X,
+  VariableAttributeType, build_call, build_call_error, build_call_result,
+  build_call_result_error, parse_frame, validate_boot_notification_fields,
+  validate_data_transfer_fields, validate_outbound_id_token,
 };
 use crate::sensitive::redact_url_secrets;
 
@@ -54,7 +54,7 @@ pub(in crate::simulator) use types::{
   TransactionState, TxEventType, normalize_identifier,
 };
 pub use types::{
-  ConnectorSnapshot, MeterUpdate, SimulatorCommand, SimulatorConfig,
+  ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
   SimulatorConnectionConfig, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
   UiLogLevel,
 };
@@ -399,7 +399,7 @@ impl Simulator {
         connector,
         ConnectorState {
           status: ConnectorStatus::Available,
-          meter_wh: 0,
+          meter_values: MeterReadings::default(),
           offered_limit: None,
           scheduled_availability: None,
           transaction: None,
@@ -697,22 +697,21 @@ impl Simulator {
           is_connected,
         )?;
       }
-      SimulatorCommand::GetMeter { connector } => {
-        self.show_meter(connector)?;
+      SimulatorCommand::GetMeterValue {
+        connector,
+        measurand,
+      } => {
+        self.show_meter_value(connector, measurand)?;
       }
-      SimulatorCommand::UpdateMeter { connector, update } => {
-        self.update_meter(connector, update)?;
+      SimulatorCommand::UpdateMeterValue { connector, update } => {
+        self.update_meter_value(connector, update)?;
       }
-      SimulatorCommand::SendMeter { connector, update } => {
-        if let Some(update) = update {
-          self.update_meter(connector, update)?;
-        }
-        if is_connected
-          && !self.ensure_post_boot_ocpp_requests_allowed("MeterValues")
-        {
-          return Ok(());
-        }
-        self.send_meter(connector, is_connected)?;
+      SimulatorCommand::SendMeterValue {
+        connector,
+        measurand,
+        update,
+      } => {
+        self.send_meter_update(connector, measurand, update, is_connected)?;
       }
       SimulatorCommand::Heartbeat => {
         if !self.ensure_can_send_ocpp_command(is_connected, "Heartbeat") {
@@ -809,7 +808,7 @@ impl Simulator {
           connector,
           ConnectorState {
             status: ConnectorStatus::Available,
-            meter_wh: 0,
+            meter_values: MeterReadings::default(),
             offered_limit: None,
             scheduled_availability: None,
             transaction: None,

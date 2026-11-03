@@ -462,6 +462,7 @@ impl Simulator {
         .inactive_connector_status(connector, ConnectorStatus::Available)?;
       let connector_state = self.connector_mut(connector)?;
       connector_state.transaction = None;
+      connector_state.meter_values.clear_transaction_readings();
       connector_state.status = target_status;
     }
     Ok(())
@@ -487,6 +488,7 @@ impl Simulator {
       self.inactive_connector_status(connector, ConnectorStatus::Finishing)?;
     let connector_state = self.connector_mut(connector)?;
     connector_state.transaction = None;
+    connector_state.meter_values.clear_transaction_readings();
     connector_state.status = target_status;
     Ok(())
   }

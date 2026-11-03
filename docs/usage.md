@@ -183,11 +183,21 @@ the mouse and remain available after `ocppsim` exits.
   Prefix the value with `+` or `-` to increase or decrease the current
   reading instead.
   For example, `meter 1 +100` adds 100 Wh and `meter 1 -50` subtracts 50 Wh.
-- `send-meter <connector> [<wh>]`: send current meter data.
-  If `<wh>` is given, first update the local meter counter, equivalent to
-  `meter <connector> <wh>` followed by `send-meter <connector>`.
-  The value accepts the same `+` and `-` prefixes for relative adjustments.
-  An out-of-range adjustment leaves the reading unchanged and cancels the send.
+- `send-meter <connector> [<wh>]`: send the stored energy reading.
+  If a value is given, first set or adjust the reading as with `meter`.
+- `soc`: show local EV state of charge for all connectors.
+- `soc <connector>`: show local EV state of charge for one connector.
+  Unknown readings are shown as `unset`.
+- `soc <connector> <percent>`: set local EV state of charge from 0 to 100.
+  Decimal percentages are accepted, so `75.5` means 75.5%.
+  Prefix the value with `+` or `-` to adjust it by percentage points.
+  For example, `soc 1 +5` increases 75% to 80%.
+  A value set while idle becomes the initial SoC of the next transaction.
+- `send-soc <connector> [<percent>]`: send the stored SoC reading.
+  If a value is given, first set or adjust the reading as with `soc`.
+  SoC is initially unset; set it before adjusting or sending it.
+  Adjustments must leave SoC between 0 and 100.
+  Finalizing a transaction clears SoC; failed stops and reconnects preserve it.
 - `heartbeat`: send one heartbeat.
 - `heartbeat start <seconds>`: start periodic heartbeats.
 - `heartbeat stop`: stop periodic heartbeats.
@@ -198,8 +208,17 @@ the mouse and remain available after `ocppsim` exits.
   confirmation. Press `y` or `Y` to exit; any other non-control key cancels.
   Ctrl-C and Ctrl-D leave the confirmation active.
 
+An invalid adjustment leaves the reading unchanged and cancels the send.
+The `meter` and `soc` query forms work online or offline and do not change
+readings or send OCPP messages.
+
 Commands that send OCPP messages require an active connection.
 Local state commands can still update simulator state while disconnected.
+The optional values in `send-meter` and `send-soc` are stored locally even
+when sending is unavailable.
+Each command sends only its named measurand.
+During an active OCPP 2.x transaction, these sends use `TransactionEvent`;
+otherwise, they use `MeterValues`.
 
 ## Shell Completions
 

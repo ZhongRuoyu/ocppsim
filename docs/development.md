@@ -10,6 +10,7 @@ The current split is worth preserving:
 
 - `src/ocpp.rs` owns OCPP-J frame parsing, protocol metadata, action
   manifests, and version labels.
+- `src/metering.rs` owns protocol-neutral readings keyed by measurand.
 - `src/simulator/types.rs` owns public simulator configuration/UI types and
   internal state types.
 - `src/simulator/support.rs` owns protocol-neutral helper functions for

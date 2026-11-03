@@ -2,12 +2,11 @@ use super::super::payloads::{
   StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
 };
 use super::super::{
-  ConnectorStatus, IdTokenType, MeterUpdate, OcppVersion, OutgoingAction,
-  PendingContext, QueuedCall, REDACTED_SENSITIVE_VALUE, Result, Simulator,
-  StopReason, TransactionEventRequest, TransactionState,
-  TransactionTriggerReason, TxEventType, UiLogLevel, anyhow,
-  map_stop_reason_v1_6, map_stop_reason_v2_x, now_timestamp,
-  validate_outbound_id_token,
+  ConnectorStatus, IdTokenType, OcppVersion, OutgoingAction, PendingContext,
+  QueuedCall, REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
+  TransactionEventRequest, TransactionState, TransactionTriggerReason,
+  TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
+  now_timestamp, validate_outbound_id_token,
 };
 
 impl Simulator {
@@ -96,7 +95,7 @@ impl Simulator {
         let meter_start = self
           .connectors
           .get(&connector)
-          .map_or(0, |state| state.meter_wh);
+          .map_or(0, |state| state.meter_values.energy_wh());
         let timestamp = now_timestamp();
         let payload = to_value(&StartTransactionV1_6Request {
           connector_id: connector,
@@ -259,7 +258,7 @@ impl Simulator {
     let payload = to_value(&StopTransactionV1_6Request {
       transaction_id: tx_id,
       timestamp: &timestamp,
-      meter_stop: connector_state.meter_wh,
+      meter_stop: connector_state.meter_values.energy_wh(),
       id_tag: token,
       reason: reason_str,
     });
@@ -385,111 +384,6 @@ impl Simulator {
       UiLogLevel::Warn,
       "Not connected. Transaction stop is local only.",
     );
-  }
-
-  /// Displays the local Wh reading for one connector or all connectors.
-  ///
-  /// Returns an error for an unknown connector without changing or sending data.
-  pub(in crate::simulator) fn show_meter(
-    &self,
-    connector: Option<u16>,
-  ) -> Result<()> {
-    let connectors = connector.map_or_else(
-      || self.connectors.keys().copied().collect(),
-      |connector| vec![connector],
-    );
-    for connector in connectors {
-      let value_wh = self.connector_ref(connector)?.meter_wh;
-      self.log(
-        UiLogLevel::Info,
-        format!("Connector {connector} meter={value_wh}Wh"),
-      );
-    }
-    Ok(())
-  }
-
-  /// Applies an absolute reading or an adjustment to the latest local value.
-  ///
-  /// Unknown connectors and overflow leave the stored reading unchanged.
-  pub(in crate::simulator) fn update_meter(
-    &mut self,
-    connector: u16,
-    update: MeterUpdate,
-  ) -> Result<()> {
-    let value_wh = match update {
-      MeterUpdate::Set(value_wh) => value_wh,
-      MeterUpdate::Adjust(delta_wh) => self
-        .connector_ref(connector)?
-        .meter_wh
-        .checked_add(delta_wh)
-        .ok_or_else(|| {
-          anyhow!("Meter adjustment on connector {connector} is out of range.")
-        })?,
-    };
-    self.set_meter(connector, value_wh)
-  }
-
-  /// Sets a connector meter reading in watt-hours.
-  pub(in crate::simulator) fn set_meter(
-    &mut self,
-    connector: u16,
-    value_wh: i64,
-  ) -> Result<()> {
-    let connector_state = self.connector_mut(connector)?;
-    connector_state.meter_wh = value_wh;
-    self.log(
-      UiLogLevel::Info,
-      format!("Connector {connector} meter set to {value_wh} Wh"),
-    );
-    Ok(())
-  }
-
-  /// Sends meter data for a connector using protocol-specific message types.
-  pub(in crate::simulator) fn send_meter(
-    &mut self,
-    connector: u16,
-    is_connected: bool,
-  ) -> Result<()> {
-    if !is_connected {
-      self.log(
-        UiLogLevel::Warn,
-        "Not connected. Connect first to send MeterValues.",
-      );
-      return Ok(());
-    }
-
-    let (has_tx, local_tx_id, remote_start_id) = {
-      let connector_state = self.connector_ref(connector)?;
-      let tx = connector_state.transaction.as_ref();
-      (
-        tx.is_some(),
-        tx.map_or(0, |item| item.local_id),
-        tx.and_then(|item| item.remote_start_id),
-      )
-    };
-
-    match self.config.protocol {
-      OcppVersion::V1_6 => {
-        self.enqueue_meter_values(connector)?;
-      }
-      OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
-        if has_tx {
-          self.bump_seq_no(connector, local_tx_id)?;
-          self.enqueue_transaction_event(&TransactionEventRequest {
-            connector,
-            local_tx_id,
-            event_type: TxEventType::Updated,
-            trigger_reason: TransactionTriggerReason::MeterValuePeriodic,
-            id_token: None,
-            remote_start_id,
-            stopped_reason: None,
-          })?;
-        } else {
-          self.enqueue_meter_values(connector)?;
-        }
-      }
-    }
-    Ok(())
   }
 
   /// Sets connector status locally and optionally notifies CSMS.

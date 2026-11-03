@@ -2358,7 +2358,7 @@ async fn mock_csms_remote_start_meter_and_stop_v2_x_lifecycle() {
       .await
       .expect("handle request start");
     simulator
-      .send_meter(1, true)
+      .send_meter_value(1, Measurand::EnergyActiveImportRegister, true)
       .expect("meter should enqueue update");
     let transaction_id = simulator
       .active_transaction_uid(1)
@@ -2531,13 +2531,15 @@ async fn v1_6_stop_waits_for_start_response_and_preserves_meter_sample() {
   assert_eq!(action, "StartTransaction");
 
   simulator
-    .set_meter(1, 42)
+    .set_meter_value(1, MeterReading::energy(42))
     .expect("set stopping meter value");
   simulator
     .stop_transaction(1, Some("Local"), false, true)
     .expect("queue stop before start response");
   let stopped = queued_payload(&simulator, "StopTransaction");
-  simulator.set_meter(1, 99).expect("later meter change");
+  simulator
+    .set_meter_value(1, MeterReading::energy(99))
+    .expect("later meter change");
   simulator
     .try_send_next(&mut write)
     .await

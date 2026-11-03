@@ -6,7 +6,9 @@
 #![allow(non_camel_case_types)]
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Number, Value};
+
+use crate::metering::MeterReading;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,10 +29,27 @@ pub(super) struct IdTokenPayload<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SampledValueV1_6<'a> {
-  pub value: &'a str,
+  pub value: String,
   pub context: &'a str,
   pub measurand: &'a str,
   pub unit: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub location: Option<&'a str>,
+}
+
+impl<'a> SampledValueV1_6<'a> {
+  /// Encodes a stored reading using OCPP 1.6's string-valued sample format.
+  pub(super) fn new(reading: &'a MeterReading, context: &'a str) -> Self {
+    Self {
+      value: reading.value.to_string(),
+      context,
+      measurand: reading.measurand.as_str(),
+      unit: &reading.unit,
+      location: reading
+        .location
+        .map(crate::ocpp::MeterValueLocation::as_str),
+    }
+  }
 }
 
 #[derive(Serialize)]
@@ -42,10 +61,29 @@ pub(super) struct UnitOfMeasure<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SampledValue_V2_X<'a> {
-  pub value: i64,
+  pub value: &'a Number,
   pub context: &'a str,
   pub measurand: &'a str,
   pub unit_of_measure: UnitOfMeasure<'a>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub location: Option<&'a str>,
+}
+
+impl<'a> SampledValue_V2_X<'a> {
+  /// Encodes a stored reading using OCPP 2.x's numeric sample format.
+  pub(super) fn new(reading: &'a MeterReading, context: &'a str) -> Self {
+    Self {
+      value: &reading.value,
+      context,
+      measurand: reading.measurand.as_str(),
+      unit_of_measure: UnitOfMeasure {
+        unit: &reading.unit,
+      },
+      location: reading
+        .location
+        .map(crate::ocpp::MeterValueLocation::as_str),
+    }
+  }
 }
 
 #[derive(Serialize)]

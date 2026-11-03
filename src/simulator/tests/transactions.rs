@@ -687,9 +687,11 @@ fn v2_x_multi_connector_transactions_progress_independently() {
       .expect("second start should succeed");
     simulator.queue.clear();
 
-    simulator.set_meter(1, 1200).expect("set meter");
     simulator
-      .send_meter(1, true)
+      .set_meter_value(1, MeterReading::energy(1200))
+      .expect("set meter");
+    simulator
+      .send_meter_value(1, Measurand::EnergyActiveImportRegister, true)
       .expect("meter update should enqueue");
     let update_payload = queued_payload(&simulator, "TransactionEvent");
     assert_eq!(update_payload["eventType"], json!("Updated"));
@@ -1014,7 +1016,9 @@ fn v2_x_deauthorization_reuses_queued_end_snapshot() {
   for protocol in v2_x_protocols() {
     for event_type in [TxEventType::Started, TxEventType::Updated] {
       let mut simulator = pending_v2_x_authorization(protocol, event_type);
-      simulator.set_meter(1, 1234).expect("set stop reading");
+      simulator
+        .set_meter_value(1, MeterReading::energy(1234))
+        .expect("set stop reading");
       simulator
         .stop_transaction(1, None, false, true)
         .expect("queue local end");
@@ -1022,7 +1026,7 @@ fn v2_x_deauthorization_reuses_queued_end_snapshot() {
       expected["triggerReason"] = json!("Deauthorized");
       expected["transactionInfo"]["stoppedReason"] = json!("DeAuthorized");
       simulator
-        .set_meter(1, 5678)
+        .set_meter_value(1, MeterReading::energy(5678))
         .expect("change current reading");
       simulator.config.outbound_queue_limit = 1;
       simulator
@@ -1174,7 +1178,9 @@ fn pending_v2_x_authorization(
       )
       .expect("authorize initial start");
     simulator.queue.clear();
-    simulator.send_meter(1, true).expect("queue update");
+    simulator
+      .send_meter_value(1, Measurand::EnergyActiveImportRegister, true)
+      .expect("queue update");
   }
   simulator.pending = Some(PendingCall {
     message_id: "authorization".to_string(),

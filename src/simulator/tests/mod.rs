@@ -3,18 +3,22 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+use crate::metering::{MeterReading, MeterUpdate};
+use crate::ocpp::Measurand;
+
 use super::{
-  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, MeterUpdate,
-  OcppVersion, PendingCall, PendingContext, ResponseStatus,
-  SecurityProfileFallback, Simulator, SimulatorCommand, SimulatorConfig,
-  SimulatorConnectionConfig, TxEventType, UiEvent, UiLogLevel, now_timestamp,
-  sanitized_trace_frame_text, validate_negotiated_subprotocol,
+  BootRegistrationStatus, ConfigurationKey, ConnectorStatus, OcppVersion,
+  PendingCall, PendingContext, ResponseStatus, SecurityProfileFallback,
+  Simulator, SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig,
+  TxEventType, UiEvent, UiLogLevel, now_timestamp, sanitized_trace_frame_text,
+  validate_negotiated_subprotocol,
 };
 
 mod boot;
 mod charging_profiles;
 mod configuration;
 mod connection;
+mod metering;
 mod schema_validation;
 mod security;
 mod state;

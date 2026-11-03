@@ -1,10 +1,13 @@
 use std::ops::RangeBounds;
 
+use serde_json::Number;
+
+use crate::metering::{MeterReading, MeterUpdate};
 use crate::ocpp::{
-  OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppVersion,
+  Measurand, OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
+  OcppVersion,
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
-use crate::simulator::MeterUpdate;
 
 const USAGE_STATUS: &str = "Usage: status";
 const USAGE_CONNECT: &str = "Usage: connect [<profile> | <ws-url> <cp-id>]";
@@ -20,6 +23,10 @@ const USAGE_CONNECTOR_STATUS: &str =
 const USAGE_METER: &str = "Usage: meter [<connector> [<wh>|+<wh>|-<wh>]]";
 const USAGE_SEND_METER: &str =
   "Usage: send-meter <connector> [<wh>|+<wh>|-<wh>]";
+const USAGE_SOC: &str =
+  "Usage: soc [<connector> [<percent>|+<percent>|-<percent>]]";
+const USAGE_SEND_SOC: &str =
+  "Usage: send-soc <connector> [<percent>|+<percent>|-<percent>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
   "Usage: heartbeat | heartbeat start <seconds> | heartbeat stop";
@@ -52,15 +59,17 @@ pub enum UserCommand {
     connector: u16,
     reason: Option<String>,
   },
-  GetMeter {
+  GetMeterValue {
     connector: Option<u16>,
+    measurand: Measurand,
   },
-  Meter {
+  UpdateMeterValue {
     connector: u16,
     update: MeterUpdate,
   },
-  SendMeter {
+  SendMeterValue {
     connector: u16,
+    measurand: Measurand,
     update: Option<MeterUpdate>,
   },
   Heartbeat,
@@ -107,8 +116,9 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
     "start" => parse_start_command(&parts),
     "stop" => parse_stop_command(&parts),
     "connector-status" => parse_connector_status_command(&parts),
-    "meter" => parse_meter_command(&parts),
-    "send-meter" => parse_send_meter_command(&parts),
+    "meter" | "send-meter" | "soc" | "send-soc" => {
+      parse_meter_command(&parts, command.as_str())
+    }
     "heartbeat" => parse_heartbeat_command(&parts),
     _ => Err(format!(
       "Unknown command `{}`. Type `help` for available commands.",
@@ -259,43 +269,82 @@ fn parse_connector_status_command(
   })
 }
 
-fn parse_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
-  ensure_range(parts, 1..=3, USAGE_METER)?;
+fn parse_meter_command(
+  parts: &[&str],
+  command: &str,
+) -> Result<UserCommand, String> {
+  let (measurand, send, usage) = match command {
+    "meter" => (Measurand::EnergyActiveImportRegister, false, USAGE_METER),
+    "send-meter" => (
+      Measurand::EnergyActiveImportRegister,
+      true,
+      USAGE_SEND_METER,
+    ),
+    "soc" => (Measurand::Soc, false, USAGE_SOC),
+    "send-soc" => (Measurand::Soc, true, USAGE_SEND_SOC),
+    _ => unreachable!("meter command dispatch is exhaustive"),
+  };
+  ensure_range(parts, (if send { 2 } else { 1 })..=3, usage)?;
   if parts.len() == 1 {
-    return Ok(UserCommand::GetMeter { connector: None });
-  }
-  let connector = parse_u16(parts.get(1), USAGE_METER)?;
-  if parts.len() == 2 {
-    return Ok(UserCommand::GetMeter {
-      connector: Some(connector),
+    return Ok(UserCommand::GetMeterValue {
+      connector: None,
+      measurand,
     });
   }
-  let update = parse_meter_update(parts.get(2), USAGE_METER)?;
-  Ok(UserCommand::Meter { connector, update })
-}
-
-fn parse_send_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
-  ensure_range(parts, 2..=3, USAGE_SEND_METER)?;
-  let connector = parse_u16(parts.get(1), USAGE_SEND_METER)?;
+  let connector = parse_u16(parts.get(1), usage)?;
+  if !send && parts.len() == 2 {
+    return Ok(UserCommand::GetMeterValue {
+      connector: Some(connector),
+      measurand,
+    });
+  }
   let update = parts
     .get(2)
-    .map(|value| parse_meter_update(Some(value), USAGE_SEND_METER))
+    .map(|value| parse_meter_update(measurand, Some(value), usage))
     .transpose()?;
-  Ok(UserCommand::SendMeter { connector, update })
+  if send {
+    Ok(UserCommand::SendMeterValue {
+      connector,
+      measurand,
+      update,
+    })
+  } else {
+    Ok(UserCommand::UpdateMeterValue {
+      connector,
+      update: update.expect("update commands require a value"),
+    })
+  }
 }
 
-/// Interprets a leading sign as a relative adjustment instead of a reading.
+/// Interprets signed values as adjustments in the measurand's native unit.
 fn parse_meter_update(
+  measurand: Measurand,
   value: Option<&&str>,
   usage: &str,
 ) -> Result<MeterUpdate, String> {
   let raw = parse_required(value, usage)?;
-  let value_wh = parse_i64(value, usage)?;
-  Ok(if raw.starts_with('+') || raw.starts_with('-') {
-    MeterUpdate::Adjust(value_wh)
-  } else {
-    MeterUpdate::Set(value_wh)
-  })
+  let relative = raw.starts_with('+') || raw.starts_with('-');
+  match measurand {
+    Measurand::EnergyActiveImportRegister => {
+      let value = parse_i64(value, usage)?;
+      Ok(if relative {
+        MeterUpdate::Adjust(measurand, value.into())
+      } else {
+        MeterUpdate::Set(MeterReading::energy(value))
+      })
+    }
+    Measurand::Soc => {
+      let value = raw.parse::<f64>().map_err(|_| usage.to_string())?;
+      if relative {
+        let delta = Number::from_f64(value)
+          .ok_or_else(|| "SoC adjustment must be finite.".to_string())?;
+        Ok(MeterUpdate::Adjust(measurand, delta))
+      } else {
+        MeterReading::soc(value).map(MeterUpdate::Set)
+      }
+    }
+    _ => unreachable!("built-in meter commands use energy or SoC"),
+  }
 }
 
 fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
@@ -348,8 +397,17 @@ pub fn help_text() -> &'static str {
     Set local meter counter (Wh) for connector.
     Use +<wh> or -<wh> to adjust the current reading.
   send-meter <connector> [<wh>]
-    Optionally update the local meter counter (Wh), then send meter data.
+    Optionally update the local meter counter, then send the energy reading.
     Use +<wh> or -<wh> to adjust the reading before sending.
+  soc
+    Show local EV state of charge for all connectors, or unset if unknown.
+  soc <connector>
+    Show local EV state of charge for one connector.
+  soc <connector> <percent>
+    Set local EV state of charge (0-100 percent, decimals allowed).
+    Use +<percent> or -<percent> to adjust it by percentage points.
+  send-soc <connector> [<percent>]
+    Optionally set or adjust state of charge, then send the stored SoC.
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
@@ -456,6 +514,8 @@ mod tests {
     ConnectTarget, USAGE_SEND_METER, UserCommand, help_text, parse_command,
     redact_sensitive_command,
   };
+  use crate::metering::{MeterReading, MeterUpdate};
+  use crate::ocpp::Measurand;
 
   #[test]
   /// Verifies fixed-arity commands reject surplus tokens.
@@ -523,25 +583,55 @@ mod tests {
 
   #[test]
   fn meter_updates_distinguish_relative_and_absolute_values() {
-    use crate::simulator::MeterUpdate;
+    use crate::metering::MeterUpdate;
 
     for (value, expected) in [
-      ("100", MeterUpdate::Set(100)),
-      ("+100", MeterUpdate::Adjust(100)),
-      ("-50", MeterUpdate::Adjust(-50)),
-      ("0", MeterUpdate::Set(0)),
-      ("+0", MeterUpdate::Adjust(0)),
-      ("-0", MeterUpdate::Adjust(0)),
-      ("+9223372036854775807", MeterUpdate::Adjust(i64::MAX)),
-      ("-9223372036854775808", MeterUpdate::Adjust(i64::MIN)),
+      ("100", MeterUpdate::Set(MeterReading::energy(100))),
+      (
+        "+100",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (100).into(),
+        ),
+      ),
+      (
+        "-50",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (-50).into(),
+        ),
+      ),
+      ("0", MeterUpdate::Set(MeterReading::energy(0))),
+      (
+        "+0",
+        MeterUpdate::Adjust(Measurand::EnergyActiveImportRegister, (0).into()),
+      ),
+      (
+        "-0",
+        MeterUpdate::Adjust(Measurand::EnergyActiveImportRegister, (0).into()),
+      ),
+      (
+        "+9223372036854775807",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (i64::MAX).into(),
+        ),
+      ),
+      (
+        "-9223372036854775808",
+        MeterUpdate::Adjust(
+          Measurand::EnergyActiveImportRegister,
+          (i64::MIN).into(),
+        ),
+      ),
     ] {
       assert!(matches!(
         parse_command(&format!("meter 1 {value}")).unwrap(),
-        UserCommand::Meter { connector: 1, update } if update == expected
+        UserCommand::UpdateMeterValue { connector: 1, update } if update == expected
       ));
       assert!(matches!(
         parse_command(&format!("send-meter 1 {value}")).unwrap(),
-        UserCommand::SendMeter { connector: 1, update: Some(update) }
+        UserCommand::SendMeterValue { measurand: Measurand::EnergyActiveImportRegister,  connector: 1, update: Some(update) }
           if update == expected
       ));
     }
@@ -599,6 +689,86 @@ mod tests {
         USAGE_SEND_METER,
         "{input}"
       );
+    }
+  }
+
+  #[test]
+  fn soc_commands_accept_percentages_and_optional_send_values() {
+    for percent in ["0", "75.5", "100"] {
+      for name in ["soc", "send-soc"] {
+        let command = parse_command(&format!("{name} 2 {percent}"))
+          .expect("valid percentage");
+        let reading = match command {
+          UserCommand::UpdateMeterValue {
+            connector: 2,
+            update: MeterUpdate::Set(reading),
+          } if name == "soc" => reading,
+          UserCommand::SendMeterValue {
+            connector: 2,
+            measurand: crate::ocpp::Measurand::Soc,
+            update: Some(MeterUpdate::Set(reading)),
+          } if name == "send-soc" => reading,
+          other => panic!("unexpected command: {other:?}"),
+        };
+        assert_eq!(reading.value.as_f64(), percent.parse::<f64>().ok());
+        assert_eq!(reading.unit, "Percent");
+      }
+    }
+    assert!(matches!(
+      parse_command("send-soc 2").unwrap(),
+      UserCommand::SendMeterValue {
+        connector: 2,
+        measurand: crate::ocpp::Measurand::Soc,
+        update: None,
+      }
+    ));
+  }
+
+  #[test]
+  fn soc_commands_parse_signed_decimal_adjustments() {
+    for (input, delta) in [
+      ("soc 1 +2.5", 2.5),
+      ("soc 1 -1", -1.0),
+      ("soc 1 +0", 0.0),
+      ("soc 1 -0", 0.0),
+      ("send-soc 1 -2.5", -2.5),
+    ] {
+      let update = match parse_command(input).unwrap() {
+        UserCommand::UpdateMeterValue { update, .. }
+        | UserCommand::SendMeterValue {
+          update: Some(update),
+          ..
+        } => update,
+        other => panic!("unexpected command: {other:?}"),
+      };
+      assert!(matches!(update, MeterUpdate::Adjust(Measurand::Soc, actual)
+        if actual.as_f64() == Some(delta)));
+    }
+    for name in ["soc", "send-soc"] {
+      for value in ["+", "-", "++1", "--1", "+-1", "-+1", "+NaN", "+inf"] {
+        assert!(parse_command(&format!("{name} 1 {value}")).is_err());
+      }
+    }
+  }
+
+  #[test]
+  fn soc_commands_reject_invalid_or_out_of_range_values() {
+    for name in ["soc", "send-soc"] {
+      for value in ["100.1", "NaN", "inf", "-inf", "1e999", "75%", "abc"] {
+        assert!(
+          parse_command(&format!("{name} 1 {value}")).is_err(),
+          "{name} {value}"
+        );
+      }
+    }
+    for input in [
+      "soc x 50",
+      "soc 1 50 extra",
+      "send-soc",
+      "send-soc x",
+      "send-soc 1 50 extra",
+    ] {
+      assert!(parse_command(input).is_err(), "{input}");
     }
   }
 
