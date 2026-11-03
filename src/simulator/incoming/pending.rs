@@ -1,6 +1,4 @@
-use super::super::{
-  PendingContext, Result, Simulator, TxEventType, UiLogLevel, Value,
-};
+use super::super::{Result, Simulator, UiLogLevel, Value};
 
 impl Simulator {
   /// Applies a CALLRESULT to the current pending request context.
@@ -56,7 +54,7 @@ impl Simulator {
     }
 
     let pending = self.pending.take().expect("pending exists");
-    self.handle_pending_failure_context(&pending.call.context);
+    let _ = self.handle_pending_failure_context(&pending.call.context);
     self.emit_runtime_state();
   }
 
@@ -91,48 +89,7 @@ impl Simulator {
       format!("{} failed: {} {}", pending.call.action, code, description),
     );
 
-    match pending.call.context {
-      PendingContext::StartTxV1_6 {
-        connector,
-        local_tx_id,
-      }
-      | PendingContext::TxEvent {
-        connector,
-        local_tx_id,
-        event_type: TxEventType::Started,
-      } => {
-        self.cancel_transaction_start(connector, local_tx_id)?;
-        self.enqueue_status_notification(connector)?;
-      }
-      PendingContext::StopTxV1_6 {
-        connector,
-        local_tx_id,
-      }
-      | PendingContext::TxEvent {
-        connector,
-        local_tx_id,
-        event_type: TxEventType::Ended,
-      } => {
-        self.restore_active_transaction_status(connector, local_tx_id)?;
-        self.enqueue_status_notification(connector)?;
-      }
-      PendingContext::TxEvent { .. }
-      | PendingContext::Boot
-      | PendingContext::Heartbeat
-      | PendingContext::DataTransfer
-      | PendingContext::DiagnosticsStatusNotification
-      | PendingContext::FirmwareStatusNotification
-      | PendingContext::LogStatusNotification
-      | PendingContext::SignCertificate
-      | PendingContext::SignedFirmwareStatusNotification
-      | PendingContext::Authorize { .. }
-      | PendingContext::RemoteStartAuthorizeV1_6 { .. }
-      | PendingContext::StatusNotification { .. }
-      | PendingContext::MeterValues { .. } => {}
-      PendingContext::SecurityEventNotification { event_id } => {
-        self.retry_security_event_notification(event_id);
-      }
-    }
+    self.handle_pending_failure_context(&pending.call.context)?;
     self.emit_runtime_state();
     Ok(())
   }

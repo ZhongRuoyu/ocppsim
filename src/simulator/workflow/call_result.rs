@@ -117,12 +117,16 @@ impl Simulator {
       self.enqueue_boot_status_notifications()?;
       self.enqueue_pending_security_event_notifications();
     } else if self.config.protocol == OcppVersion::V1_6 {
-      self.apply_v1_6_boot_retry_interval(interval);
+      self.apply_boot_retry_interval(interval);
     }
     Ok(())
   }
 
-  fn apply_v1_6_boot_retry_interval(&mut self, interval: Option<u64>) {
+  /// Schedules registration retry using the response interval or a fallback.
+  pub(in crate::simulator) fn apply_boot_retry_interval(
+    &mut self,
+    interval: Option<u64>,
+  ) {
     let retry_interval = interval
       .filter(|seconds| *seconds > 0)
       .map_or(DEFAULT_BOOT_RETRY_INTERVAL, std::time::Duration::from_secs)

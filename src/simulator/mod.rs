@@ -1111,14 +1111,22 @@ impl Simulator {
         "Timed out waiting for response to {action} (messageId={message_id})."
       ),
     );
-    self.handle_pending_failure_context(&context);
+    let _ = self.handle_pending_failure_context(&context);
     self.pending = None;
     self.emit_runtime_state();
   }
 
   /// Restores local state for pending calls that failed before a valid response.
-  fn handle_pending_failure_context(&mut self, context: &PendingContext) {
+  fn handle_pending_failure_context(
+    &mut self,
+    context: &PendingContext,
+  ) -> Result<()> {
     let result = match context {
+      PendingContext::Boot => {
+        self.boot_registration_status = BootRegistrationStatus::Rejected;
+        self.apply_boot_retry_interval(None);
+        Ok(())
+      }
       PendingContext::StartTxV1_6 {
         connector,
         local_tx_id,
@@ -1146,7 +1154,6 @@ impl Simulator {
         .restore_active_transaction_status(*connector, *local_tx_id)
         .and_then(|()| self.enqueue_status_notification(*connector)),
       PendingContext::TxEvent { .. }
-      | PendingContext::Boot
       | PendingContext::Heartbeat
       | PendingContext::DataTransfer
       | PendingContext::DiagnosticsStatusNotification
@@ -1163,12 +1170,13 @@ impl Simulator {
         Ok(())
       }
     };
-    if let Err(error) = result {
+    if let Err(error) = &result {
       self.log(
         UiLogLevel::Error,
         format!("Failed to apply pending response rollback: {error}"),
       );
     }
+    result
   }
 }
 

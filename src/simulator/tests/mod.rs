@@ -11,6 +11,7 @@ use super::{
   validate_negotiated_subprotocol,
 };
 
+mod boot;
 mod charging_profiles;
 mod configuration;
 mod connection;

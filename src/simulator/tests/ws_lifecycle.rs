@@ -1616,7 +1616,7 @@ async fn strict_mode_sends_call_result_error_for_invalid_v2_1_response() {
   simulator.config.strict = true;
   simulator.connected = true;
   simulator
-    .enqueue_boot_notification()
+    .enqueue_boot_with_registration_state()
     .expect("boot should validate");
   simulator
     .try_send_next(&mut write)
@@ -1649,8 +1649,9 @@ async fn strict_mode_sends_call_result_error_for_invalid_v2_1_response() {
   assert!(simulator.pending.is_none());
   assert_eq!(
     simulator.boot_registration_status,
-    BootRegistrationStatus::Accepted
+    BootRegistrationStatus::Rejected
   );
+  assert!(simulator.boot_retry_remaining().is_some());
   assert!(simulator.queue.is_empty());
 }
 

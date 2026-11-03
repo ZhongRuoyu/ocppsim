@@ -22,6 +22,8 @@ The outbound queue is capped by `outbound-queue-limit` unless that value is `0`.
 The pending context records what response is expected and how to update local
 state when a CALLRESULT or CALLERROR arrives.
 Request timeouts clear stale pending state so later queued messages can move.
+Failed boot requests leave the response-waiting state and retry after a short
+backoff, including timeouts, CALLERRORs, and schema-invalid responses.
 Start and stop transaction requests keep enough pending context to roll back or
 finish local transaction state when the CSMS rejects, times out, or accepts the
 request.
