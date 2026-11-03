@@ -249,36 +249,74 @@ impl Simulator {
     payload: &Value,
   ) -> Result<()> {
     let status = parse_v1_6_id_tag_status(payload);
-    let transaction_id = payload.get("transactionId").and_then(Value::as_i64);
-    if status == ResponseStatus::Accepted {
-      if let Some(tx_id) = transaction_id {
-        self.set_v1_6_transaction_id(connector, local_tx_id, tx_id)?;
-        self.log(
-          UiLogLevel::Info,
-          format!(
-            "StartTransaction accepted on connector {connector} \
-            transactionId={tx_id}"
-          ),
-        );
-      } else {
-        self.log(
-          UiLogLevel::Warn,
-          "StartTransaction accepted without transactionId.",
-        );
-        self.cancel_transaction_start(connector, local_tx_id)?;
-      }
-      self.enqueue_status_notification(connector)?;
-    } else {
+    let Some(transaction_id) =
+      payload.get("transactionId").and_then(Value::as_i64)
+    else {
+      self.log(
+        UiLogLevel::Warn,
+        "StartTransaction response omitted transactionId.",
+      );
       self.cancel_transaction_start(connector, local_tx_id)?;
       self.enqueue_status_notification(connector)?;
+      return Ok(());
+    };
+    self.set_v1_6_transaction_id(connector, local_tx_id, transaction_id)?;
+    self.log(
+      UiLogLevel::Info,
+      format!(
+        "StartTransaction status={} on connector {connector} \
+        transactionId={transaction_id}",
+        status.as_str()
+      ),
+    );
+    if status != ResponseStatus::Accepted {
+      self.enqueue_deauthorized_stop_v1_6(connector, local_tx_id)?;
+    }
+    self.enqueue_status_notification(connector)?;
+    Ok(())
+  }
+
+  fn enqueue_deauthorized_stop_v1_6(
+    &mut self,
+    connector: u16,
+    local_tx_id: u64,
+  ) -> Result<()> {
+    if let Some(transaction) =
+      self.connector_mut(connector)?.transaction.as_mut()
+    {
+      transaction.deauthorized = true;
+    }
+    // A local stop can already be waiting behind StartTransaction. Reuse its
+    // original time and meter sample instead of reporting the transaction twice.
+    if let Some(stop) = self.queue.iter_mut().find(|call| {
+      matches!(
+        call.context,
+        PendingContext::StopTxV1_6 {
+          connector: target,
+          local_tx_id: transaction,
+        } if target == connector && transaction == local_tx_id
+      )
+    }) {
+      stop.payload["reason"] = StopReason::DeAuthorized.as_str().into();
+      return Ok(());
+    }
+    self.connector_mut(connector)?.status = ConnectorStatus::SuspendedEvse;
+    if let Err(error) = self.stop_transaction(
+      connector,
+      Some(StopReason::DeAuthorized.as_str()),
+      false,
+      true,
+    ) {
       self.log(
         UiLogLevel::Warn,
         format!(
-          "StartTransaction status={} on connector {}.",
-          status.as_str(),
-          connector
+          "Deauthorized transaction on connector {connector} remains \
+          suspended; retry stop after the queue drains: {error}"
         ),
       );
+      self.emit_snapshot();
+      // The response is valid. Keep the connection alive so queued calls can
+      // drain and the operator can retry this stop with its retained CSMS ID.
     }
     Ok(())
   }

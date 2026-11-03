@@ -43,12 +43,12 @@ impl Simulator {
 
     {
       let connector_state = self.connector_mut(connector)?;
-      let tx_uid = format!("tx-{local_tx_id}");
       connector_state.transaction = Some(TransactionState {
         local_id: local_tx_id,
-        transaction_uid: tx_uid,
+        transaction_uid: format!("tx-{local_tx_id}"),
         id_token: id_token.clone(),
         authorization_accepted: false,
+        deauthorized: false,
         v1_6_transaction_id: None,
         remote_start_id,
         seq_no: 0,
@@ -227,7 +227,15 @@ impl Simulator {
     // temporary unknown ID is replaced before transmission after start ACK.
     let tx_id = v1_6_tx_id.unwrap_or(-1);
     let timestamp = now_timestamp();
-    let stop_reason = map_stop_reason_v1_6(reason, remote_stop);
+    let stop_reason = if connector_state
+      .transaction
+      .as_ref()
+      .is_some_and(|transaction| transaction.deauthorized)
+    {
+      StopReason::DeAuthorized
+    } else {
+      map_stop_reason_v1_6(reason, remote_stop)
+    };
     let reason_str =
       stop_reason.as_v1_6().unwrap_or(StopReason::Local.as_str());
     let payload = to_value(&StopTransactionV1_6Request {

@@ -505,7 +505,9 @@ impl Simulator {
     if transaction.local_id != local_tx_id {
       return Ok(());
     }
-    connector_state.status = if protocol == OcppVersion::V1_6 {
+    connector_state.status = if transaction.deauthorized {
+      ConnectorStatus::SuspendedEvse
+    } else if protocol == OcppVersion::V1_6 {
       ConnectorStatus::Charging
     } else {
       ConnectorStatus::Occupied
@@ -622,8 +624,13 @@ impl Simulator {
       .get(&connector)
       .and_then(|item| item.transaction.as_ref())
       .is_some();
+    let deauthorized = self
+      .connectors
+      .get(&connector)
+      .and_then(|state| state.transaction.as_ref())
+      .is_some_and(|transaction| transaction.deauthorized);
     let target = if has_active_tx {
-      if offered_limit.is_some_and(|limit| limit <= 0.0) {
+      if deauthorized || offered_limit.is_some_and(|limit| limit <= 0.0) {
         ConnectorStatus::SuspendedEvse
       } else if self.config.protocol == OcppVersion::V1_6 {
         ConnectorStatus::Charging

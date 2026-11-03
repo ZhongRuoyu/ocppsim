@@ -365,6 +365,13 @@ remote-start attempt.
 When `AuthorizeRemoteTxRequests` is set to `false`, the simulator starts the
 transaction immediately and then applies the eventual `StartTransaction.conf`
 status from the CSMS.
+A non-accepted authorization status retains the CSMS transaction ID and ends
+that transaction with `StopTransaction` reason `DeAuthorized`.
+If a local stop is already queued, its timestamp and meter reading are retained
+and its reason is updated instead of sending a second stop.
+The local transaction is cleared after the stop is acknowledged.
+If the outbound queue is full or the stop fails, the transaction remains
+suspended with its CSMS ID, and a later local stop retries `DeAuthorized`.
 
 Availability changes to `Inoperative` are scheduled when the target connector
 has an active transaction.

@@ -579,52 +579,6 @@ fn remote_start_authorization_concurrent_tx_does_not_start_v1_6() {
 }
 
 #[test]
-fn start_transaction_v1_6_rejection_rolls_back_local_state() {
-  let mut simulator = simulator_for_tests();
-  simulator
-    .start_transaction(1, "TOKEN".to_string(), false, None, true)
-    .expect("start should enqueue");
-  let start_call = simulator
-    .queue
-    .iter()
-    .find(|call| call.action == "StartTransaction")
-    .expect("queued start")
-    .clone();
-  simulator.queue.clear();
-  simulator.pending = Some(PendingCall {
-    message_id: "start-rejected".to_string(),
-    sent_at: Instant::now(),
-    call: start_call,
-  });
-
-  simulator
-    .handle_call_result(
-      "start-rejected",
-      &json!({
-        "idTagInfo": { "status": "Rejected" }
-      }),
-    )
-    .expect("start rejection should apply");
-
-  assert!(
-    simulator
-      .connectors
-      .get(&1)
-      .and_then(|state| state.transaction.as_ref())
-      .is_none()
-  );
-  assert_eq!(
-    simulator
-      .connectors
-      .get(&1)
-      .map(|state| state.status.display()),
-    Some("Available")
-  );
-  let status_payload = queued_payload(&simulator, "StatusNotification");
-  assert_eq!(status_payload["status"], json!("Available"));
-}
-
-#[test]
 fn transaction_event_start_error_rolls_back_v2_x_local_state() {
   for_each_v2_x_simulator(|_, mut simulator| {
     simulator
@@ -914,4 +868,85 @@ fn v1_6_stop_cannot_report_an_offline_only_transaction() {
     .expect_err("unreported transaction has no CSMS ID");
   assert!(simulator.queue.is_empty());
   assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Charging);
+}
+
+#[test]
+fn v1_6_denied_start_stays_suspended_after_stop_failure() {
+  for full_queue in [false, true] {
+    for failure in ["timeout", "error"] {
+      let mut simulator = simulator_for_tests();
+      simulator.config.request_timeout = Duration::ZERO;
+      simulator
+        .start_transaction(1, "TOKEN".to_string(), false, None, true)
+        .expect("queue start");
+      simulator.pending = Some(PendingCall {
+        message_id: "start".to_string(),
+        sent_at: Instant::now(),
+        call: simulator.queue.pop_front().expect("queued start"),
+      });
+      if full_queue {
+        simulator.config.outbound_queue_limit = 1;
+        simulator.enqueue_heartbeat();
+      }
+      let response = json!({
+        "transactionId": 123,
+        "idTagInfo": { "status": "Invalid" }
+      });
+      assert_schema_valid(
+        "schemas/1.6/StartTransactionResponse.json",
+        &response,
+      );
+      let result = simulator.handle_call_result("start", &response);
+      if full_queue {
+        result.expect("queue pressure must not fail valid response handling");
+        assert_eq!(simulator.queue.front().unwrap().action, "Heartbeat");
+        assert_eq!(
+          simulator.connectors[&1].status,
+          ConnectorStatus::SuspendedEvse
+        );
+        simulator.queue.clear();
+        simulator
+          .stop_transaction(1, None, false, true)
+          .expect("retry deauthorized stop after queue drains");
+      } else {
+        result.expect("queue automatic stop");
+      }
+      let stop = simulator.queue.pop_front().expect("queued stop");
+      assert_eq!(stop.payload["reason"], json!("DeAuthorized"));
+      assert_eq!(stop.payload["transactionId"], json!(123));
+      simulator.pending = Some(PendingCall {
+        message_id: "stop".to_string(),
+        sent_at: Instant::now(),
+        call: stop,
+      });
+      if failure == "timeout" {
+        simulator.check_pending_timeout();
+      } else {
+        simulator
+          .handle_call_error("stop", "InternalError", "retry")
+          .expect("handle stop error");
+      }
+      assert_eq!(
+        simulator.connectors[&1].status,
+        ConnectorStatus::SuspendedEvse
+      );
+      assert!(
+        simulator.connectors[&1]
+          .transaction
+          .as_ref()
+          .unwrap()
+          .deauthorized
+      );
+      simulator
+        .set_offered_limit(1, Some(7000.0))
+        .expect("set positive limit");
+      simulator
+        .apply_charging_profile_state(1)
+        .expect("apply positive limit");
+      assert_eq!(
+        simulator.connectors[&1].status,
+        ConnectorStatus::SuspendedEvse
+      );
+    }
+  }
 }

@@ -2438,3 +2438,82 @@ async fn v1_6_stop_waits_for_start_response_and_preserves_meter_sample() {
   assert_eq!(payload["meterStop"], json!(42));
   assert_eq!(payload["timestamp"], stopped["timestamp"]);
 }
+
+#[tokio::test]
+async fn v1_6_denied_start_ends_the_assigned_transaction_once() {
+  for status in ["Blocked", "Expired", "Invalid", "ConcurrentTx"] {
+    for stop_before_response in [false, true] {
+      let (mut write, _read, _server_write, mut server_read) =
+        in_memory_ws_pair().await;
+      let mut simulator = simulator_for_tests();
+      simulator.config.strict = true;
+      simulator
+        .start_transaction(1, "TOKEN".to_string(), false, None, true)
+        .expect("queue start");
+      simulator
+        .try_send_next(&mut write)
+        .await
+        .expect("send start");
+      let OcppFrame::Call { message_id, .. } =
+        read_ocpp_frame(&mut server_read).await
+      else {
+        panic!("expected start request");
+      };
+      if stop_before_response {
+        simulator
+          .stop_transaction(1, Some("Local"), false, true)
+          .expect("stop before start response");
+      }
+      simulator
+        .handle_ws_text(
+          build_call_result(
+            &message_id,
+            &json!({
+              "transactionId": 123,
+              "idTagInfo": { "status": status }
+            }),
+          ),
+          &mut write,
+        )
+        .await
+        .expect("handle valid denied authorization");
+      assert_eq!(
+        simulator.connectors[&1]
+          .transaction
+          .as_ref()
+          .and_then(|transaction| transaction.v1_6_transaction_id),
+        Some(123)
+      );
+      assert_eq!(
+        simulator
+          .queue
+          .iter()
+          .filter(|call| call.action == "StopTransaction")
+          .count(),
+        1
+      );
+      simulator
+        .try_send_next(&mut write)
+        .await
+        .expect("send stop");
+      let OcppFrame::Call {
+        message_id,
+        action,
+        payload,
+      } = read_ocpp_frame(&mut server_read).await
+      else {
+        panic!("expected stop request");
+      };
+      assert_eq!(action, "StopTransaction");
+      assert_schema_valid("schemas/1.6/StopTransaction.json", &payload);
+      assert_eq!(payload["transactionId"], json!(123));
+      assert_eq!(payload["reason"], json!("DeAuthorized"));
+      assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Finishing);
+      simulator
+        .handle_ws_text(build_call_result(&message_id, &json!({})), &mut write)
+        .await
+        .expect("acknowledge stop");
+      assert!(simulator.connectors[&1].transaction.is_none());
+    }
+  }
+}
