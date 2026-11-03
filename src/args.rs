@@ -8,7 +8,7 @@ use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
-use crate::config::{ProfileDefaults, profile_names, resolve_profile};
+use crate::config::{ConfigDefaults, profile_names, resolve_config};
 use crate::ocpp::{
   OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
   validate_boot_notification_fields,
@@ -28,7 +28,8 @@ const CLI_LONG_ABOUT: &str =
   "Command-line OCPP charge point simulator for OCPP-J.
 Run without a remote target for local simulation,
 with --ws-url and --cp-id for direct mode,
-or with a profile name from a TOML config file.";
+or with a profile name from a TOML config file.
+Global config defaults apply in every startup mode.";
 const CLI_AFTER_HELP: &str = r#"Config file format:
   # Optional global defaults that can be overridden by charge point configs.
   # CLI options take precedence over config file items.
@@ -276,64 +277,79 @@ impl CliArgs {
   ///
   /// This method merges, in order of precedence:
   /// 1. Built-in defaults.
-  /// 2. Global profile defaults from config.
+  /// 2. Global defaults from config.
   /// 3. Charge-point profile values.
   /// 4. Explicit CLI overrides.
   ///
   /// Returns an error when partial direct-mode flags are provided, when profile
   /// constraints are violated, or when overrides are invalid.
   pub fn resolve(self) -> Result<ResolvedCliArgs> {
+    self.resolve_with_default_config_path(&default_config_path())
+  }
+
+  /// Resolves settings using the supplied fallback config location.
+  fn resolve_with_default_config_path(
+    self,
+    default_path: &Path,
+  ) -> Result<ResolvedCliArgs> {
     if self.profile.is_some() && (self.ws_url.is_some() || self.cp_id.is_some())
     {
       bail!("When a profile is used, --ws-url and --cp-id must not be set.");
     }
+    if self.ws_url.is_none() && self.cp_id.is_some() {
+      bail!("--ws-url is required when no profile is used.");
+    }
+    if self.ws_url.is_some() && self.cp_id.is_none() {
+      bail!("--cp-id is required when no profile is used.");
+    }
 
-    let mut resolved = if let Some(profile_name) = &self.profile {
-      let config_path = self
-        .config_path
-        .clone()
-        .map_or_else(default_config_path, |path| expand_tilde_path(&path));
-      let defaults = ProfileDefaults {
-        connectors: DEFAULT_CONNECTORS,
-        protocol: DEFAULT_PROTOCOL,
-        vendor: DEFAULT_VENDOR.to_string(),
-        model: DEFAULT_MODEL.to_string(),
-        firmware: DEFAULT_FIRMWARE.to_string(),
-        request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
-        outbound_queue_limit: DEFAULT_OUTBOUND_QUEUE_LIMIT,
-        security_event_limit: DEFAULT_SECURITY_EVENT_LIMIT,
-      };
-      let profile = resolve_profile(&config_path, profile_name, &defaults)?;
-      ResolvedCliArgs {
-        profile: Some(profile_name.clone()),
-        config_path: Some(config_path),
-        ws_url: Some(profile.ws_url),
-        cp_id: Some(profile.cp_id),
-        append_cp_id: profile.append_cp_id,
-        connectors: profile.connectors,
-        protocol: profile.protocol,
-        vendor: profile.vendor,
-        model: profile.model,
-        firmware: profile.firmware,
-        log_path: profile.log_path.map(|path| expand_tilde_path(&path)),
-        trace_frames: profile.trace_frames,
-        strict: profile.strict,
-        request_timeout_seconds: profile.request_timeout_seconds,
-        heartbeat_seconds: profile.heartbeat_seconds,
-        outbound_queue_limit: profile.outbound_queue_limit,
-        security_event_limit: profile.security_event_limit,
-        security_profile: profile.security_profile,
-        basic_auth_password: profile.basic_auth_password,
-        ca_cert_path: profile.ca_cert_path.map(|path| expand_tilde_path(&path)),
-        client_cert_path: profile
-          .client_cert_path
-          .map(|path| expand_tilde_path(&path)),
-        client_key_path: profile
-          .client_key_path
-          .map(|path| expand_tilde_path(&path)),
-      }
-    } else {
-      resolve_with_direct_args(&self)?
+    let config_path = self.config_path.as_ref().map_or_else(
+      || default_path.to_path_buf(),
+      |path| expand_tilde_path(path),
+    );
+    let defaults = ConfigDefaults {
+      connectors: DEFAULT_CONNECTORS,
+      protocol: DEFAULT_PROTOCOL,
+      vendor: DEFAULT_VENDOR.to_string(),
+      model: DEFAULT_MODEL.to_string(),
+      firmware: DEFAULT_FIRMWARE.to_string(),
+      request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
+      outbound_queue_limit: DEFAULT_OUTBOUND_QUEUE_LIMIT,
+      security_event_limit: DEFAULT_SECURITY_EVENT_LIMIT,
+    };
+    let config = resolve_config(
+      &config_path,
+      self.profile.as_deref(),
+      &defaults,
+      self.config_path.is_none(),
+    )?;
+    let mut resolved = ResolvedCliArgs {
+      profile: self.profile.clone(),
+      config_path: Some(config_path),
+      ws_url: self.ws_url.clone().or(config.ws_url),
+      cp_id: self.cp_id.clone().or(config.cp_id),
+      append_cp_id: config.append_cp_id,
+      connectors: config.connectors,
+      protocol: config.protocol,
+      vendor: config.vendor,
+      model: config.model,
+      firmware: config.firmware,
+      log_path: config.log_path.map(|path| expand_tilde_path(&path)),
+      trace_frames: config.trace_frames,
+      strict: config.strict,
+      request_timeout_seconds: config.request_timeout_seconds,
+      heartbeat_seconds: config.heartbeat_seconds,
+      outbound_queue_limit: config.outbound_queue_limit,
+      security_event_limit: config.security_event_limit,
+      security_profile: config.security_profile,
+      basic_auth_password: config.basic_auth_password,
+      ca_cert_path: config.ca_cert_path.map(|path| expand_tilde_path(&path)),
+      client_cert_path: config
+        .client_cert_path
+        .map(|path| expand_tilde_path(&path)),
+      client_key_path: config
+        .client_key_path
+        .map(|path| expand_tilde_path(&path)),
     };
 
     apply_cli_overrides(&mut resolved, &self)?;
@@ -404,53 +420,6 @@ impl ProtocolArg {
       Self::V2_1 => OcppVersion::V2_1,
     }
   }
-}
-
-/// Resolves configuration without profile loading.
-///
-/// Inputs may omit both `--ws-url` and `--cp-id` to start in offline-only
-/// local simulation mode. If either direct connection flag is present, both
-/// must be present.
-fn resolve_with_direct_args(cli: &CliArgs) -> Result<ResolvedCliArgs> {
-  let (ws_url, cp_id) = match (&cli.ws_url, &cli.cp_id) {
-    (None, None) => (None, None),
-    (None, Some(_)) => {
-      bail!("--ws-url is required when no profile is used.");
-    }
-    (Some(_), None) => {
-      bail!("--cp-id is required when no profile is used.");
-    }
-    (Some(ws_url), Some(cp_id)) => (Some(ws_url.clone()), Some(cp_id.clone())),
-  };
-  let config_path =
-    cli.config_path.as_ref().map(|path| expand_tilde_path(path));
-
-  Ok(ResolvedCliArgs {
-    profile: None,
-    config_path,
-    ws_url,
-    cp_id,
-    append_cp_id: true,
-    connectors: DEFAULT_CONNECTORS,
-    protocol: cli
-      .protocol
-      .map_or(DEFAULT_PROTOCOL, ProtocolArg::to_version),
-    vendor: DEFAULT_VENDOR.to_string(),
-    model: DEFAULT_MODEL.to_string(),
-    firmware: DEFAULT_FIRMWARE.to_string(),
-    log_path: None,
-    trace_frames: false,
-    strict: false,
-    request_timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
-    heartbeat_seconds: None,
-    outbound_queue_limit: DEFAULT_OUTBOUND_QUEUE_LIMIT,
-    security_event_limit: DEFAULT_SECURITY_EVENT_LIMIT,
-    security_profile: None,
-    basic_auth_password: None,
-    ca_cert_path: None,
-    client_cert_path: None,
-    client_key_path: None,
-  })
 }
 
 /// Applies optional CLI overrides on top of already-resolved settings.
@@ -608,7 +577,7 @@ fn expand_tilde_path(path: &Path) -> PathBuf {
   path.to_path_buf()
 }
 
-/// Returns the default config file location for profile mode.
+/// Returns the default config file location for all startup modes.
 ///
 /// The path is `$HOME/.config/ocppsim/ocppsim.toml` when `HOME` exists,
 /// otherwise a relative fallback of `.config/ocppsim/ocppsim.toml`.
@@ -705,7 +674,7 @@ mod tests {
       ws_url: Some("ws://example".to_string()),
       ..base_args()
     };
-    assert!(args.resolve().is_err());
+    assert!(resolve_args(args).is_err());
   }
 
   #[test]
@@ -725,10 +694,10 @@ mod tests {
       security_event_limit: Some(34),
       ..base_args()
     };
-    let resolved = args.resolve().expect("resolution should succeed");
+    let resolved = resolve_args(args).expect("resolution should succeed");
     assert!(resolved.ws_url.is_none());
     assert!(resolved.cp_id.is_none());
-    assert_eq!(resolved.config_path, None);
+    assert!(resolved.config_path.is_some());
     assert_eq!(resolved.connectors, 2);
     assert_eq!(resolved.vendor, "vendor");
     assert!(resolved.trace_frames);
@@ -745,9 +714,8 @@ mod tests {
       vendor: Some("V".repeat(21)),
       ..base_args()
     };
-    let error = v1_6_args
-      .resolve()
-      .expect_err("should reject vendor length");
+    let error =
+      resolve_args(v1_6_args).expect_err("should reject vendor length");
     assert!(
       error.to_string().contains("chargePointVendor"),
       "unexpected error: {error}"
@@ -758,7 +726,8 @@ mod tests {
       model: Some("M".repeat(21)),
       ..base_args()
     };
-    let error = v2_x_args.resolve().expect_err("should reject model length");
+    let error =
+      resolve_args(v2_x_args).expect_err("should reject model length");
     assert!(
       error.to_string().contains("chargingStation.model"),
       "unexpected error: {error}"
@@ -772,7 +741,7 @@ mod tests {
       cp_id: Some("CP-DEMO".to_string()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("resolution should fail");
+    let error = resolve_args(args).expect_err("resolution should fail");
     assert_eq!(
       error.to_string(),
       "--ws-url is required when no profile is used."
@@ -786,7 +755,7 @@ mod tests {
       ws_url: Some("ws://localhost:9000/ocpp".to_string()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("resolution should fail");
+    let error = resolve_args(args).expect_err("resolution should fail");
     assert_eq!(
       error.to_string(),
       "--cp-id is required when no profile is used."
@@ -818,7 +787,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.cp_id.as_deref(), Some("CP-DEMO"));
     assert_eq!(resolved.ws_url.as_deref(), Some("wss://example.com/ocpp"));
     assert_eq!(resolved.protocol, OcppVersion::V1_6);
@@ -845,7 +814,7 @@ id = "CP-DEMO"
       config_path: Some(path.clone()),
       ..base_args()
     };
-    assert!(args.resolve().is_err());
+    assert!(resolve_args(args).is_err());
 
     let _ = fs::remove_file(path);
   }
@@ -899,8 +868,22 @@ id = "CP-BETA"
     let _ = fs::remove_file(path);
   }
 
-  /// Writes temporary TOML config content and returns its path.
-  fn write_temp_config(content: &str) -> PathBuf {
+  /// Resolves test args without loading the user's default configuration.
+  fn resolve_args(args: CliArgs) -> anyhow::Result<super::ResolvedCliArgs> {
+    args.resolve_with_default_config_path(&temp_config_path())
+  }
+
+  /// Builds args with a direct connection target for startup tests.
+  fn direct_args() -> CliArgs {
+    CliArgs {
+      ws_url: Some("wss://example.com/ocpp".to_string()),
+      cp_id: Some("CP-DIRECT".to_string()),
+      ..base_args()
+    }
+  }
+
+  /// Generates a unique repository-local path without creating a file.
+  fn temp_config_path() -> PathBuf {
     let base = std::env::current_dir().expect("cwd");
     let timestamp = SystemTime::now()
       .duration_since(UNIX_EPOCH)
@@ -908,8 +891,12 @@ id = "CP-BETA"
       .as_nanos();
     let sequence = TEMP_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
-    let path =
-      base.join(format!(".tmp-ocppsim-{pid}-{timestamp}-{sequence}.toml"));
+    base.join(format!(".tmp-ocppsim-{pid}-{timestamp}-{sequence}.toml"))
+  }
+
+  /// Writes temporary TOML config content and returns its path.
+  fn write_temp_config(content: &str) -> PathBuf {
+    let path = temp_config_path();
     fs::write(&path, content).expect("write temp config");
     path
   }
@@ -924,8 +911,304 @@ id = "CP-BETA"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("arguments should resolve");
+    let resolved = resolve_args(args).expect("arguments should resolve");
     assert_eq!(resolved.log_path, Some(PathBuf::from("./sim.log")));
+  }
+
+  #[test]
+  /// Verifies local/direct startup inherits every supported global setting.
+  fn resolves_global_settings_without_profile() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.1"
+vendor = "global-vendor"
+model = "global-model"
+firmware = "global-fw"
+log-path = "~/global.log"
+trace-frames = true
+strict = true
+request-timeout-seconds = 42
+heartbeat-seconds = 12
+outbound-queue-limit = 123
+security-event-limit = 456
+security-profile = 2
+basic-auth-password = "0123456789abcdef0123456789abcdef"
+ca-cert = "~/csms-root.pem"
+client-cert = "~/charge-point.pem"
+client-key = "~/charge-point-key.pem"
+"#,
+    );
+
+    for config_path in [None, Some(path.clone())] {
+      for mut args in [base_args(), direct_args()] {
+        let expected_url = args.ws_url.clone();
+        let expected_id = args.cp_id.clone();
+        args.config_path = config_path.clone();
+        let resolved = args
+          .resolve_with_default_config_path(&path)
+          .expect("global settings should resolve");
+        assert_eq!(resolved.profile, None);
+        assert_eq!(resolved.config_path.as_ref(), Some(&path));
+        assert_eq!(resolved.ws_url, expected_url);
+        assert_eq!(resolved.cp_id, expected_id);
+        assert_eq!(resolved.connectors, 1);
+        assert!(resolved.append_cp_id);
+        assert_eq!(resolved.protocol, OcppVersion::V2_1);
+        assert_eq!(resolved.vendor, "global-vendor");
+        assert_eq!(resolved.model, "global-model");
+        assert_eq!(resolved.firmware, "global-fw");
+        assert_eq!(
+          resolved.log_path,
+          Some(expand_tilde_path(Path::new("~/global.log")))
+        );
+        assert!(resolved.trace_frames);
+        assert!(resolved.strict);
+        assert_eq!(resolved.request_timeout_seconds, 42);
+        assert_eq!(resolved.heartbeat_seconds, Some(12));
+        assert_eq!(resolved.outbound_queue_limit, 123);
+        assert_eq!(resolved.security_event_limit, 456);
+        assert_eq!(resolved.security_profile, Some(2));
+        assert_eq!(
+          resolved.basic_auth_password.as_deref(),
+          Some("0123456789abcdef0123456789abcdef")
+        );
+        assert_eq!(
+          resolved.ca_cert_path,
+          Some(expand_tilde_path(Path::new("~/csms-root.pem")))
+        );
+        assert_eq!(
+          resolved.client_cert_path,
+          Some(expand_tilde_path(Path::new("~/charge-point.pem")))
+        );
+        assert_eq!(
+          resolved.client_key_path,
+          Some(expand_tilde_path(Path::new("~/charge-point-key.pem")))
+        );
+      }
+    }
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies explicit CLI flags override globals in local and direct modes.
+  fn cli_overrides_global_settings_without_profile() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.1"
+vendor = "global-vendor"
+model = "global-model"
+firmware = "global-fw"
+log-path = "./global.log"
+trace-frames = false
+strict = false
+request-timeout-seconds = 42
+heartbeat-seconds = 12
+outbound-queue-limit = 123
+security-event-limit = 456
+security-profile = 2
+basic-auth-password = "0123456789abcdef0123456789abcdef"
+ca-cert = "./global-ca.pem"
+client-cert = "./global-cert.pem"
+client-key = "./global-key.pem"
+"#,
+    );
+
+    for target in [base_args(), direct_args()] {
+      let args = CliArgs {
+        config_path: Some(path.clone()),
+        protocol: Some(super::ProtocolArg::V1_6),
+        vendor: Some("cli-vendor".to_string()),
+        model: Some("cli-model".to_string()),
+        firmware: Some("cli-fw".to_string()),
+        log_path: Some(PathBuf::from("./cli.log")),
+        trace_frames: true,
+        strict: true,
+        request_timeout_seconds: Some(99),
+        heartbeat_seconds: Some(0),
+        outbound_queue_limit: Some(0),
+        security_event_limit: Some(0),
+        security_profile: Some(1),
+        basic_auth_password: Some(
+          "abcdef0123456789abcdef0123456789".to_string(),
+        ),
+        ca_cert: Some(PathBuf::from("./cli-ca.pem")),
+        client_cert: Some(PathBuf::from("./cli-cert.pem")),
+        client_key: Some(PathBuf::from("./cli-key.pem")),
+        ..target
+      };
+      let resolved = resolve_args(args).expect("CLI settings should win");
+      assert_eq!(resolved.protocol, OcppVersion::V1_6);
+      assert_eq!(resolved.vendor, "cli-vendor");
+      assert_eq!(resolved.model, "cli-model");
+      assert_eq!(resolved.firmware, "cli-fw");
+      assert_eq!(resolved.log_path, Some(PathBuf::from("./cli.log")));
+      assert!(resolved.trace_frames);
+      assert!(resolved.strict);
+      assert_eq!(resolved.request_timeout_seconds, 99);
+      assert_eq!(resolved.heartbeat_seconds, None);
+      assert_eq!(resolved.outbound_queue_limit, 0);
+      assert_eq!(resolved.security_event_limit, 0);
+      assert_eq!(resolved.security_profile, Some(1));
+      assert_eq!(
+        resolved.basic_auth_password.as_deref(),
+        Some("abcdef0123456789abcdef0123456789")
+      );
+      assert_eq!(resolved.ca_cert_path, Some(PathBuf::from("./cli-ca.pem")));
+      assert_eq!(
+        resolved.client_cert_path,
+        Some(PathBuf::from("./cli-cert.pem"))
+      );
+      assert_eq!(
+        resolved.client_key_path,
+        Some(PathBuf::from("./cli-key.pem"))
+      );
+    }
+
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies an absent implicit config still permits local/direct startup.
+  fn missing_default_config_uses_builtin_defaults() {
+    let path = temp_config_path();
+    for args in [base_args(), direct_args()] {
+      let resolved = args
+        .resolve_with_default_config_path(&path)
+        .expect("default configuration is optional");
+      assert_eq!(resolved.config_path.as_ref(), Some(&path));
+      assert_eq!(resolved.protocol, OcppVersion::V1_6);
+      assert_eq!(resolved.vendor, "ocppsim");
+      assert_eq!(resolved.log_path, None);
+      assert!(!resolved.trace_frames);
+      assert!(!resolved.strict);
+      assert_eq!(resolved.heartbeat_seconds, None);
+    }
+  }
+
+  #[test]
+  /// Verifies an explicit missing config never falls back to implicit globals.
+  fn missing_explicit_config_without_profile_produces_error() {
+    let default_path = write_temp_config("protocol = \"2.1\"\n");
+    let missing_path = temp_config_path();
+    for mut args in [base_args(), direct_args()] {
+      args.config_path = Some(missing_path.clone());
+      let error = args
+        .resolve_with_default_config_path(&default_path)
+        .expect_err("explicit config must exist");
+      assert!(error.to_string().contains("Failed to read"));
+      assert!(
+        error
+          .to_string()
+          .contains(&missing_path.display().to_string())
+      );
+    }
+    let _ = fs::remove_file(default_path);
+  }
+
+  #[test]
+  /// Verifies invalid globals are reported in both local and direct modes.
+  fn invalid_global_settings_without_profile_produce_errors() {
+    for (content, expected) in [
+      ("this is not valid toml [[[", "Failed to parse"),
+      ("protocol = \"invalid\"", "protocol"),
+      ("security-profile = 4", "security-profile"),
+      ("basic-auth-password = \"invalid\"", "basic-auth-password"),
+      ("vendor = \"too-long-for-ocpp-one-six\"", "BootNotification"),
+    ] {
+      let path = write_temp_config(content);
+      for config_path in [None, Some(path.clone())] {
+        for mut args in [base_args(), direct_args()] {
+          args.config_path = config_path.clone();
+          let error = args
+            .resolve_with_default_config_path(&path)
+            .expect_err("invalid global settings must fail");
+          assert!(
+            error.to_string().contains(expected),
+            "expected {expected}: {error}"
+          );
+          assert!(error.to_string().contains(&path.display().to_string()));
+        }
+      }
+      let _ = fs::remove_file(path);
+    }
+  }
+
+  #[test]
+  /// Verifies unreadable implicit config errors are not treated as absence.
+  fn unreadable_default_config_produces_error() {
+    let path = std::env::current_dir().expect("cwd");
+    let error = base_args()
+      .resolve_with_default_config_path(&path)
+      .expect_err("a directory cannot be read as a config file");
+    assert!(error.to_string().contains("Failed to read"));
+  }
+
+  #[test]
+  /// Verifies discovering profiles does not select one for local startup.
+  fn global_settings_do_not_select_a_profile() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.1"
+log-path = "./global.log"
+heartbeat-seconds = 0
+
+[charge-points.demo]
+ws-url = "wss://example.com/ocpp"
+id = "CP-PROFILE"
+protocol = "1.6"
+connectors = 3
+log-path = "./profile.log"
+heartbeat-seconds = 20
+"#,
+    );
+    let resolved = base_args()
+      .resolve_with_default_config_path(&path)
+      .expect("globals should resolve without a profile");
+    assert_eq!(resolved.profile, None);
+    assert_eq!(resolved.ws_url, None);
+    assert_eq!(resolved.cp_id, None);
+    assert_eq!(resolved.protocol, OcppVersion::V2_1);
+    assert_eq!(resolved.connectors, 1);
+    assert_eq!(resolved.log_path, Some(PathBuf::from("./global.log")));
+    assert_eq!(resolved.heartbeat_seconds, None);
+    let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  /// Verifies an interactive direct connection keeps global defaults.
+  fn direct_connect_inherits_global_settings() {
+    let path = write_temp_config(
+      r#"
+protocol = "2.1"
+vendor = "global-vendor"
+log-path = "./global.log"
+strict = true
+request-timeout-seconds = 42
+heartbeat-seconds = 12
+"#,
+    );
+    let args = CliArgs {
+      config_path: Some(path.clone()),
+      vendor: Some("cli-vendor".to_string()),
+      ..base_args()
+    };
+    let resolved = args
+      .resolve_direct_for_connect(
+        "wss://example.com/ocpp".to_string(),
+        "CP-DIRECT".to_string(),
+      )
+      .expect("direct connect should inherit globals");
+    assert_eq!(resolved.profile, None);
+    assert_eq!(resolved.ws_url.as_deref(), Some("wss://example.com/ocpp"));
+    assert_eq!(resolved.cp_id.as_deref(), Some("CP-DIRECT"));
+    assert_eq!(resolved.protocol, OcppVersion::V2_1);
+    assert_eq!(resolved.vendor, "cli-vendor");
+    assert_eq!(resolved.log_path, Some(PathBuf::from("./global.log")));
+    assert!(resolved.strict);
+    assert_eq!(resolved.request_timeout_seconds, 42);
+    assert_eq!(resolved.heartbeat_seconds, Some(12));
+    let _ = fs::remove_file(path);
   }
 
   #[test]
@@ -946,7 +1229,7 @@ log-path = "./profile.log"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.log_path, Some(PathBuf::from("./profile.log")));
 
     let _ = fs::remove_file(path);
@@ -981,7 +1264,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.protocol, OcppVersion::V1_6);
     assert_eq!(resolved.vendor, "global-vendor");
     assert_eq!(resolved.model, "global-model");
@@ -1037,7 +1320,7 @@ security-event-limit = 34
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.protocol, OcppVersion::V2_1);
     assert_eq!(resolved.vendor, "profile-vendor");
     assert_eq!(resolved.model, "profile-model");
@@ -1102,7 +1385,7 @@ security-event-limit = 34
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.protocol, OcppVersion::V2_1);
     assert_eq!(resolved.vendor, "cli-vendor");
     assert_eq!(resolved.model, "cli-model");
@@ -1137,7 +1420,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.heartbeat_seconds, None);
 
     let _ = fs::remove_file(path);
@@ -1153,7 +1436,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("arguments should resolve");
+    let resolved = resolve_args(args).expect("arguments should resolve");
     assert_eq!(resolved.heartbeat_seconds, None);
   }
 
@@ -1167,7 +1450,7 @@ id = "CP-DEMO"
       basic_auth_password: Some("not-a-hex-password".to_string()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should reject password");
+    let error = resolve_args(args).expect_err("should reject password");
     assert!(
       error.to_string().contains("ASCII hexadecimal"),
       "unexpected error: {error}"
@@ -1186,7 +1469,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("arguments should resolve");
+    let resolved = resolve_args(args).expect("arguments should resolve");
     assert_eq!(
       resolved.basic_auth_password.as_deref(),
       Some("not-a-hex-passwd")
@@ -1204,7 +1487,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let error = args.resolve().expect_err("should reject colon");
+    let error = resolve_args(args).expect_err("should reject colon");
     assert!(
       error.to_string().contains("must not contain `:`"),
       "unexpected error: {error}"
@@ -1220,7 +1503,7 @@ id = "CP-DEMO"
       protocol: Some(super::ProtocolArg::V2_1),
       ..base_args()
     };
-    let error = colon_args.resolve().expect_err("should reject colon");
+    let error = resolve_args(colon_args).expect_err("should reject colon");
     assert!(
       error.to_string().contains("must not contain `:`"),
       "unexpected error: {error}"
@@ -1232,7 +1515,7 @@ id = "CP-DEMO"
       protocol: Some(super::ProtocolArg::V2_0_1),
       ..base_args()
     };
-    let error = long_args.resolve().expect_err("should reject length");
+    let error = resolve_args(long_args).expect_err("should reject length");
     assert!(
       error.to_string().contains("at most 48"),
       "unexpected error: {error}"
@@ -1249,7 +1532,7 @@ id = "CP-DEMO"
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("arguments should resolve");
+    let resolved = resolve_args(args).expect("arguments should resolve");
     assert_eq!(
       resolved.log_path,
       Some(expand_tilde_path(Path::new("~/sim.log")))
@@ -1268,7 +1551,7 @@ id = "CP-DEMO"
       config_path: Some(PathBuf::from("/nonexistent/path/ocppsim.toml")),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("Failed to read"),
       "unexpected error: {error}"
@@ -1291,7 +1574,7 @@ id = "CP-DEMO"
       config_path: Some(path.clone()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("was not found"),
       "unexpected error: {error}"
@@ -1317,7 +1600,7 @@ protocol = "3.0"
       config_path: Some(path.clone()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("protocol"),
       "unexpected error: {error}"
@@ -1344,7 +1627,7 @@ id = "CP-DEMO"
       config_path: Some(path.clone()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("protocol"),
       "unexpected error: {error}"
@@ -1370,7 +1653,7 @@ connectors = 0
       config_path: Some(path.clone()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("connectors"),
       "unexpected error: {error}"
@@ -1388,7 +1671,7 @@ connectors = 0
       connectors: Some(0),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("--connectors must be positive"),
       "unexpected error: {error}"
@@ -1413,7 +1696,7 @@ append-cp-id = false
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert!(!resolved.append_cp_id);
 
     let _ = fs::remove_file(path);
@@ -1438,7 +1721,7 @@ append-cp-id = true
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert!(!resolved.append_cp_id);
 
     let _ = fs::remove_file(path);
@@ -1453,7 +1736,7 @@ append-cp-id = true
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("arguments should resolve");
+    let resolved = resolve_args(args).expect("arguments should resolve");
     assert_eq!(resolved.ws_url.as_deref(), Some("ws://localhost:9000/ocpp"));
     assert_eq!(resolved.cp_id.as_deref(), Some("CP-TEST"));
     assert!(resolved.append_cp_id);
@@ -1493,7 +1776,7 @@ connectors = 3
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.connectors, 3);
 
     let _ = fs::remove_file(path);
@@ -1518,7 +1801,7 @@ connectors = 3
       ..base_args()
     };
 
-    let resolved = args.resolve().expect("profile should resolve");
+    let resolved = resolve_args(args).expect("profile should resolve");
     assert_eq!(resolved.connectors, 5);
 
     let _ = fs::remove_file(path);
@@ -1534,7 +1817,7 @@ connectors = 3
       config_path: Some(path.clone()),
       ..base_args()
     };
-    let error = args.resolve().expect_err("should fail");
+    let error = resolve_args(args).expect_err("should fail");
     assert!(
       error.to_string().contains("Failed to parse"),
       "unexpected error: {error}"

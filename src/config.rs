@@ -11,7 +11,7 @@ use crate::ocpp::{
 
 /// Built-in defaults used when profile/global config entries are omitted.
 #[derive(Debug, Clone)]
-pub struct ProfileDefaults {
+pub struct ConfigDefaults {
   pub connectors: u16,
   pub protocol: OcppVersion,
   pub vendor: String,
@@ -22,11 +22,11 @@ pub struct ProfileDefaults {
   pub security_event_limit: usize,
 }
 
-/// Final profile settings after merging defaults, global config, and profile.
+/// Final settings after merging defaults, global config, and a profile.
 #[derive(Debug, Clone)]
-pub struct ResolvedProfileConfig {
-  pub ws_url: String,
-  pub cp_id: String,
+pub struct ResolvedConfig {
+  pub ws_url: Option<String>,
+  pub cp_id: Option<String>,
   pub append_cp_id: bool,
   pub connectors: u16,
   pub protocol: OcppVersion,
@@ -47,7 +47,7 @@ pub struct ResolvedProfileConfig {
   pub client_key_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct ConfigFile {
   protocol: Option<String>,
   vendor: Option<String>,
@@ -80,7 +80,7 @@ struct ConfigFile {
   charge_points: HashMap<String, ProfileConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct ProfileConfig {
   #[serde(rename = "ws-url")]
   ws_url: Option<String>,
@@ -117,64 +117,32 @@ struct ProfileConfig {
   client_key_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
-struct GlobalConfig {
-  protocol: Option<String>,
-  vendor: Option<String>,
-  model: Option<String>,
-  firmware: Option<String>,
-  log_path: Option<PathBuf>,
-  trace_frames: Option<bool>,
-  strict: Option<bool>,
-  request_timeout_seconds: Option<u64>,
-  heartbeat_seconds: Option<u64>,
-  outbound_queue_limit: Option<usize>,
-  security_event_limit: Option<usize>,
-  security_profile: Option<u8>,
-  basic_auth_password: Option<String>,
-  ca_cert_path: Option<PathBuf>,
-  client_cert_path: Option<PathBuf>,
-  client_key_path: Option<PathBuf>,
-}
-
-#[derive(Debug)]
-struct ProfileSelection {
-  profile: ProfileConfig,
-  global: GlobalConfig,
-}
-
-/// Resolves one profile from a config file into runtime-ready settings.
+/// Resolves global settings and an optional charge point profile.
 ///
-/// The profile must define `ws-url` and `id`. Other values inherit from
-/// global config and then from `defaults` when not present.
-pub fn resolve_profile(
+/// A selected profile must define `ws-url` and `id`. Other values inherit
+/// from global config and then from `defaults`. A missing file is allowed
+/// only when `allow_missing` is true and no profile is selected.
+pub fn resolve_config(
   config_path: &Path,
-  profile_name: &str,
-  defaults: &ProfileDefaults,
-) -> Result<ResolvedProfileConfig> {
-  let selection = load_profile(config_path, profile_name)?;
-  let profile = selection.profile;
-  let global = selection.global;
-
-  let ws_url = required_profile_value(
-    profile.ws_url,
-    profile_name,
-    config_path,
-    "ws-url",
-  )?;
-  let cp_id =
-    required_profile_value(profile.id, profile_name, config_path, "id")?;
-
-  let connectors = profile.connectors.unwrap_or(defaults.connectors);
-  validate_profile_connectors(profile_name, config_path, connectors)?;
+  profile_name: Option<&str>,
+  defaults: &ConfigDefaults,
+  allow_missing: bool,
+) -> Result<ResolvedConfig> {
+  let mut global =
+    load_config(config_path, allow_missing && profile_name.is_none())?;
+  let profile = select_profile(&mut global, config_path, profile_name)?;
+  let source = profile_name.map_or_else(
+    || "Global config".to_string(),
+    |name| format!("Profile `{name}`"),
+  );
 
   let protocol_label =
     profile.protocol.as_deref().or(global.protocol.as_deref());
   let protocol = if let Some(label) = protocol_label {
     parse_protocol_label(label).with_context(|| {
       format!(
-        "Invalid `protocol` in profile `{}` ({}).",
-        profile_name,
+        "Invalid `protocol` in {} ({}).",
+        source,
         config_path.display()
       )
     })?
@@ -187,8 +155,8 @@ pub fn resolve_profile(
     && !(1..=3).contains(&profile_number)
   {
     bail!(
-      "Profile `{}` has invalid `security-profile={}` in {}.",
-      profile_name,
+      "{} has invalid `security-profile={}` in {}.",
+      source,
       profile_number,
       config_path.display()
     );
@@ -200,9 +168,9 @@ pub fn resolve_profile(
     && !is_valid_basic_auth_password(protocol, password)
   {
     bail!(
-      "Profile `{}` has invalid `basic-auth-password` in {}. \
+      "{} has invalid `basic-auth-password` in {}. \
       Expected {}.",
-      profile_name,
+      source,
       config_path.display(),
       basic_auth_password_requirement(protocol)
     );
@@ -212,8 +180,8 @@ pub fn resolve_profile(
   let model = merged_string(profile.model, global.model, &defaults.model);
   let firmware =
     merged_string(profile.firmware, global.firmware, &defaults.firmware);
-  validate_profile_boot_identity(
-    profile_name,
+  validate_boot_identity(
+    &source,
     config_path,
     protocol,
     &vendor,
@@ -221,11 +189,11 @@ pub fn resolve_profile(
     &firmware,
   )?;
 
-  Ok(ResolvedProfileConfig {
-    ws_url,
-    cp_id,
+  Ok(ResolvedConfig {
+    ws_url: profile.ws_url,
+    cp_id: profile.id,
     append_cp_id: profile.append_cp_id.unwrap_or(true),
-    connectors,
+    connectors: profile.connectors.unwrap_or(defaults.connectors),
     protocol,
     vendor,
     model,
@@ -259,6 +227,36 @@ pub fn resolve_profile(
   })
 }
 
+/// Selects and validates profile-specific target fields when requested.
+fn select_profile(
+  config: &mut ConfigFile,
+  config_path: &Path,
+  profile_name: Option<&str>,
+) -> Result<ProfileConfig> {
+  let Some(name) = profile_name else {
+    return Ok(ProfileConfig::default());
+  };
+  let mut profile = config.charge_points.remove(name).ok_or_else(|| {
+    anyhow!(
+      "Profile `{}` was not found in {}.",
+      name,
+      config_path.display()
+    )
+  })?;
+  profile.ws_url = Some(required_profile_value(
+    profile.ws_url,
+    name,
+    config_path,
+    "ws-url",
+  )?);
+  profile.id =
+    Some(required_profile_value(profile.id, name, config_path, "id")?);
+  if let Some(connectors) = profile.connectors {
+    validate_profile_connectors(name, config_path, connectors)?;
+  }
+  Ok(profile)
+}
+
 fn merged_string(
   profile: Option<String>,
   global: Option<String>,
@@ -282,8 +280,8 @@ fn validate_profile_connectors(
   );
 }
 
-fn validate_profile_boot_identity(
-  profile_name: &str,
+fn validate_boot_identity(
+  source: &str,
   config_path: &Path,
   protocol: OcppVersion,
   vendor: &str,
@@ -293,8 +291,8 @@ fn validate_profile_boot_identity(
   validate_boot_notification_fields(protocol, vendor, model, firmware).map_err(
     |message| {
       anyhow!(
-        "Profile `{}` has invalid BootNotification identity in {}. {}",
-        profile_name,
+        "{} has invalid BootNotification identity in {}. {}",
+        source,
         config_path.display(),
         message
       )
@@ -339,51 +337,22 @@ pub fn profile_names(config_path: &Path) -> Result<Vec<String>> {
   Ok(names)
 }
 
-/// Loads the config file and returns the requested profile plus global values.
-fn load_profile(path: &Path, profile_name: &str) -> Result<ProfileSelection> {
-  let content = std::fs::read_to_string(path)
-    .with_context(|| format!("Failed to read {}", path.display()))?;
-  let config: ConfigFile = toml::from_str(&content)
-    .with_context(|| format!("Failed to parse {}", path.display()))?;
-  let global = GlobalConfig {
-    protocol: config.protocol,
-    vendor: config.vendor,
-    model: config.model,
-    firmware: config.firmware,
-    log_path: config.log_path,
-    trace_frames: config.trace_frames,
-    strict: config.strict,
-    request_timeout_seconds: config.request_timeout_seconds,
-    heartbeat_seconds: config.heartbeat_seconds,
-    outbound_queue_limit: config.outbound_queue_limit,
-    security_event_limit: config.security_event_limit,
-    security_profile: config.security_profile,
-    basic_auth_password: config.basic_auth_password,
-    ca_cert_path: config.ca_cert_path,
-    client_cert_path: config.client_cert_path,
-    client_key_path: config.client_key_path,
+/// Reads configuration, optionally tolerating an absent default file.
+fn load_config(path: &Path, allow_missing: bool) -> Result<ConfigFile> {
+  let content = match std::fs::read_to_string(path) {
+    Ok(content) => content,
+    Err(error)
+      if allow_missing && error.kind() == std::io::ErrorKind::NotFound =>
+    {
+      return Ok(ConfigFile::default());
+    }
+    Err(error) => {
+      return Err(error)
+        .with_context(|| format!("Failed to read {}", path.display()));
+    }
   };
-
-  config
-    .charge_points
-    .into_iter()
-    .find_map(|(name, profile)| {
-      if name == profile_name {
-        Some(ProfileSelection {
-          profile,
-          global: global.clone(),
-        })
-      } else {
-        None
-      }
-    })
-    .ok_or_else(|| {
-      anyhow!(
-        "Profile `{}` was not found in {}.",
-        profile_name,
-        path.display()
-      )
-    })
+  toml::from_str(&content)
+    .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
 /// Parses a protocol label from TOML into an internal OCPP version enum.
@@ -453,7 +422,7 @@ vendor = "ocppsim"
   /// Verifies empty config files do not fail deserialization.
   fn resolve_profile_reports_missing_profile_for_empty_config() {
     let path = write_temp_config("");
-    let defaults = super::ProfileDefaults {
+    let defaults = super::ConfigDefaults {
       connectors: 1,
       protocol: super::OcppVersion::V1_6,
       vendor: "ocppsim".to_string(),
@@ -464,7 +433,7 @@ vendor = "ocppsim"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_profile(&path, "test", &defaults)
+    let error = super::resolve_config(&path, Some("test"), &defaults, false)
       .expect_err("empty config should not resolve a profile");
     assert_eq!(
       error.to_string(),
@@ -486,7 +455,7 @@ security-profile = 2
 basic-auth-password = "not-a-hex-password"
 "#,
     );
-    let defaults = super::ProfileDefaults {
+    let defaults = super::ConfigDefaults {
       connectors: 1,
       protocol: super::OcppVersion::V1_6,
       vendor: "ocppsim".to_string(),
@@ -497,7 +466,7 @@ basic-auth-password = "not-a-hex-password"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_profile(&path, "demo", &defaults)
+    let error = super::resolve_config(&path, Some("demo"), &defaults, false)
       .expect_err("invalid password should not resolve");
     assert!(
       error.to_string().contains("basic-auth-password"),
@@ -521,7 +490,7 @@ security-profile = 2
 basic-auth-password = "not-a-hex-passwd"
 "#,
     );
-    let defaults = super::ProfileDefaults {
+    let defaults = super::ConfigDefaults {
       connectors: 1,
       protocol: super::OcppVersion::V1_6,
       vendor: "ocppsim".to_string(),
@@ -532,8 +501,8 @@ basic-auth-password = "not-a-hex-passwd"
       security_event_limit: 1000,
     };
 
-    let resolved =
-      super::resolve_profile(&path, "demo", &defaults).expect("profile");
+    let resolved = super::resolve_config(&path, Some("demo"), &defaults, false)
+      .expect("profile");
     assert_eq!(
       resolved.basic_auth_password.as_deref(),
       Some("not-a-hex-passwd")
@@ -554,7 +523,7 @@ ws-url = "wss://example.com/ocpp"
 id = "CP-DEMO"
 "#,
     );
-    let defaults = super::ProfileDefaults {
+    let defaults = super::ConfigDefaults {
       connectors: 1,
       protocol: super::OcppVersion::V1_6,
       vendor: "ocppsim".to_string(),
@@ -565,7 +534,7 @@ id = "CP-DEMO"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_profile(&path, "demo", &defaults)
+    let error = super::resolve_config(&path, Some("demo"), &defaults, false)
       .expect_err("invalid vendor should not resolve");
     assert!(
       error.to_string().contains("BootNotification identity"),

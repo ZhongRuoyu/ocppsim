@@ -90,8 +90,13 @@ Type `connect` inside the terminal UI to connect to that target.
 
 `ocppsim` can be configured through a TOML file with global defaults and named
 charge point profiles.
-It expects the file to be present at `~/.config/ocppsim/ocppsim.toml` by
-default, but you can specify a custom path with `--config-path`.
+Global defaults apply in local, direct, and profile modes.
+The default file is `~/.config/ocppsim/ocppsim.toml`; use `--config-path` to
+select a different file.
+Without a profile, a missing default file uses built-in defaults.
+An explicit `--config-path` or a selected profile requires the file to exist.
+Invalid configuration files report an error in every mode.
+Profile values override global defaults, and CLI flags override both.
 
 Below is a sample config file with all available options.
 
@@ -145,7 +150,8 @@ CLI flags override profile values where both are provided.
 
 ## Logs
 
-File logs are appended when `--log-path` or profile `log-path` is set.
+File logs are appended when `--log-path`, global `log-path`, or the startup
+profile's `log-path` is set.
 `ocppsim` does not rotate or truncate log files.
 Use a unique path per long-running profile, or rotate the file with external
 tooling such as `logrotate`, `newsyslog`, or a shell wrapper that moves the

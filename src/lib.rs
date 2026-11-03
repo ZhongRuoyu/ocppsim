@@ -349,7 +349,12 @@ mod tests {
   #[test]
   /// Verifies connection-oriented commands dispatch the expected variants.
   fn parsed_connection_commands_dispatch_to_simulator_commands() {
-    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    let (mut cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    let config_path = std::env::current_dir()
+      .expect("cwd")
+      .join(format!(".tmp-ocppsim-command-{}.toml", std::process::id()));
+    std::fs::write(&config_path, "").expect("write empty config");
+    cli_args.config_path = Some(config_path.clone());
 
     assert!(!dispatch("connect", &cli_args, &cmd_tx, &mut app));
     match next_command(&mut cmd_rx) {
@@ -386,6 +391,7 @@ mod tests {
       next_command(&mut cmd_rx),
       SimulatorCommand::Disconnect
     ));
+    let _ = std::fs::remove_file(config_path);
   }
 
   #[test]
