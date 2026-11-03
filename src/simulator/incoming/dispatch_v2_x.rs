@@ -219,7 +219,10 @@ impl Simulator {
     message_id: &str,
     payload: &Value,
   ) -> Result<()> {
-    let request = match RequestStartTransactionRequest_V2_X::parse(payload) {
+    let request = match RequestStartTransactionRequest_V2_X::parse(
+      payload,
+      self.config.protocol,
+    ) {
       Ok(value) => value,
       Err(error) => {
         return self
@@ -275,6 +278,7 @@ impl Simulator {
       connector: _,
       remote_start_id,
       id_token,
+      id_token_type,
       charging_profile,
     } = request;
     let status = if let Err(error) =
@@ -289,7 +293,14 @@ impl Simulator {
       );
       ResponseStatus::Rejected
     } else if self
-      .start_transaction(connector, id_token, true, Some(remote_start_id), true)
+      .start_transaction_with_token_type(
+        connector,
+        id_token,
+        id_token_type,
+        true,
+        Some(remote_start_id),
+        true,
+      )
       .and_then(|()| {
         self.apply_remote_start_charging_profile(
           connector,

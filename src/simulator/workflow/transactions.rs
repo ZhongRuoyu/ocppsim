@@ -2,8 +2,8 @@ use super::super::payloads::{
   StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
 };
 use super::super::{
-  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext, QueuedCall,
-  REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
+  ConnectorStatus, IdTokenType, OcppVersion, OutgoingAction, PendingContext,
+  QueuedCall, REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
   TransactionEventRequest, TransactionState, TransactionTriggerReason,
   TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
   now_timestamp, validate_outbound_id_token,
@@ -15,6 +15,26 @@ impl Simulator {
     &mut self,
     connector: u16,
     id_token: String,
+    remote_start: bool,
+    remote_start_id: Option<i64>,
+    is_connected: bool,
+  ) -> Result<()> {
+    self.start_transaction_with_token_type(
+      connector,
+      id_token,
+      IdTokenType::Central.as_str().to_string(),
+      remote_start,
+      remote_start_id,
+      is_connected,
+    )
+  }
+
+  /// Starts a transaction while preserving the supplied token namespace.
+  pub(in crate::simulator) fn start_transaction_with_token_type(
+    &mut self,
+    connector: u16,
+    id_token: String,
+    id_token_type: String,
     remote_start: bool,
     remote_start_id: Option<i64>,
     is_connected: bool,
@@ -32,10 +52,9 @@ impl Simulator {
       self.ensure_outbound_queue_capacity(action)?;
     }
 
-    let status = if self.config.protocol == OcppVersion::V1_6 {
-      ConnectorStatus::Charging
-    } else {
-      ConnectorStatus::Occupied
+    let status = match self.config.protocol {
+      OcppVersion::V1_6 => ConnectorStatus::Charging,
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => ConnectorStatus::Occupied,
     };
 
     let local_tx_id = self.next_tx_id;
@@ -47,6 +66,7 @@ impl Simulator {
         local_id: local_tx_id,
         transaction_uid: format!("tx-{local_tx_id}"),
         id_token: id_token.clone(),
+        id_token_type,
         authorization_accepted: false,
         deauthorized: false,
         v1_6_transaction_id: None,

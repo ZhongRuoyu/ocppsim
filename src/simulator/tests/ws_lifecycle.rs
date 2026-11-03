@@ -2637,3 +2637,58 @@ async fn v1_6_denied_start_ends_the_assigned_transaction_once() {
     }
   }
 }
+#[tokio::test]
+async fn request_start_v2_x_preserves_token_type() {
+  for protocol in v2_x_protocols() {
+    let token_types = if protocol == OcppVersion::V2_1 {
+      vec!["ISO14443", "eMAID", "DirectPayment"]
+    } else {
+      vec!["ISO14443", "eMAID"]
+    };
+    for token_type in token_types {
+      let (frame, simulator) = capture_inbound_call_response(
+        protocol,
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 12,
+          "idToken": {"idToken": "TOKEN", "type": token_type},
+          "evseId": 1
+        }),
+      )
+      .await;
+      let OcppFrame::CallResult { payload, .. } = frame else {
+        panic!("expected CALLRESULT frame");
+      };
+      assert_eq!(payload["status"], "Accepted");
+      let event = queued_payload(&simulator, "TransactionEvent");
+      assert_eq!(event["idToken"]["idToken"], "TOKEN");
+      assert_eq!(event["idToken"]["type"], token_type);
+      assert_schema_valid(
+        &schema_path(v2_x_schema_dir(protocol), "TransactionEventRequest.json"),
+        &event,
+      );
+    }
+  }
+}
+
+#[tokio::test]
+async fn request_start_rejects_invalid_token_type_before_start() {
+  for (protocol, token_type) in [
+    (OcppVersion::V2_0_1, "DirectPayment"),
+    (OcppVersion::V2_1, "TypeLongerThanTwentyChars"),
+  ] {
+    let (frame, simulator) = capture_inbound_call_response(
+      protocol,
+      "RequestStartTransaction",
+      json!({
+        "remoteStartId": 12,
+        "idToken": {"idToken": "TOKEN", "type": token_type},
+        "evseId": 1
+      }),
+    )
+    .await;
+    assert!(matches!(frame, OcppFrame::CallError { .. }));
+    assert!(simulator.connectors[&1].transaction.is_none());
+    assert!(simulator.queue.is_empty());
+  }
+}

@@ -1,8 +1,8 @@
 #![allow(non_camel_case_types)]
 
 use super::super::{
-  ChargingRateUnit, ConnectorStatus, Result, Value, anyhow,
-  normalize_identifier, optional_u16_field, required_i64_field,
+  ChargingRateUnit, ConnectorStatus, IdTokenType, OcppVersion, Result, Value,
+  anyhow, normalize_identifier, optional_u16_field, required_i64_field,
   required_string_field, required_u16_field, required_u64_field,
 };
 
@@ -41,18 +41,34 @@ pub(in crate::simulator) struct RequestStartTransactionRequest_V2_X {
   pub connector: Option<u16>,
   pub remote_start_id: i64,
   pub id_token: String,
+  pub id_token_type: String,
   pub charging_profile: Option<Value>,
 }
 
 impl RequestStartTransactionRequest_V2_X {
-  pub(in crate::simulator) fn parse(payload: &Value) -> Result<Self> {
+  pub(in crate::simulator) fn parse(
+    payload: &Value,
+    protocol: OcppVersion,
+  ) -> Result<Self> {
     let id_token =
       required_nested_string_field(payload, "idToken", "idToken")?.to_string();
-    let _ = required_nested_string_field(payload, "idToken", "type")?;
+    let id_token_type =
+      required_nested_string_field(payload, "idToken", "type")?;
+    let valid_type = match protocol {
+      OcppVersion::V2_0_1 => IdTokenType::parse(id_token_type)
+        .is_some_and(|value| value.as_str() == id_token_type),
+      // OCPP 2.1 replaces the fixed enum with an extensible string.
+      OcppVersion::V2_1 => id_token_type.chars().count() <= 20,
+      OcppVersion::V1_6 => false,
+    };
+    if !valid_type {
+      return Err(anyhow!("idToken.type is invalid for this protocol."));
+    }
     Ok(Self {
       connector: optional_u16_field(payload, "evseId")?,
       remote_start_id: required_i64_field(payload, "remoteStartId")?,
       id_token,
+      id_token_type: id_token_type.to_string(),
       charging_profile: optional_object_field(payload, "chargingProfile")?,
     })
   }

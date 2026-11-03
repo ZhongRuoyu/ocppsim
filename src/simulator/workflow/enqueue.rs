@@ -739,7 +739,7 @@ impl Simulator {
       }],
       id_token: request.id_token.as_deref().map(|token| IdTokenPayload {
         id_token: token,
-        token_type: IdTokenType::Central.as_str(),
+        token_type: &transaction.id_token_type,
       }),
     })
   }
