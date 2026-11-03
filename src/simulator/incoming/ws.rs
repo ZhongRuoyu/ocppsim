@@ -3,9 +3,9 @@ use std::collections::btree_map::Entry;
 use crate::ocpp::OcppMessageTypeId;
 
 use super::super::{
-  BootRegistrationStatus, Message, OcppErrorCode, OcppFrame, OcppVersion,
-  Result, Simulator, UiLogLevel, Value, WsMessageSink, anyhow,
-  build_call_error, json, parse_frame, sanitized_trace_details,
+  BootRegistrationStatus, MAX_INBOUND_MESSAGE_IDS, Message, OcppErrorCode,
+  OcppFrame, OcppVersion, Result, Simulator, UiLogLevel, Value, WsMessageSink,
+  anyhow, build_call_error, json, parse_frame, sanitized_trace_details,
   sanitized_trace_frame, sanitized_trace_payload,
 };
 use super::request::CompositeScheduleRequestV1_6;
@@ -147,7 +147,7 @@ impl Simulator {
         action,
         payload,
       } => {
-        if !self.accept_unique_inbound_send_id(&message_id) {
+        if !self.accept_unique_inbound_send_id(&message_id)? {
           return Ok(());
         }
         self.handle_send_frame(&message_id, &action, &payload);
@@ -200,7 +200,7 @@ impl Simulator {
     write: &mut impl WsMessageSink,
     message_id: &str,
   ) -> Result<bool> {
-    if self.record_inbound_message_id(message_id) {
+    if self.record_inbound_message_id(message_id)? {
       return Ok(true);
     }
     self.log_duplicate_inbound_message_id(message_id);
@@ -216,16 +216,30 @@ impl Simulator {
     Ok(false)
   }
 
-  fn accept_unique_inbound_send_id(&mut self, message_id: &str) -> bool {
-    if self.record_inbound_message_id(message_id) {
-      return true;
+  fn accept_unique_inbound_send_id(
+    &mut self,
+    message_id: &str,
+  ) -> Result<bool> {
+    if self.record_inbound_message_id(message_id)? {
+      return Ok(true);
     }
     self.log_duplicate_inbound_message_id(message_id);
-    false
+    Ok(false)
   }
 
-  fn record_inbound_message_id(&mut self, message_id: &str) -> bool {
-    self.incoming_message_ids.insert(message_id.to_string())
+  fn record_inbound_message_id(&mut self, message_id: &str) -> Result<bool> {
+    if self.incoming_message_ids.contains(message_id) {
+      return Ok(false);
+    }
+    // End this connection instead of forgetting earlier IDs and allowing
+    // their requests to be dispatched again within the same OCPP session.
+    if self.incoming_message_ids.len() >= MAX_INBOUND_MESSAGE_IDS {
+      return Err(anyhow!(
+        "Inbound OCPP message ID limit {MAX_INBOUND_MESSAGE_IDS} reached; \
+        reconnect to start a new connection."
+      ));
+    }
+    Ok(self.incoming_message_ids.insert(message_id.to_string()))
   }
 
   fn log_duplicate_inbound_message_id(&mut self, message_id: &str) {

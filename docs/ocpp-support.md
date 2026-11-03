@@ -321,6 +321,10 @@ Inbound CSMS `CALL` and OCPP 2.1 `SEND` message ids are tracked for the active
 WebSocket connection.
 Duplicate `CALL` ids receive `OccurrenceConstraintViolation` before dispatch,
 and duplicate `SEND` ids are logged and dropped without mutating state.
+Each connection retains at most 100,000 distinct inbound message ids.
+The next distinct id drops the connection before dispatch; reconnect to start a
+new connection with empty tracking state.
+Earlier ids are retained until then so duplicate detection remains reliable.
 
 For OCPP 1.6 and OCPP 2.x, station-initiated OCPP messages are held until
 `BootNotification` is accepted.

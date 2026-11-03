@@ -64,6 +64,7 @@ type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
+const MAX_INBOUND_MESSAGE_IDS: usize = 100_000;
 const DEFAULT_BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 // Preserve the full OCPP signed 32-bit interval range without overflowing timers.
 const MAX_BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(0x7fff_ffff);

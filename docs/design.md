@@ -53,6 +53,9 @@ Inbound CALL frames are parsed into OCPP-J frame types, then dispatched by the
 configured protocol version.
 The WebSocket reader caps inbound messages at 1 MiB, and the OCPP-J frame parser
 enforces the specification's 36-character `messageId` limit before dispatch.
+Duplicate tracking retains at most 100,000 distinct inbound ids per connection.
+Reaching this bound drops the connection before accepting another distinct id,
+which bounds memory without forgetting ids during an active connection.
 OCPP 1.6 and OCPP 2.x have separate dispatch modules because action names,
 payload shapes, and response statuses differ.
 Typed request extractors stay side-effect free until required fields have been

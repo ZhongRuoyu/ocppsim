@@ -328,6 +328,126 @@ async fn older_protocol_rejects_send_message_type() {
 }
 
 #[tokio::test]
+async fn inbound_call_id_limit_disconnects_before_dispatch() {
+  use crate::simulator::{CommandOutcome, MAX_INBOUND_MESSAGE_IDS};
+
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.incoming_message_ids = (0..MAX_INBOUND_MESSAGE_IDS - 1)
+      .map(|index| format!("seen-{index}"))
+      .collect();
+    let last = build_call(
+      "last-allowed",
+      "DataTransfer",
+      &json!({ "vendorId": "ocppsim" }),
+    );
+    simulator
+      .handle_ws_text(last.clone(), &mut write)
+      .await
+      .unwrap();
+    assert!(matches!(
+      read_ocpp_frame(&mut server_read).await,
+      OcppFrame::CallResult { .. }
+    ));
+    assert_eq!(
+      simulator.incoming_message_ids.len(),
+      MAX_INBOUND_MESSAGE_IDS
+    );
+
+    simulator.handle_ws_text(last, &mut write).await.unwrap();
+    let OcppFrame::CallError { code, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected duplicate CALLERROR");
+    };
+    assert_eq!(code, "OccurrenceConstraintViolation");
+
+    let previous = simulator.configuration
+      [&ConfigurationKey::HeartbeatInterval]
+      .value
+      .clone();
+    let (action, payload) = if protocol == OcppVersion::V1_6 {
+      (
+        "ChangeConfiguration",
+        json!({
+          "key": "HeartbeatInterval", "value": "20"
+        }),
+      )
+    } else {
+      (
+        "SetVariables",
+        json!({ "setVariableData": [
+        set_variable_data("HeartbeatInterval", "20")
+      ] }),
+      )
+    };
+    let mut outcome = CommandOutcome::Continue;
+    let disconnected = crate::simulator::handle_connected_ws_message(
+      &mut simulator,
+      Some(Ok(Message::Text(
+        build_call("over-limit", action, &payload).into(),
+      ))),
+      &mut write,
+      &mut outcome,
+    )
+    .await;
+    assert!(disconnected);
+    assert_eq!(
+      simulator.incoming_message_ids.len(),
+      MAX_INBOUND_MESSAGE_IDS
+    );
+    assert!(!simulator.incoming_message_ids.contains("over-limit"));
+    assert_eq!(
+      simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+      previous
+    );
+  }
+}
+
+#[tokio::test]
+async fn inbound_send_id_limit_disconnects_without_growing_history() {
+  use crate::simulator::{CommandOutcome, MAX_INBOUND_MESSAGE_IDS};
+
+  let (mut write, _read, _server_write, _server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests_with_protocol(OcppVersion::V2_1);
+  simulator.incoming_message_ids = (0..MAX_INBOUND_MESSAGE_IDS - 1)
+    .map(|index| format!("seen-{index}"))
+    .collect();
+  let last = json!([6, "last-allowed", "NotifyEvent", {}]).to_string();
+  simulator
+    .handle_ws_text(last.clone(), &mut write)
+    .await
+    .unwrap();
+  simulator.handle_ws_text(last, &mut write).await.unwrap();
+  assert_eq!(
+    simulator.incoming_message_ids.len(),
+    MAX_INBOUND_MESSAGE_IDS
+  );
+
+  let mut outcome = CommandOutcome::Continue;
+  let disconnected = crate::simulator::handle_connected_ws_message(
+    &mut simulator,
+    Some(Ok(Message::Text(
+      json!([6, "over-limit", "NotifyEvent", {}])
+        .to_string()
+        .into(),
+    ))),
+    &mut write,
+    &mut outcome,
+  )
+  .await;
+  assert!(disconnected);
+  assert_eq!(
+    simulator.incoming_message_ids.len(),
+    MAX_INBOUND_MESSAGE_IDS
+  );
+  assert!(!simulator.incoming_message_ids.contains("over-limit"));
+}
+
+#[tokio::test]
 async fn duplicate_inbound_call_ids_return_call_error_without_dispatch() {
   let (mut write, _read, _server_write, mut server_read) =
     in_memory_ws_pair().await;
