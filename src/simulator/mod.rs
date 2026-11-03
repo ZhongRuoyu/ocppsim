@@ -12,6 +12,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Response;
 use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tokio_tungstenite::{
   MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
@@ -191,7 +192,14 @@ async fn handle_connected_loop_step(
     }
     CommandOutcome::Reconnect => {
       if !disconnected {
-        *connection = reconnect_after_security_change(simulator, &mut io).await;
+        match reconnect_after_security_change(simulator, &mut io, cmd_rx).await
+        {
+          OfflineOutcome::Connect(new_connection) => {
+            *connection = Some(new_connection);
+          }
+          OfflineOutcome::Continue => {}
+          OfflineOutcome::Exit => return false,
+        }
       }
       true
     }
@@ -285,18 +293,20 @@ async fn handle_offline_loop_step(
   connection: &mut Option<Connection>,
 ) -> bool {
   match cmd_rx.recv().await {
-    Some(command) => match simulator.handle_offline_command(command).await {
-      Ok(OfflineOutcome::Continue) => true,
-      Ok(OfflineOutcome::Connect(new_connection)) => {
-        *connection = Some(new_connection);
-        true
+    Some(command) => {
+      match simulator.handle_offline_command(command, cmd_rx).await {
+        Ok(OfflineOutcome::Continue) => true,
+        Ok(OfflineOutcome::Connect(new_connection)) => {
+          *connection = Some(new_connection);
+          true
+        }
+        Ok(OfflineOutcome::Exit) => false,
+        Err(error) => {
+          simulator.log(UiLogLevel::Error, format!("Command failed: {error}"));
+          true
+        }
       }
-      Ok(OfflineOutcome::Exit) => false,
-      Err(error) => {
-        simulator.log(UiLogLevel::Error, format!("Command failed: {error}"));
-        true
-      }
-    },
+    }
     None => false,
   }
 }
@@ -325,14 +335,17 @@ enum CommandOutcome {
 async fn reconnect_after_security_change(
   simulator: &mut Simulator,
   connection: &mut Connection,
-) -> Option<Connection> {
-  let plan = simulator.security.pending_reconnect.take()?;
+  cmd_rx: &mut UnboundedReceiver<SimulatorCommand>,
+) -> OfflineOutcome {
+  let Some(plan) = simulator.security.pending_reconnect.take() else {
+    return OfflineOutcome::Continue;
+  };
   simulator.emit_runtime_state();
   simulator.close_connection(&mut connection.write).await;
   simulator.handle_disconnect("Reconnecting after security parameter change.");
 
-  match simulator.connect().await {
-    Ok(new_connection) => Some(new_connection),
+  match simulator.connect(cmd_rx).await {
+    Ok(outcome) => outcome,
     Err(error) => {
       simulator.log(
         UiLogLevel::Error,
@@ -353,18 +366,18 @@ async fn reconnect_after_security_change(
           UiLogLevel::Warn,
           "Falling back to the previous security profile.",
         );
-        match simulator.connect().await {
-          Ok(new_connection) => Some(new_connection),
+        match simulator.connect(cmd_rx).await {
+          Ok(outcome) => outcome,
           Err(error) => {
             simulator.log(
               UiLogLevel::Error,
               format!("Fallback reconnect failed: {error}"),
             );
-            None
+            OfflineOutcome::Continue
           }
         }
       } else {
-        None
+        OfflineOutcome::Continue
       }
     }
   }
@@ -422,6 +435,7 @@ impl Simulator {
   async fn handle_offline_command(
     &mut self,
     command: SimulatorCommand,
+    cmd_rx: &mut UnboundedReceiver<SimulatorCommand>,
   ) -> Result<OfflineOutcome> {
     match command {
       SimulatorCommand::Connect { config } => {
@@ -436,8 +450,7 @@ impl Simulator {
           );
           return Ok(OfflineOutcome::Continue);
         }
-        let connection = self.connect().await?;
-        Ok(OfflineOutcome::Connect(connection))
+        self.connect(cmd_rx).await
       }
       SimulatorCommand::Disconnect => {
         self.log(UiLogLevel::Warn, "Already disconnected.");
@@ -850,8 +863,11 @@ impl Simulator {
     }
   }
 
-  /// Opens the WebSocket connection and performs initial boot/status enqueue.
-  async fn connect(&mut self) -> Result<Connection> {
+  /// Opens the WebSocket while servicing commands until success or cancellation.
+  async fn connect(
+    &mut self,
+    cmd_rx: &mut UnboundedReceiver<SimulatorCommand>,
+  ) -> Result<OfflineOutcome> {
     let url = self.connection_url()?;
     self.validate_connection_security(&url)?;
     let mut request = url.as_str().into_client_request()?;
@@ -871,15 +887,36 @@ impl Simulator {
         self.config.protocol.subprotocol()
       ),
     );
-    let connector = match self.tls_connector() {
-      Ok(connector) => connector,
-      Err(error) => return Err(error),
-    };
+    let connector = self.tls_connector()?;
     let ws_config = Some(websocket_config());
-    let connection_result = if connector.is_some() {
-      connect_async_tls_with_config(request, ws_config, false, connector).await
-    } else {
-      connect_async_with_config(request, ws_config, false).await
+    let connection_attempt = async move {
+      if connector.is_some() {
+        connect_async_tls_with_config(request, ws_config, false, connector)
+          .await
+      } else {
+        connect_async_with_config(request, ws_config, false).await
+      }
+    };
+    // Keep the attempt and its deadline alive across commands. Dropping the
+    // attempt on cancellation closes any partially established connection.
+    tokio::pin!(connection_attempt);
+    let deadline = tokio::time::sleep(self.config.request_timeout);
+    tokio::pin!(deadline);
+    let connection_result = loop {
+      tokio::select! {
+        result = &mut connection_attempt => break result,
+        () = &mut deadline => {
+          return Err(anyhow!(
+            "WebSocket connection attempt timed out after {}s.",
+            self.config.request_timeout.as_secs_f64()
+          ));
+        }
+        command = cmd_rx.recv() => {
+          if let Some(outcome) = self.handle_connecting_command(command) {
+            return Ok(outcome);
+          }
+        }
+      }
     };
     let (stream, response) = match connection_result {
       Ok(connection) => connection,
@@ -888,6 +925,46 @@ impl Simulator {
         return Err(error.into());
       }
     };
+    self
+      .finish_connection(stream, &response)
+      .map(OfflineOutcome::Connect)
+  }
+
+  /// Handles input during connection setup without restarting its deadline.
+  fn handle_connecting_command(
+    &mut self,
+    command: Option<SimulatorCommand>,
+  ) -> Option<OfflineOutcome> {
+    match command {
+      Some(SimulatorCommand::Connect { .. }) => {
+        self.log(
+          UiLogLevel::Warn,
+          "Connection already in progress. Use `disconnect` to cancel it.",
+        );
+      }
+      Some(SimulatorCommand::Disconnect) => {
+        self.log(UiLogLevel::Info, "Connection attempt canceled.");
+        self.emit_snapshot();
+        return Some(OfflineOutcome::Continue);
+      }
+      Some(SimulatorCommand::Shutdown) | None => {
+        return Some(OfflineOutcome::Exit);
+      }
+      Some(command) => {
+        if let Err(error) = self.handle_common_command(command, false) {
+          self.log(UiLogLevel::Error, format!("Command failed: {error}"));
+        }
+      }
+    }
+    None
+  }
+
+  /// Validates the handshake and initializes the connected simulator state.
+  fn finish_connection(
+    &mut self,
+    stream: WsStream,
+    response: &Response,
+  ) -> Result<Connection> {
     let expected_subprotocol = self.config.protocol.subprotocol();
     let negotiated = response
       .headers()

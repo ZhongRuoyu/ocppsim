@@ -37,9 +37,13 @@ async fn connect_without_target_warns_and_stays_offline() {
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
   simulator.config.ws_url = None;
   simulator.config.cp_id = None;
+  let (_cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
 
   let outcome = simulator
-    .handle_offline_command(SimulatorCommand::Connect { config: None })
+    .handle_offline_command(
+      SimulatorCommand::Connect { config: None },
+      &mut cmd_rx,
+    )
     .await
     .expect("offline connect should be handled");
 

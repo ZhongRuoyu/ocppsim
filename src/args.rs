@@ -181,7 +181,7 @@ pub struct CliArgs {
   )]
   pub strict: bool,
 
-  /// Request timeout in seconds
+  /// WebSocket connection and OCPP response timeout in seconds
   #[arg(long)]
   pub request_timeout_seconds: Option<u64>,
 

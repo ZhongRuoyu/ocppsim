@@ -908,7 +908,8 @@ async fn local_tls_setup_failure_does_not_record_security_event() {
   simulator.security.basic_auth_password =
     Some("0123456789abcdef0123456789abcdef".to_string());
 
-  let result = simulator.connect().await;
+  let (_cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+  let result = simulator.connect(&mut cmd_rx).await;
   assert!(result.is_err());
   assert!(simulator.security.events.is_empty());
 

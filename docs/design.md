@@ -26,6 +26,13 @@ Start and stop transaction requests keep enough pending context to roll back or
 finish local transaction state when the CSMS rejects, times out, or accepts the
 request.
 
+Connection setup selects between the network handshake, a fixed request-timeout
+deadline, and incoming UI commands.
+Repeated `connect` commands report the existing attempt; `disconnect` and
+shutdown cancel it by dropping the handshake future.
+The same behavior applies to security reconnects and fallback attempts.
+Canceling a security reconnect does not start its fallback connection.
+
 The WebSocket handshake requires the CSMS to negotiate the configured OCPP-J
 subprotocol token.
 A missing or mismatched `Sec-WebSocket-Protocol` response fails the connection

@@ -20,6 +20,12 @@ connect some-profile
 connect ws://csms.example.com/ocpp CP-001
 ```
 
+Connection attempts keep processing commands while DNS, TCP, TLS, or the
+WebSocket handshake is pending.
+A second `connect` reports that an attempt is already in progress.
+Use `disconnect` to cancel the attempt before selecting another target.
+`exit` and `quit` cancel it and exit the simulator.
+
 ## Direct Mode
 
 `ocppsim` can start with a CSMS endpoint directly from CLI flags.
@@ -53,6 +59,11 @@ Some other useful flags include:
 - `--basic-auth-password <password>`
 - `--ca-cert <path>`
 - `--client-cert <path>` and `--client-key <path>`
+
+`--request-timeout-seconds` limits each connection attempt and each OCPP
+response wait independently.
+It defaults to 30 seconds; values below five seconds are raised to five.
+Commands received during connection setup do not reset its deadline.
 
 Run `ocppsim --help` for a full list of CLI options.
 

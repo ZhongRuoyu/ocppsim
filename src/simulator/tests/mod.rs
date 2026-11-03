@@ -13,6 +13,7 @@ use super::{
 
 mod charging_profiles;
 mod configuration;
+mod connection;
 mod schema_validation;
 mod security;
 mod state;
