@@ -4,6 +4,7 @@ use crate::ocpp::{
   OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppVersion,
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
+use crate::simulator::MeterUpdate;
 
 const USAGE_STATUS: &str = "Usage: status";
 const USAGE_CONNECT: &str = "Usage: connect [<profile> | <ws-url> <cp-id>]";
@@ -16,8 +17,9 @@ const USAGE_START: &str = "Usage: start <connector> <idToken>";
 const USAGE_STOP: &str = "Usage: stop <connector> [reason]";
 const USAGE_CONNECTOR_STATUS: &str =
   "Usage: connector-status <connector> <status>";
-const USAGE_METER: &str = "Usage: meter [<connector> [<wh>]]";
-const USAGE_SEND_METER: &str = "Usage: send-meter <connector> [<wh>]";
+const USAGE_METER: &str = "Usage: meter [<connector> [<wh>|+<wh>|-<wh>]]";
+const USAGE_SEND_METER: &str =
+  "Usage: send-meter <connector> [<wh>|+<wh>|-<wh>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
   "Usage: heartbeat | heartbeat start <seconds> | heartbeat stop";
@@ -55,11 +57,11 @@ pub enum UserCommand {
   },
   Meter {
     connector: u16,
-    value_wh: i64,
+    update: MeterUpdate,
   },
   SendMeter {
     connector: u16,
-    value_wh: Option<i64>,
+    update: Option<MeterUpdate>,
   },
   Heartbeat,
   HeartbeatStart {
@@ -268,23 +270,31 @@ fn parse_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
       connector: Some(connector),
     });
   }
-  let value_wh = parse_i64(parts.get(2), USAGE_METER)?;
-  Ok(UserCommand::Meter {
-    connector,
-    value_wh,
-  })
+  let update = parse_meter_update(parts.get(2), USAGE_METER)?;
+  Ok(UserCommand::Meter { connector, update })
 }
 
 fn parse_send_meter_command(parts: &[&str]) -> Result<UserCommand, String> {
   ensure_range(parts, 2..=3, USAGE_SEND_METER)?;
   let connector = parse_u16(parts.get(1), USAGE_SEND_METER)?;
-  let value_wh = parts
+  let update = parts
     .get(2)
-    .map(|value| parse_i64(Some(value), USAGE_SEND_METER))
+    .map(|value| parse_meter_update(Some(value), USAGE_SEND_METER))
     .transpose()?;
-  Ok(UserCommand::SendMeter {
-    connector,
-    value_wh,
+  Ok(UserCommand::SendMeter { connector, update })
+}
+
+/// Interprets a leading sign as a relative adjustment instead of a reading.
+fn parse_meter_update(
+  value: Option<&&str>,
+  usage: &str,
+) -> Result<MeterUpdate, String> {
+  let raw = parse_required(value, usage)?;
+  let value_wh = parse_i64(value, usage)?;
+  Ok(if raw.starts_with('+') || raw.starts_with('-') {
+    MeterUpdate::Adjust(value_wh)
+  } else {
+    MeterUpdate::Set(value_wh)
   })
 }
 
@@ -336,8 +346,10 @@ pub fn help_text() -> &'static str {
     Show the local meter counter (Wh) for one connector.
   meter <connector> <wh>
     Set local meter counter (Wh) for connector.
+    Use +<wh> or -<wh> to adjust the current reading.
   send-meter <connector> [<wh>]
-    Optionally set the local meter counter (Wh), then send current meter data.
+    Optionally update the local meter counter (Wh), then send meter data.
+    Use +<wh> or -<wh> to adjust the reading before sending.
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
@@ -506,6 +518,51 @@ mod tests {
         assert!(reason.is_none());
       }
       _ => panic!("unexpected command variant"),
+    }
+  }
+
+  #[test]
+  fn meter_updates_distinguish_relative_and_absolute_values() {
+    use crate::simulator::MeterUpdate;
+
+    for (value, expected) in [
+      ("100", MeterUpdate::Set(100)),
+      ("+100", MeterUpdate::Adjust(100)),
+      ("-50", MeterUpdate::Adjust(-50)),
+      ("0", MeterUpdate::Set(0)),
+      ("+0", MeterUpdate::Adjust(0)),
+      ("-0", MeterUpdate::Adjust(0)),
+      ("+9223372036854775807", MeterUpdate::Adjust(i64::MAX)),
+      ("-9223372036854775808", MeterUpdate::Adjust(i64::MIN)),
+    ] {
+      assert!(matches!(
+        parse_command(&format!("meter 1 {value}")).unwrap(),
+        UserCommand::Meter { connector: 1, update } if update == expected
+      ));
+      assert!(matches!(
+        parse_command(&format!("send-meter 1 {value}")).unwrap(),
+        UserCommand::SendMeter { connector: 1, update: Some(update) }
+          if update == expected
+      ));
+    }
+  }
+
+  #[test]
+  fn meter_updates_reject_malformed_or_out_of_range_deltas() {
+    for command in ["meter", "send-meter"] {
+      for value in [
+        "+",
+        "-",
+        "++1",
+        "--1",
+        "+-1",
+        "-+1",
+        "+1.5",
+        "+9223372036854775808",
+        "-9223372036854775809",
+      ] {
+        assert!(parse_command(&format!("{command} 1 {value}")).is_err());
+      }
     }
   }
 

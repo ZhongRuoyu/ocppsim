@@ -180,9 +180,14 @@ the mouse and remain available after `ocppsim` exits.
 - `meter`: show the local meter counters in Wh for all connectors.
 - `meter <connector>`: show the local meter counter in Wh for one connector.
 - `meter <connector> <wh>`: set the local meter counter.
+  Prefix the value with `+` or `-` to increase or decrease the current
+  reading instead.
+  For example, `meter 1 +100` adds 100 Wh and `meter 1 -50` subtracts 50 Wh.
 - `send-meter <connector> [<wh>]`: send current meter data.
-  If `<wh>` is given, first set the local meter counter, equivalent to
+  If `<wh>` is given, first update the local meter counter, equivalent to
   `meter <connector> <wh>` followed by `send-meter <connector>`.
+  The value accepts the same `+` and `-` prefixes for relative adjustments.
+  An out-of-range adjustment leaves the reading unchanged and cancels the send.
 - `heartbeat`: send one heartbeat.
 - `heartbeat start <seconds>`: start periodic heartbeats.
 - `heartbeat stop`: stop periodic heartbeats.

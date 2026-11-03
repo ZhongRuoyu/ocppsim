@@ -2,11 +2,12 @@ use super::super::payloads::{
   StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
 };
 use super::super::{
-  ConnectorStatus, IdTokenType, OcppVersion, OutgoingAction, PendingContext,
-  QueuedCall, REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
-  TransactionEventRequest, TransactionState, TransactionTriggerReason,
-  TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
-  now_timestamp, validate_outbound_id_token,
+  ConnectorStatus, IdTokenType, MeterUpdate, OcppVersion, OutgoingAction,
+  PendingContext, QueuedCall, REDACTED_SENSITIVE_VALUE, Result, Simulator,
+  StopReason, TransactionEventRequest, TransactionState,
+  TransactionTriggerReason, TxEventType, UiLogLevel, anyhow,
+  map_stop_reason_v1_6, map_stop_reason_v2_x, now_timestamp,
+  validate_outbound_id_token,
 };
 
 impl Simulator {
@@ -405,6 +406,27 @@ impl Simulator {
       );
     }
     Ok(())
+  }
+
+  /// Applies an absolute reading or an adjustment to the latest local value.
+  ///
+  /// Unknown connectors and overflow leave the stored reading unchanged.
+  pub(in crate::simulator) fn update_meter(
+    &mut self,
+    connector: u16,
+    update: MeterUpdate,
+  ) -> Result<()> {
+    let value_wh = match update {
+      MeterUpdate::Set(value_wh) => value_wh,
+      MeterUpdate::Adjust(delta_wh) => self
+        .connector_ref(connector)?
+        .meter_wh
+        .checked_add(delta_wh)
+        .ok_or_else(|| {
+          anyhow!("Meter adjustment on connector {connector} is out of range.")
+        })?,
+    };
+    self.set_meter(connector, value_wh)
   }
 
   /// Sets a connector meter reading in watt-hours.

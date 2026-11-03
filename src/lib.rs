@@ -26,7 +26,8 @@ use commands::{
 };
 use sensitive::redact_text_secrets;
 use simulator::{
-  SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig, run_simulator,
+  MeterUpdate, SimulatorCommand, SimulatorConfig, SimulatorConnectionConfig,
+  run_simulator,
 };
 use tokio::sync::mpsc;
 use version::version_string;
@@ -272,14 +273,12 @@ fn handle_user_command(
     UserCommand::GetMeter { connector } => {
       send_command(cmd_tx, SimulatorCommand::GetMeter { connector }, app)
     }
-    UserCommand::Meter {
-      connector,
-      value_wh,
-    } => set_meter_command(cmd_tx, connector, value_wh, app),
-    UserCommand::SendMeter {
-      connector,
-      value_wh,
-    } => send_meter_command(cmd_tx, connector, value_wh, app),
+    UserCommand::Meter { connector, update } => {
+      update_meter_command(cmd_tx, connector, update, app)
+    }
+    UserCommand::SendMeter { connector, update } => {
+      send_meter_command(cmd_tx, connector, update, app)
+    }
     UserCommand::Heartbeat => {
       send_command(cmd_tx, SimulatorCommand::Heartbeat, app)
     }
@@ -322,37 +321,33 @@ fn resolve_connect_config(
 }
 
 /// Queues a local meter update, returning true if the simulator is unavailable.
-fn set_meter_command(
+fn update_meter_command(
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
   connector: u16,
-  value_wh: i64,
+  update: MeterUpdate,
   app: &mut TerminalApp,
 ) -> bool {
   send_command(
     cmd_tx,
-    SimulatorCommand::SetMeter {
-      connector,
-      value_wh,
-    },
+    SimulatorCommand::UpdateMeter { connector, update },
     app,
   )
 }
 
-/// Queues an optional local meter update followed by a meter send.
+/// Queues a send that applies an optional meter update first.
 ///
 /// Returns `true` when the simulator task is unavailable.
 fn send_meter_command(
   cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
   connector: u16,
-  value_wh: Option<i64>,
+  update: Option<MeterUpdate>,
   app: &mut TerminalApp,
 ) -> bool {
-  if let Some(value_wh) = value_wh
-    && set_meter_command(cmd_tx, connector, value_wh, app)
-  {
-    return true;
-  }
-  send_command(cmd_tx, SimulatorCommand::SendMeter { connector }, app)
+  send_command(
+    cmd_tx,
+    SimulatorCommand::SendMeter { connector, update },
+    app,
+  )
 }
 
 /// Sends a simulator command over the command channel.
@@ -502,40 +497,31 @@ mod tests {
   fn parsed_runtime_commands_dispatch_to_simulator_commands() {
     let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
 
-    assert!(!dispatch("meter 2 1234", &cli_args, &cmd_tx, &mut app));
-    match next_command(&mut cmd_rx) {
-      SimulatorCommand::SetMeter {
-        connector,
-        value_wh,
-      } => {
-        assert_eq!(connector, 2);
-        assert_eq!(value_wh, 1234);
-      }
-      other => panic!("unexpected command: {other:?}"),
+    for (input, update) in [
+      ("meter 2 1234", MeterUpdate::Set(1234)),
+      ("meter 2 +100", MeterUpdate::Adjust(100)),
+      ("meter 2 -50", MeterUpdate::Adjust(-50)),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::UpdateMeter { connector: 2, update: actual }
+          if actual == update
+      ));
     }
 
-    assert!(!dispatch("send-meter 2", &cli_args, &cmd_tx, &mut app));
-    match next_command(&mut cmd_rx) {
-      SimulatorCommand::SendMeter { connector } => assert_eq!(connector, 2),
-      other => panic!("unexpected command: {other:?}"),
+    for (input, update) in [
+      ("send-meter 2", None),
+      ("send-meter 2 5678", Some(MeterUpdate::Set(5678))),
+      ("send-meter 2 +100", Some(MeterUpdate::Adjust(100))),
+      ("send-meter 2 -50", Some(MeterUpdate::Adjust(-50))),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::SendMeter { connector: 2, update: actual }
+          if actual == update
+      ));
+      assert!(cmd_rx.try_recv().is_err());
     }
-
-    assert!(!dispatch("send-meter 2 5678", &cli_args, &cmd_tx, &mut app));
-    match next_command(&mut cmd_rx) {
-      SimulatorCommand::SetMeter {
-        connector,
-        value_wh,
-      } => {
-        assert_eq!(connector, 2);
-        assert_eq!(value_wh, 5678);
-      }
-      other => panic!("unexpected command: {other:?}"),
-    }
-    match next_command(&mut cmd_rx) {
-      SimulatorCommand::SendMeter { connector } => assert_eq!(connector, 2),
-      other => panic!("unexpected command: {other:?}"),
-    }
-    assert!(cmd_rx.try_recv().is_err());
 
     assert!(!dispatch(
       "heartbeat start 12",

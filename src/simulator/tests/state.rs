@@ -110,6 +110,120 @@ fn meter_queries_show_local_readings_online_and_offline() {
 }
 
 #[test]
+fn meter_adjustments_use_the_latest_reading_online_and_offline() {
+  for connected in [false, true] {
+    let mut simulator = simulator_for_tests();
+    simulator.boot_registration_status = BootRegistrationStatus::Pending;
+    for (update, expected) in [
+      (MeterUpdate::Set(1000), 1000),
+      (MeterUpdate::Adjust(250), 1250),
+      (MeterUpdate::Adjust(-100), 1150),
+      (MeterUpdate::Adjust(0), 1150),
+      (MeterUpdate::Set(200), 200),
+      (MeterUpdate::Adjust(-250), -50),
+      (MeterUpdate::Set(0), 0),
+      (MeterUpdate::Adjust(i64::MIN), i64::MIN),
+    ] {
+      simulator
+        .handle_common_command(
+          SimulatorCommand::UpdateMeter {
+            connector: 1,
+            update,
+          },
+          connected,
+        )
+        .unwrap();
+      assert_eq!(simulator.connectors[&1].meter_wh, expected);
+      assert_eq!(simulator.connectors[&2].meter_wh, 0);
+      assert!(simulator.queue.is_empty());
+    }
+  }
+}
+
+#[test]
+fn invalid_meter_adjustments_do_not_mutate_or_send() {
+  let mut simulator = simulator_for_tests();
+  for (current, delta) in [(i64::MAX, 1), (i64::MIN, -1)] {
+    simulator.set_meter(1, current).unwrap();
+    for command in [
+      SimulatorCommand::UpdateMeter {
+        connector: 1,
+        update: MeterUpdate::Adjust(delta),
+      },
+      SimulatorCommand::SendMeter {
+        connector: 1,
+        update: Some(MeterUpdate::Adjust(delta)),
+      },
+    ] {
+      let error = simulator.handle_common_command(command, true).unwrap_err();
+      assert!(error.to_string().contains("out of range"));
+      assert_eq!(simulator.connectors[&1].meter_wh, current);
+      assert!(simulator.queue.is_empty());
+    }
+  }
+  assert!(simulator.update_meter(3, MeterUpdate::Adjust(1)).is_err());
+}
+
+#[test]
+fn send_meter_adjustments_update_even_when_sending_is_unavailable() {
+  for connected in [false, true] {
+    let mut simulator = simulator_for_tests();
+    simulator.boot_registration_status = BootRegistrationStatus::Pending;
+    simulator.set_meter(1, 1000).unwrap();
+    simulator
+      .handle_common_command(
+        SimulatorCommand::SendMeter {
+          connector: 1,
+          update: Some(MeterUpdate::Adjust(250)),
+        },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(simulator.connectors[&1].meter_wh, 1250);
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+#[test]
+fn send_meter_adjustments_send_the_updated_reading_in_each_protocol() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.set_meter(1, 1000).unwrap();
+    for active in [false, true] {
+      if active {
+        simulator
+          .start_transaction(1, "TOKEN".to_string(), false, None, true)
+          .unwrap();
+      }
+      simulator.queue.clear();
+      simulator
+        .handle_common_command(
+          SimulatorCommand::SendMeter {
+            connector: 1,
+            update: Some(MeterUpdate::Adjust(250)),
+          },
+          true,
+        )
+        .unwrap();
+      let action = if active && protocol != OcppVersion::V1_6 {
+        "TransactionEvent"
+      } else {
+        "MeterValues"
+      };
+      let payload = queued_payload(&simulator, action);
+      let expected = if active { 1500 } else { 1250 };
+      let value = &payload["meterValue"][0]["sampledValue"][0]["value"];
+      if protocol == OcppVersion::V1_6 {
+        assert_eq!(value, &json!(expected.to_string()));
+      } else {
+        assert_eq!(value, &json!(expected));
+      }
+      assert_eq!(simulator.connectors[&1].meter_wh, expected);
+    }
+  }
+}
+
+#[test]
 fn meter_query_rejects_unknown_connectors() {
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);

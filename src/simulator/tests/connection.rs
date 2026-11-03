@@ -121,9 +121,9 @@ async fn pending_handshake_keeps_commands_and_shutdown_responsive() {
     let (mut runtime, mut socket, _listener) =
       pending_connection(scheme, Duration::from_secs(30)).await;
     runtime.send(SimulatorCommand::Connect { config: None });
-    runtime.send(SimulatorCommand::SetMeter {
+    runtime.send(SimulatorCommand::UpdateMeter {
       connector: 1,
-      value_wh: 42,
+      update: MeterUpdate::Set(42),
     });
     runtime.send(SimulatorCommand::Status);
     runtime.wait_for_log("Connection already in progress").await;

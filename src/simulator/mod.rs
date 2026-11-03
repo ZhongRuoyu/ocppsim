@@ -54,7 +54,7 @@ pub(in crate::simulator) use types::{
   TransactionState, TxEventType, normalize_identifier,
 };
 pub use types::{
-  ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
+  ConnectorSnapshot, MeterUpdate, SimulatorCommand, SimulatorConfig,
   SimulatorConnectionConfig, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
   UiLogLevel,
 };
@@ -700,13 +700,13 @@ impl Simulator {
       SimulatorCommand::GetMeter { connector } => {
         self.show_meter(connector)?;
       }
-      SimulatorCommand::SetMeter {
-        connector,
-        value_wh,
-      } => {
-        self.set_meter(connector, value_wh)?;
+      SimulatorCommand::UpdateMeter { connector, update } => {
+        self.update_meter(connector, update)?;
       }
-      SimulatorCommand::SendMeter { connector } => {
+      SimulatorCommand::SendMeter { connector, update } => {
+        if let Some(update) = update {
+          self.update_meter(connector, update)?;
+        }
         if is_connected
           && !self.ensure_post_boot_ocpp_requests_allowed("MeterValues")
         {

@@ -180,6 +180,13 @@ pub struct ConnectorSnapshot {
   pub transaction: Option<String>,
 }
 
+/// An absolute meter reading or a relative adjustment in watt-hours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeterUpdate {
+  Set(i64),
+  Adjust(i64),
+}
+
 #[derive(Debug, Clone)]
 pub enum SimulatorCommand {
   Connect {
@@ -207,12 +214,13 @@ pub enum SimulatorCommand {
   GetMeter {
     connector: Option<u16>,
   },
-  SetMeter {
+  UpdateMeter {
     connector: u16,
-    value_wh: i64,
+    update: MeterUpdate,
   },
   SendMeter {
     connector: u16,
+    update: Option<MeterUpdate>,
   },
   Heartbeat,
   StartHeartbeat {
