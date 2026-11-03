@@ -1349,8 +1349,8 @@ async fn request_start_v2_x_accepts_not_yet_authorized_active_evse() {
         json!({
           "remoteStartId": 12,
           "idToken": {
-            "idToken": "TOKEN",
-            "type": "Central"
+            "idToken": "REMOTE-TOKEN",
+            "type": "ISO14443"
           },
           "evseId": 1
         }),
@@ -1365,6 +1365,21 @@ async fn request_start_v2_x_accepts_not_yet_authorized_active_evse() {
     };
     assert_eq!(payload["status"], json!(ResponseStatus::Accepted.as_str()));
     assert_eq!(payload["transactionId"], json!(transaction_id));
+    let event = &simulator.queue.back().expect("remote-start update").payload;
+    assert_eq!(event["eventType"], "Updated");
+    assert_eq!(event["triggerReason"], "RemoteStart");
+    assert_eq!(event["transactionInfo"]["transactionId"], transaction_id);
+    assert_eq!(event["transactionInfo"]["remoteStartId"], 12);
+    assert_eq!(event["idToken"]["idToken"], "REMOTE-TOKEN");
+    assert_eq!(event["idToken"]["type"], "ISO14443");
+    let tx = simulator.connectors[&1].transaction.as_ref().unwrap();
+    assert_eq!(tx.id_token, "REMOTE-TOKEN");
+    assert_eq!(tx.id_token_type, "ISO14443");
+    assert_eq!(tx.remote_start_id, Some(12));
+    assert_schema_valid(
+      &schema_path(v2_x_schema_dir(protocol), "TransactionEventRequest.json"),
+      event,
+    );
   }
 }
 
@@ -2690,5 +2705,43 @@ async fn request_start_rejects_invalid_token_type_before_start() {
     assert!(matches!(frame, OcppFrame::CallError { .. }));
     assert!(simulator.connectors[&1].transaction.is_none());
     assert!(simulator.queue.is_empty());
+  }
+}
+
+#[tokio::test]
+async fn request_start_existing_transaction_rejects_full_queue() {
+  for protocol in v2_x_protocols() {
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.config.outbound_queue_limit = 1;
+    simulator
+      .start_transaction(1, "ORIGINAL".to_string(), false, None, true)
+      .expect("start transaction");
+
+    simulator
+      .handle_incoming_call_v2_x(
+        &mut write,
+        "remote-start",
+        "RequestStartTransaction",
+        json!({
+          "remoteStartId": 12,
+          "idToken": {"idToken": "REPLACEMENT", "type": "ISO14443"},
+          "evseId": 1
+        }),
+      )
+      .await
+      .expect("handle request start");
+    let OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected CALLRESULT frame");
+    };
+    assert_eq!(payload["status"], "Rejected");
+    let tx = simulator.connectors[&1].transaction.as_ref().unwrap();
+    assert_eq!(tx.id_token, "ORIGINAL");
+    assert_eq!(tx.id_token_type, "Central");
+    assert_eq!(tx.remote_start_id, None);
+    assert_eq!(simulator.queue.len(), 1);
   }
 }

@@ -3,7 +3,9 @@ use super::super::payloads::{
 };
 use super::super::{
   IncomingAction_V2_X, OcppErrorCode, ResponseStatus, Result, Simulator,
-  TriggerMessage_V2_X, UiLogLevel, Value, WsMessageSink, json,
+  TransactionEventRequest, TransactionTriggerReason, TriggerMessage_V2_X,
+  TxEventType, UiLogLevel, Value, WsMessageSink, anyhow, json,
+  validate_outbound_id_token,
 };
 use super::request::{
   RequestStartTransactionRequest_V2_X, RequestStopTransactionRequest_V2_X,
@@ -245,15 +247,13 @@ impl Simulator {
     if let Some(existing) = self.active_transaction_uid(connector) {
       let status = if self.active_transaction_authorized(connector) {
         ResponseStatus::Rejected
-      } else if let Err(error) = self.apply_remote_start_charging_profile(
-        connector,
-        request.charging_profile.as_ref(),
-      ) {
+      } else if let Err(error) =
+        self.bind_remote_start_v2_x(connector, &request)
+      {
         self.log(
           UiLogLevel::Warn,
           format!(
-            "RequestStartTransaction charging profile rejected on EVSE \
-            {connector}: {error}"
+            "RequestStartTransaction rejected on EVSE {connector}: {error}"
           ),
         );
         ResponseStatus::Rejected
@@ -314,6 +314,45 @@ impl Simulator {
       ResponseStatus::Rejected
     };
     self.send_status_response(write, message_id, status).await
+  }
+
+  /// Binds a remote start to an existing transaction and reports the change.
+  fn bind_remote_start_v2_x(
+    &mut self,
+    connector: u16,
+    request: &RequestStartTransactionRequest_V2_X,
+  ) -> Result<()> {
+    validate_outbound_id_token(self.config.protocol, &request.id_token)
+      .map_err(anyhow::Error::msg)?;
+    Self::validate_remote_start_charging_profile(
+      request.charging_profile.as_ref(),
+    )?;
+    self.ensure_outbound_queue_capacity("TransactionEvent")?;
+
+    let transaction = self
+      .connector_mut(connector)?
+      .transaction
+      .as_mut()
+      .ok_or_else(|| anyhow!("No active transaction on EVSE {connector}."))?;
+    transaction.id_token.clone_from(&request.id_token);
+    transaction.id_token_type.clone_from(&request.id_token_type);
+    transaction.remote_start_id = Some(request.remote_start_id);
+    let local_tx_id = transaction.local_id;
+
+    self.bump_seq_no(connector, local_tx_id)?;
+    self.enqueue_transaction_event(&TransactionEventRequest {
+      connector,
+      local_tx_id,
+      event_type: TxEventType::Updated,
+      trigger_reason: TransactionTriggerReason::RemoteStart,
+      id_token: Some(request.id_token.clone()),
+      remote_start_id: Some(request.remote_start_id),
+      stopped_reason: None,
+    })?;
+    self.apply_remote_start_charging_profile(
+      connector,
+      request.charging_profile.as_ref(),
+    )
   }
 
   async fn handle_request_stop_transaction_call_v2_x(
