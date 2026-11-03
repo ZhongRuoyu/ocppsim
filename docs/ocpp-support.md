@@ -379,6 +379,19 @@ The local transaction is cleared after the stop is acknowledged.
 If the outbound queue is full or the stop fails, the transaction remains
 suspended with its CSMS ID, and a later local stop retries `DeAuthorized`.
 
+For OCPP 2.x, a non-accepted `TransactionEventResponse.idTokenInfo.status`
+for a `Started` or `Updated` event deauthorizes the transaction before queueing
+an `Ended` event.
+A queued end is reused with its original sequence number, timestamp, and meter
+reading, and its reason is changed to `DeAuthorized`.
+Queue pressure in this flow does not disconnect the simulator.
+If the end cannot be queued, fails, times out, or receives an invalid response
+in strict mode, the transaction remains suspended.
+A later local or remote stop retains the `DeAuthorized` reason and
+`Deauthorized` trigger.
+Charging profile changes and later authorization responses cannot restore
+charging, and remote starts cannot reuse the transaction before it ends.
+
 Availability changes to `Inoperative` are scheduled when the target connector
 has an active transaction.
 The scheduled `Unavailable` state is applied after the stop or transaction-end

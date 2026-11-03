@@ -334,6 +334,12 @@ impl Simulator {
       .transaction
       .as_mut()
       .ok_or_else(|| anyhow!("No active transaction on EVSE {connector}."))?;
+    if transaction.deauthorized {
+      return Err(anyhow!(
+        "Transaction on EVSE {connector} is deauthorized; finish stopping \
+        it before starting another transaction."
+      ));
+    }
     transaction.id_token.clone_from(&request.id_token);
     transaction.id_token_type.clone_from(&request.id_token_type);
     transaction.remote_start_id = Some(request.remote_start_id);

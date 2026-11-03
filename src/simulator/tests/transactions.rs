@@ -950,3 +950,257 @@ fn v1_6_denied_start_stays_suspended_after_stop_failure() {
     }
   }
 }
+
+#[test]
+fn v2_x_deauthorization_survives_end_failures() {
+  for protocol in v2_x_protocols() {
+    for event_type in [TxEventType::Started, TxEventType::Updated] {
+      for failure in ["timeout", "error", "invalid"] {
+        let mut simulator = pending_v2_x_authorization(protocol, event_type);
+        simulator.config.request_timeout = Duration::ZERO;
+        simulator
+          .handle_call_result(
+            "authorization",
+            &json!({ "idTokenInfo": { "status": "Blocked" } }),
+          )
+          .expect("deauthorize transaction");
+        let end = simulator.queue.pop_front().expect("automatic end");
+        assert_deauthorized_end(protocol, &end.payload);
+        simulator.pending = Some(PendingCall {
+          message_id: "end".to_string(),
+          sent_at: Instant::now(),
+          call: end,
+        });
+        match failure {
+          "timeout" => simulator.check_pending_timeout(),
+          "error" => simulator
+            .handle_call_error("end", "InternalError", "retry")
+            .expect("handle end error"),
+          "invalid" => simulator.reject_call_result("end"),
+          _ => unreachable!(),
+        }
+        assert!(simulator.pending.is_none());
+        assert_deauthorized_transaction(&simulator);
+
+        for limit in [Some(7000.0), None] {
+          simulator.set_offered_limit(1, limit).expect("set limit");
+          simulator
+            .apply_charging_profile_state(1)
+            .expect("apply limit");
+          assert_deauthorized_transaction(&simulator);
+        }
+        simulator.queue.clear();
+        simulator
+          .stop_transaction(1, Some("Remote"), true, true)
+          .expect("retry retains deauthorization reason");
+        let retry = simulator.queue.pop_front().expect("retried end");
+        assert_deauthorized_end(protocol, &retry.payload);
+        simulator.pending = Some(PendingCall {
+          message_id: "retry".to_string(),
+          sent_at: Instant::now(),
+          call: retry,
+        });
+        simulator
+          .handle_call_result("retry", &json!({}))
+          .expect("complete deauthorized transaction");
+        assert!(simulator.connectors[&1].transaction.is_none());
+      }
+    }
+  }
+}
+
+#[test]
+fn v2_x_deauthorization_reuses_queued_end_snapshot() {
+  for protocol in v2_x_protocols() {
+    for event_type in [TxEventType::Started, TxEventType::Updated] {
+      let mut simulator = pending_v2_x_authorization(protocol, event_type);
+      simulator.set_meter(1, 1234).expect("set stop reading");
+      simulator
+        .stop_transaction(1, None, false, true)
+        .expect("queue local end");
+      let mut expected = simulator.queue[0].payload.clone();
+      expected["triggerReason"] = json!("Deauthorized");
+      expected["transactionInfo"]["stoppedReason"] = json!("DeAuthorized");
+      simulator
+        .set_meter(1, 5678)
+        .expect("change current reading");
+      simulator.config.outbound_queue_limit = 1;
+      simulator
+        .handle_call_result(
+          "authorization",
+          &json!({ "idTokenInfo": { "status": "Blocked" } }),
+        )
+        .expect("reuse end even when queue is full");
+
+      assert_eq!(simulator.queue.len(), 1);
+      assert_eq!(simulator.queue[0].payload, expected);
+      assert_deauthorized_end(protocol, &expected);
+      let state = &simulator.connectors[&1];
+      assert!(state.transaction.as_ref().unwrap().deauthorized);
+      assert!(!state.transaction.as_ref().unwrap().authorization_accepted);
+      assert_eq!(state.status, ConnectorStatus::Finishing);
+    }
+  }
+}
+
+#[tokio::test]
+async fn v2_x_deauthorization_keeps_connection_when_queue_full() {
+  use super::ws_lifecycle::{in_memory_ws_pair, read_ocpp_frame};
+
+  for protocol in v2_x_protocols() {
+    let mut simulator =
+      pending_v2_x_authorization(protocol, TxEventType::Started);
+    simulator.connected = true;
+    simulator.config.strict = true;
+    simulator.config.outbound_queue_limit = 1;
+    simulator.enqueue_heartbeat();
+    let seq_no = simulator.connectors[&1]
+      .transaction
+      .as_ref()
+      .unwrap()
+      .seq_no;
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    let response = crate::ocpp::build_call_result(
+      "authorization",
+      &json!({ "idTokenInfo": { "status": "Blocked" } }),
+    );
+    simulator
+      .handle_ws_text(response, &mut write)
+      .await
+      .expect("valid rejection must not disconnect on queue pressure");
+    assert_deauthorized_transaction(&simulator);
+    assert_eq!(
+      simulator.connectors[&1]
+        .transaction
+        .as_ref()
+        .unwrap()
+        .seq_no,
+      seq_no
+    );
+    simulator
+      .try_send_next(&mut write)
+      .await
+      .expect("queue drains");
+    let crate::ocpp::OcppFrame::Call {
+      message_id, action, ..
+    } = read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected queued heartbeat");
+    };
+    assert_eq!(action, "Heartbeat");
+    simulator
+      .handle_ws_text(
+        crate::ocpp::build_call_result(
+          &message_id,
+          &json!({ "currentTime": now_timestamp() }),
+        ),
+        &mut write,
+      )
+      .await
+      .expect("connection still handles responses");
+    simulator
+      .stop_transaction(1, None, false, true)
+      .expect("retry after queue drains");
+    assert_deauthorized_end(protocol, &simulator.queue[0].payload);
+  }
+}
+
+#[tokio::test]
+async fn v2_x_deauthorization_cannot_be_revived_by_late_authorization() {
+  use super::ws_lifecycle::{in_memory_ws_pair, read_ocpp_frame};
+
+  for protocol in v2_x_protocols() {
+    let mut simulator =
+      pending_v2_x_authorization(protocol, TxEventType::Updated);
+    let context = simulator.pending.as_ref().unwrap().call.context.clone();
+    simulator
+      .handle_call_result(
+        "authorization",
+        &json!({ "idTokenInfo": { "status": "Blocked" } }),
+      )
+      .expect("revoke previously accepted authorization");
+    simulator
+      .apply_call_result_context(
+        &context,
+        &json!({ "idTokenInfo": { "status": "Accepted" } }),
+      )
+      .expect("process an older authorization response");
+    simulator.queue.clear();
+    let (mut write, _read, _server_write, mut server_read) =
+      in_memory_ws_pair().await;
+    simulator
+      .handle_incoming_call(
+        &mut write,
+        "remote-start",
+        "RequestStartTransaction",
+        json!({
+          "evseId": 1,
+          "remoteStartId": 42,
+          "idToken": { "idToken": "NEW-TOKEN", "type": "Central" }
+        }),
+      )
+      .await
+      .expect("respond to remote start");
+    let crate::ocpp::OcppFrame::CallResult { payload, .. } =
+      read_ocpp_frame(&mut server_read).await
+    else {
+      panic!("expected remote start response");
+    };
+    assert_eq!(payload["status"], json!("Rejected"));
+    let transaction = simulator.connectors[&1].transaction.as_ref().unwrap();
+    assert!(transaction.deauthorized);
+    assert!(!transaction.authorization_accepted);
+    assert_eq!(transaction.id_token, "TOKEN");
+    assert!(simulator.queue.is_empty());
+  }
+}
+
+/// Queues a response-bearing event for initial or previously accepted auth.
+fn pending_v2_x_authorization(
+  protocol: OcppVersion,
+  event_type: TxEventType,
+) -> Simulator {
+  let mut simulator = simulator_for_tests_with_protocol(protocol);
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect("queue start");
+  if event_type == TxEventType::Updated {
+    let context = simulator.queue.pop_front().unwrap().context;
+    simulator
+      .apply_call_result_context(
+        &context,
+        &json!({ "idTokenInfo": { "status": "Accepted" } }),
+      )
+      .expect("authorize initial start");
+    simulator.queue.clear();
+    simulator.send_meter(1, true).expect("queue update");
+  }
+  simulator.pending = Some(PendingCall {
+    message_id: "authorization".to_string(),
+    sent_at: Instant::now(),
+    call: simulator.queue.pop_front().expect("queued event"),
+  });
+  simulator
+}
+
+fn assert_deauthorized_transaction(simulator: &Simulator) {
+  let state = &simulator.connectors[&1];
+  let transaction = state.transaction.as_ref().expect("retained transaction");
+  assert!(transaction.deauthorized);
+  assert!(!transaction.authorization_accepted);
+  assert_eq!(state.status, ConnectorStatus::SuspendedEvse);
+}
+
+fn assert_deauthorized_end(protocol: OcppVersion, payload: &Value) {
+  assert_eq!(payload["eventType"], json!("Ended"));
+  assert_eq!(payload["triggerReason"], json!("Deauthorized"));
+  assert_eq!(
+    payload["transactionInfo"]["stoppedReason"],
+    json!("DeAuthorized")
+  );
+  assert_schema_valid(
+    &schema_path(v2_x_schema_dir(protocol), "TransactionEventRequest.json"),
+    payload,
+  );
+}

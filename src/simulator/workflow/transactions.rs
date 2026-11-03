@@ -335,13 +335,27 @@ impl Simulator {
     reason: Option<&str>,
     remote_stop: bool,
   ) -> Result<()> {
-    let trigger_reason = if remote_stop {
-      TransactionTriggerReason::RemoteStop
+    let deauthorized = self
+      .connector_ref(connector)?
+      .transaction
+      .as_ref()
+      .is_some_and(|transaction| transaction.deauthorized);
+    let (trigger_reason, stopped_reason) = if deauthorized {
+      (
+        TransactionTriggerReason::Deauthorized,
+        StopReason::DeAuthorized,
+      )
     } else {
-      TransactionTriggerReason::StopAuthorized
+      let trigger_reason = if remote_stop {
+        TransactionTriggerReason::RemoteStop
+      } else {
+        TransactionTriggerReason::StopAuthorized
+      };
+      (
+        trigger_reason,
+        map_stop_reason_v2_x(self.config.protocol, reason, remote_stop),
+      )
     };
-    let stopped_reason =
-      map_stop_reason_v2_x(self.config.protocol, reason, remote_stop);
     self.enqueue_transaction_event(&TransactionEventRequest {
       connector,
       local_tx_id,

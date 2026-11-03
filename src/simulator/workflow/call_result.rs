@@ -4,8 +4,7 @@ use super::super::{
   BootRegistrationStatus, ConfigurationKey, ConnectorStatus,
   DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, PendingContext,
   REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator, StopReason,
-  TransactionEventRequest, TransactionTriggerReason, TxEventType, UiLogLevel,
-  Value, authorize_status,
+  TransactionTriggerReason, TxEventType, UiLogLevel, Value, authorize_status,
 };
 
 impl Simulator {
@@ -411,11 +410,14 @@ impl Simulator {
   }
 
   fn mark_transaction_authorized(&mut self, connector: u16, local_tx_id: u64) {
+    // A response to an older queued event cannot revive a deauthorized session.
     let Some(transaction) = self
       .connectors
       .get_mut(&connector)
       .and_then(|state| state.transaction.as_mut())
-      .filter(|transaction| transaction.local_id == local_tx_id)
+      .filter(|transaction| {
+        transaction.local_id == local_tx_id && !transaction.deauthorized
+      })
     else {
       return;
     };
@@ -427,27 +429,50 @@ impl Simulator {
     connector: u16,
     local_tx_id: u64,
   ) -> Result<()> {
-    let Some(remote_start_id) = self
+    let Some(transaction) = self
       .connectors
-      .get(&connector)
-      .and_then(|state| state.transaction.as_ref())
+      .get_mut(&connector)
+      .and_then(|state| state.transaction.as_mut())
       .filter(|transaction| transaction.local_id == local_tx_id)
-      .map(|transaction| transaction.remote_start_id)
     else {
       return Ok(());
     };
+    // Persist the decision before queueing so failures cannot restore charging.
+    transaction.deauthorized = true;
+    transaction.authorization_accepted = false;
+    self.connector_mut(connector)?.status = ConnectorStatus::SuspendedEvse;
 
-    self.bump_seq_no(connector, local_tx_id)?;
-    self.enqueue_transaction_event(&TransactionEventRequest {
-      connector,
-      local_tx_id,
-      event_type: TxEventType::Ended,
-      trigger_reason: TransactionTriggerReason::Deauthorized,
-      id_token: None,
-      remote_start_id,
-      stopped_reason: Some(StopReason::DeAuthorized),
-    })?;
-    self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
+    // A stop may already be queued behind the event being rejected. Preserve
+    // its original sequence number, timestamp, and meter reading.
+    if let Some(end) = self.queue.iter_mut().find(|call| {
+      matches!(
+        call.context,
+        PendingContext::TxEvent {
+          connector: target,
+          local_tx_id: transaction,
+          event_type: TxEventType::Ended,
+        } if target == connector && transaction == local_tx_id
+      )
+    }) {
+      end.payload["triggerReason"] =
+        TransactionTriggerReason::Deauthorized.as_str().into();
+      end.payload["transactionInfo"]["stoppedReason"] =
+        StopReason::DeAuthorized.as_str().into();
+      self.connector_mut(connector)?.status = ConnectorStatus::Finishing;
+    } else if let Err(error) =
+      self.stop_transaction(connector, None, false, true)
+    {
+      // The CSMS response is valid. Keep the transport alive to drain queued
+      // work and allow a later local or remote stop to retry the terminal event.
+      self.log(
+        UiLogLevel::Warn,
+        format!(
+          "Deauthorized transaction on connector {connector} remains \
+          suspended; retry stop after the queue drains: {error}"
+        ),
+      );
+      self.emit_snapshot();
+    }
     self.emit_runtime_state();
     Ok(())
   }
