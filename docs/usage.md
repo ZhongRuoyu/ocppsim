@@ -34,6 +34,9 @@ Use `disconnect` to cancel the attempt before selecting another target.
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
 ```
 
+These flags configure the connection target.
+After the terminal UI opens, type `connect` to open the WebSocket connection.
+
 By default, direct mode appends the charge point ID to the WebSocket URL path.
 Use `--no-append-cp-id` when the CSMS endpoint already includes the final path.
 Charge point ids must be non-empty.
@@ -76,6 +79,9 @@ multiple profiles for different CSMS endpoints and test scenarios, and run
 ```sh
 ocppsim some-profile
 ```
+
+The profile configures the startup target and simulator settings.
+Type `connect` inside the terminal UI to connect to that target.
 
 ## Configuration
 
@@ -155,7 +161,8 @@ the mouse and remain available after `ocppsim` exits.
 - `connect <profile>`: load a profile and connect to its WebSocket target.
 - `connect <ws-url> <cp-id>`: connect to a direct WebSocket target.
 - `disconnect`: close the active WebSocket connection.
-- `boot`: send `BootNotification` immediately.
+- `boot`: send `BootNotification` if the registration retry interval has
+  expired.
 - `authorize <idToken>`: send `Authorize`.
 - `data-transfer <vendorId> [messageId] [data...]`: send `DataTransfer`.
 - `start <connector> <idToken>`: start a local transaction.

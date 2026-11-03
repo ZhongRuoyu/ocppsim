@@ -53,7 +53,7 @@ connect some-profile
 connect ws://csms.example.com/ocpp CP-001
 ```
 
-Or start `ocppsim` directly against a CSMS endpoint:
+Or configure a CSMS endpoint when starting `ocppsim`:
 
 ```sh
 ocppsim --ws-url ws://csms.example.com/ocpp --cp-id CP-001
@@ -76,6 +76,13 @@ In a Docker container, you can run `ocppsim` with a mounted config file like:
 docker run --rm -it \
   -v "$PWD/ocppsim.toml:/config/ocppsim.toml:ro" \
   zhongruoyu/ocppsim some-profile --config-path /config/ocppsim.toml
+```
+
+After starting with command-line targets or a profile, open the configured
+connection from inside the terminal UI:
+
+```text
+connect
 ```
 
 Run `ocppsim --help` for more CLI options.
