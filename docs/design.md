@@ -71,6 +71,14 @@ OCPP 1.6 uses `StartTransaction` and `StopTransaction`; OCPP 2.0.1 and OCPP
 Transaction workflows keep enough pending context to roll back, finish, or
 advance local state after the corresponding CSMS response, error, or timeout.
 
+An OCPP 1.6 stop queued before `StartTransaction.conf` retains the meter reading
+and timestamp from the local stop.
+Its transaction ID is resolved from the start response before transmission.
+If the start fails, dependent queued stops are discarded.
+An online stop requires an assigned CSMS transaction ID or an outstanding
+`StartTransaction` request.
+Transactions created only while offline are not synchronized to the CSMS.
+
 `ChangeAvailability` requests that make an active connector inoperative are
 stored as scheduled changes so connector transitions can be resolved after the
 active transaction finishes.

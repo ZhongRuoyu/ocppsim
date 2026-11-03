@@ -1,7 +1,8 @@
 use super::super::types::{SecurityProfileFallback, SecurityReconnectPlan};
 use super::super::{
   CertificateType, ConfigurationEntry, ConfigurationKey, ConnectorState,
-  ConnectorStatus, OcppVersion, ResponseStatus, Result, Simulator, anyhow,
+  ConnectorStatus, OcppVersion, PendingContext, ResponseStatus, Result,
+  Simulator, anyhow,
 };
 use crate::ocpp::is_valid_basic_auth_password;
 
@@ -440,6 +441,15 @@ impl Simulator {
     connector: u16,
     local_tx_id: u64,
   ) -> Result<()> {
+    self.queue.retain(|call| {
+      !matches!(
+        call.context,
+        PendingContext::StopTxV1_6 {
+          connector: target,
+          local_tx_id: transaction,
+        } if target == connector && transaction == local_tx_id
+      )
+    });
     let should_cancel = self
       .connectors
       .get(&connector)

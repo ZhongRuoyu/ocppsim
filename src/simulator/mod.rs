@@ -1054,7 +1054,7 @@ impl Simulator {
     if self.pending.is_some() {
       return Ok(());
     }
-    let Some(call) = self.queue.pop_front() else {
+    let Some(mut call) = self.queue.pop_front() else {
       return Ok(());
     };
     if !self.queued_call_allowed(&call) {
@@ -1069,6 +1069,14 @@ impl Simulator {
         return Ok(());
       }
       self.queue.push_front(call);
+      return Ok(());
+    }
+    if !self.bind_stop_transaction_id(&mut call) {
+      self.log(
+        UiLogLevel::Warn,
+        "Discarded queued StopTransaction without an assigned CSMS ID.",
+      );
+      self.emit_runtime_state();
       return Ok(());
     }
     self.enqueue_pending_security_event_notifications();

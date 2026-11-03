@@ -73,6 +73,9 @@ fn stop_transaction_timeout_restores_v1_6_status() {
   simulator
     .start_transaction(1, "TOKEN".to_string(), false, None, false)
     .expect("start should succeed");
+  simulator
+    .set_v1_6_transaction_id(1, 1, 123)
+    .expect("assign CSMS transaction ID");
   let local_tx_id = simulator
     .connectors
     .get(&1)
@@ -185,6 +188,9 @@ fn stop_ack_enqueues_scheduled_v1_6_status() {
   simulator
     .start_transaction(1, "TOKEN".to_string(), false, None, false)
     .expect("start should succeed");
+  simulator
+    .set_v1_6_transaction_id(1, 1, 123)
+    .expect("assign CSMS transaction ID");
   assert_eq!(
     simulator
       .change_availability_v1_6(&json!({
@@ -264,6 +270,9 @@ fn stop_transaction_v1_6_remote_reason_is_preserved() {
   simulator
     .start_transaction(1, "TOKEN".to_string(), false, None, true)
     .expect("start should succeed");
+  simulator
+    .set_v1_6_transaction_id(1, 1, 123)
+    .expect("assign CSMS transaction ID");
   simulator.queue.clear();
 
   simulator
@@ -849,4 +858,60 @@ fn stop_transaction_v2_x_queues_ended_transaction_event() {
         .is_none()
     );
   });
+}
+
+#[test]
+fn v1_6_start_failure_discards_dependent_stops() {
+  for failure in ["timeout", "error", "invalid", "missing-id"] {
+    let mut simulator = simulator_for_tests();
+    simulator.config.request_timeout = Duration::ZERO;
+    simulator
+      .start_transaction(1, "TOKEN".to_string(), false, None, true)
+      .expect("queue start");
+    simulator.pending = Some(PendingCall {
+      message_id: "start".to_string(),
+      sent_at: Instant::now(),
+      call: simulator.queue.pop_front().expect("queued start"),
+    });
+    simulator
+      .stop_transaction(1, Some("Local"), false, true)
+      .expect("defer stop until start response");
+
+    match failure {
+      "timeout" => simulator.check_pending_timeout(),
+      "error" => simulator
+        .handle_call_error("start", "InternalError", "temporary failure")
+        .expect("handle start error"),
+      "invalid" => simulator.reject_call_result("start"),
+      "missing-id" => simulator
+        .handle_call_result(
+          "start",
+          &json!({ "idTagInfo": { "status": "Accepted" } }),
+        )
+        .expect("handle malformed start response"),
+      _ => unreachable!(),
+    }
+
+    assert!(simulator.connectors[&1].transaction.is_none(), "{failure}");
+    assert!(
+      simulator
+        .queue
+        .iter()
+        .all(|call| call.action != "StopTransaction"),
+      "stale stop remains after {failure}"
+    );
+  }
+}
+
+#[test]
+fn v1_6_stop_cannot_report_an_offline_only_transaction() {
+  let mut simulator = simulator_for_tests();
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, false)
+    .expect("start offline");
+  simulator
+    .stop_transaction(1, Some("Local"), false, true)
+    .expect_err("unreported transaction has no CSMS ID");
+  assert!(simulator.queue.is_empty());
+  assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Charging);
 }

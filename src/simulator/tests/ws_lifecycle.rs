@@ -2373,3 +2373,68 @@ async fn remote_stop_v1_6_uses_only_the_csms_transaction_id() {
   assert_eq!(simulator.connectors[&1].status, ConnectorStatus::Charging);
   assert_eq!(simulator.connectors[&2].status, ConnectorStatus::Finishing);
 }
+
+#[tokio::test]
+async fn v1_6_stop_waits_for_start_response_and_preserves_meter_sample() {
+  let (mut write, _read, _server_write, mut server_read) =
+    in_memory_ws_pair().await;
+  let mut simulator = simulator_for_tests();
+  simulator.config.strict = true;
+  simulator
+    .start_transaction(1, "TOKEN".to_string(), false, None, true)
+    .expect("queue start");
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send start");
+  let OcppFrame::Call {
+    message_id, action, ..
+  } = read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected start request");
+  };
+  assert_eq!(action, "StartTransaction");
+
+  simulator
+    .set_meter(1, 42)
+    .expect("set stopping meter value");
+  simulator
+    .stop_transaction(1, Some("Local"), false, true)
+    .expect("queue stop before start response");
+  let stopped = queued_payload(&simulator, "StopTransaction");
+  simulator.set_meter(1, 99).expect("later meter change");
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("wait for start");
+  assert_eq!(simulator.pending.as_ref().unwrap().message_id, message_id);
+
+  simulator
+    .handle_ws_text(
+      build_call_result(
+        &message_id,
+        &json!({
+          "transactionId": 123,
+          "idTagInfo": { "status": "Accepted" }
+        }),
+      ),
+      &mut write,
+    )
+    .await
+    .expect("handle start response");
+  simulator
+    .try_send_next(&mut write)
+    .await
+    .expect("send deferred stop");
+  let OcppFrame::Call {
+    action, payload, ..
+  } = read_ocpp_frame(&mut server_read).await
+  else {
+    panic!("expected stop request");
+  };
+  assert_eq!(action, "StopTransaction");
+  assert_schema_valid("schemas/1.6/StopTransaction.json", &payload);
+  assert_eq!(payload["transactionId"], json!(123));
+  assert_eq!(payload["meterStop"], json!(42));
+  assert_eq!(payload["timestamp"], stopped["timestamp"]);
+}

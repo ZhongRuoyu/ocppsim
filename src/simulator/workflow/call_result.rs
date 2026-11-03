@@ -265,6 +265,7 @@ impl Simulator {
           UiLogLevel::Warn,
           "StartTransaction accepted without transactionId.",
         );
+        self.cancel_transaction_start(connector, local_tx_id)?;
       }
       self.enqueue_status_notification(connector)?;
     } else {

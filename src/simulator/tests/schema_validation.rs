@@ -321,6 +321,9 @@ fn representative_v1_6_payloads_validate_against_schemas() {
     &queued_payload(&simulator, "StartTransaction"),
   );
 
+  simulator
+    .set_v1_6_transaction_id(1, 1, 123)
+    .expect("assign CSMS transaction ID");
   simulator.queue.clear();
   simulator
     .stop_transaction(1, Some("Local"), false, true)

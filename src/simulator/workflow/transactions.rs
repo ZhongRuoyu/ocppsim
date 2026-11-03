@@ -2,7 +2,7 @@ use super::super::payloads::{
   StartTransactionV1_6Request, StopTransactionV1_6Request, to_value,
 };
 use super::super::{
-  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext,
+  ConnectorStatus, OcppVersion, OutgoingAction, PendingContext, QueuedCall,
   REDACTED_SENSITIVE_VALUE, Result, Simulator, StopReason,
   TransactionEventRequest, TransactionState, TransactionTriggerReason,
   TxEventType, UiLogLevel, anyhow, map_stop_reason_v1_6, map_stop_reason_v2_x,
@@ -215,7 +215,17 @@ impl Simulator {
     remote_stop: bool,
   ) -> Result<()> {
     let connector_state = self.connector_ref(connector)?;
-    let tx_id = v1_6_tx_id.unwrap_or(local_tx_id.cast_signed());
+    if v1_6_tx_id.is_none()
+      && !self.has_pending_v1_6_start(connector, local_tx_id)
+    {
+      return Err(anyhow!(
+        "Transaction on connector {connector} has no CSMS transaction ID \
+        or pending StartTransaction request."
+      ));
+    }
+    // The queued snapshot preserves the stop time and meter reading. Its
+    // temporary unknown ID is replaced before transmission after start ACK.
+    let tx_id = v1_6_tx_id.unwrap_or(-1);
     let timestamp = now_timestamp();
     let stop_reason = map_stop_reason_v1_6(reason, remote_stop);
     let reason_str =
@@ -245,6 +255,51 @@ impl Simulator {
     self.log_transaction_stopped(connector);
     self.emit_runtime_state();
     Ok(())
+  }
+
+  fn has_pending_v1_6_start(&self, connector: u16, local_tx_id: u64) -> bool {
+    self
+      .pending
+      .iter()
+      .map(|pending| &pending.call)
+      .chain(self.queue.iter())
+      .any(|call| {
+        matches!(
+          call.context,
+          PendingContext::StartTxV1_6 {
+            connector: target,
+            local_tx_id: transaction,
+          } if target == connector && transaction == local_tx_id
+        )
+      })
+  }
+
+  /// Resolves a queued OCPP 1.6 stop's CSMS ID before transmission.
+  ///
+  /// Returns false for a stale stop or an unacknowledged start, so an internal
+  /// placeholder can never be sent as a transaction ID.
+  pub(in crate::simulator) fn bind_stop_transaction_id(
+    &self,
+    call: &mut QueuedCall,
+  ) -> bool {
+    let PendingContext::StopTxV1_6 {
+      connector,
+      local_tx_id,
+    } = &call.context
+    else {
+      return true;
+    };
+    let Some(transaction_id) = self
+      .connectors
+      .get(connector)
+      .and_then(|state| state.transaction.as_ref())
+      .filter(|transaction| transaction.local_id == *local_tx_id)
+      .and_then(|transaction| transaction.v1_6_transaction_id)
+    else {
+      return false;
+    };
+    call.payload["transactionId"] = transaction_id.into();
+    true
   }
 
   fn stop_transaction_v2_x(
