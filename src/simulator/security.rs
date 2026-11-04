@@ -29,7 +29,8 @@ use tokio_tungstenite::tungstenite::error::TlsError;
 use url::Url;
 
 use crate::ocpp::{
-  basic_auth_password_requirement, is_valid_basic_auth_password,
+  SecurityEventType, basic_auth_password_requirement,
+  is_valid_basic_auth_password,
 };
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 
@@ -241,7 +242,7 @@ impl Simulator {
   fn secure_connection_failure_event_type(
     &self,
     error: &WsError,
-  ) -> Option<&'static str> {
+  ) -> Option<SecurityEventType> {
     if !matches!(self.security.security_profile, Some(2 | 3)) {
       return None;
     }
@@ -256,7 +257,7 @@ impl Simulator {
   fn rustls_security_event_type(
     &self,
     error: &rustls::Error,
-  ) -> Option<&'static str> {
+  ) -> Option<SecurityEventType> {
     match error {
       rustls::Error::InvalidCertificate(_)
       | rustls::Error::NoCertificatesPresented
@@ -268,10 +269,10 @@ impl Simulator {
         | PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig
         | PeerIncompatible::Tls12NotOffered
         | PeerIncompatible::Tls12NotOfferedOrEnabled => {
-          Some("InvalidTLSVersion")
+          Some(SecurityEventType::InvalidTlsVersion)
         }
         PeerIncompatible::NoCipherSuitesInCommon => {
-          Some("InvalidTLSCipherSuite")
+          Some(SecurityEventType::InvalidTlsCipherSuite)
         }
         _ => None,
       },
@@ -279,16 +280,19 @@ impl Simulator {
     }
   }
 
-  fn invalid_csms_certificate_event_type(&self) -> &'static str {
+  fn invalid_csms_certificate_event_type(&self) -> SecurityEventType {
     match self.config.protocol {
-      OcppVersion::V1_6 => "InvalidCentralSystemCertificate",
-      OcppVersion::V2_0_1 | OcppVersion::V2_1 => "InvalidCsmsCertificate",
+      OcppVersion::V1_6 => SecurityEventType::InvalidCentralSystemCertificate,
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
+        SecurityEventType::InvalidCsmsCertificate
+      }
     }
   }
 
+  /// Records a typed security event and queues its notification when connected.
   pub(in crate::simulator) fn record_security_event(
     &mut self,
-    event_type: &str,
+    event_type: SecurityEventType,
     tech_info: Option<String>,
   ) {
     let event_id = self.security.next_event_id;
@@ -296,7 +300,7 @@ impl Simulator {
     let timestamp = now_timestamp();
     self.security.events.push(SecurityEvent {
       id: event_id,
-      event_type: event_type.to_string(),
+      event_type,
       timestamp,
       tech_info,
       notification_state: SecurityEventNotificationState::Pending,
@@ -418,7 +422,7 @@ impl Simulator {
       .find(|event| event.id == event_id)
       .map(|event| {
         (
-          event.event_type.clone(),
+          event.event_type,
           event.timestamp.clone(),
           event.tech_info.clone(),
         )
@@ -427,7 +431,7 @@ impl Simulator {
       return;
     };
     let payload = to_value(&SecurityEventNotificationRequest {
-      event_type: &event_type,
+      event_type,
       timestamp: &timestamp,
       tech_info: tech_info.as_deref(),
     });
@@ -550,7 +554,7 @@ impl Simulator {
     self.certificate_signed(
       payload,
       CertificateType::ChargePointCertificate.as_str(),
-      "InvalidChargePointCertificate",
+      SecurityEventType::InvalidChargePointCertificate,
     )
   }
 
@@ -580,7 +584,7 @@ impl Simulator {
     self.certificate_signed(
       payload,
       certificate_type,
-      "InvalidChargingStationCertificate",
+      SecurityEventType::InvalidChargingStationCertificate,
     )
   }
 
@@ -621,7 +625,7 @@ impl Simulator {
           "Including {} recorded security event(s) in log export; \
             latest={} at {}{}.",
           self.security.events.len(),
-          event.event_type,
+          event.event_type.as_str(),
           event.timestamp,
           redact_text_secrets(&detail)
         ),
@@ -678,7 +682,7 @@ impl Simulator {
     }
     if is_simulated_invalid(signing_certificate) {
       self.record_security_event(
-        "InvalidFirmwareSigningCertificate",
+        SecurityEventType::InvalidFirmwareSigningCertificate,
         Some("SignedUpdateFirmware signing certificate rejected".to_string()),
       );
       return Ok(ResponseStatus::InvalidCertificate);
@@ -697,7 +701,7 @@ impl Simulator {
         Some(request_id),
       );
       self.record_security_event(
-        "InvalidFirmwareSignature",
+        SecurityEventType::InvalidFirmwareSignature,
         Some("SignedUpdateFirmware signature rejected".to_string()),
       );
       return Ok(ResponseStatus::Accepted);
@@ -715,7 +719,7 @@ impl Simulator {
         Some(request_id),
       );
     }
-    self.record_security_event("FirmwareUpdated", None);
+    self.record_security_event(SecurityEventType::FirmwareUpdated, None);
     Ok(ResponseStatus::Accepted)
   }
 
@@ -737,14 +741,14 @@ impl Simulator {
     let signature = firmware.get("signature").and_then(Value::as_str);
     if signing_certificate.is_some_and(is_simulated_invalid) {
       self.record_security_event(
-        "InvalidFirmwareSigningCertificate",
+        SecurityEventType::InvalidFirmwareSigningCertificate,
         Some("UpdateFirmware signing certificate rejected".to_string()),
       );
       return Ok(ResponseStatus::InvalidCertificate);
     }
     if signature.is_some_and(is_simulated_invalid) {
       self.record_security_event(
-        "InvalidFirmwareSignature",
+        SecurityEventType::InvalidFirmwareSignature,
         Some("UpdateFirmware signature rejected".to_string()),
       );
       self.enqueue_firmware_status_notification(
@@ -776,7 +780,7 @@ impl Simulator {
       ResponseStatus::Installed.as_str(),
       Some(request_id),
     );
-    self.record_security_event("FirmwareUpdated", None);
+    self.record_security_event(SecurityEventType::FirmwareUpdated, None);
     Ok(ResponseStatus::Accepted)
   }
 
@@ -792,7 +796,7 @@ impl Simulator {
     &mut self,
     payload: &Value,
     certificate_type: &str,
-    invalid_event_type: &str,
+    invalid_event_type: SecurityEventType,
   ) -> Result<ResponseStatus> {
     let certificate_chain = required_string_field(payload, "certificateChain")?;
     if certificate_chain.len() > self.security.certificate_signed_max_chain_size

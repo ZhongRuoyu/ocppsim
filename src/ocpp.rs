@@ -1218,6 +1218,51 @@ wire_enum! {
 }
 
 wire_enum! {
+  /// Standard security events from the OCPP 1.6 and 2.x specifications.
+  ///
+  /// Version-specific names remain distinct so queued events retain the name
+  /// selected when they were recorded, including across protocol changes.
+  pub enum SecurityEventType {
+    FirmwareUpdated => "FirmwareUpdated",
+    FailedToAuthenticationAtCentralSystem => {
+      "FailedToAuthenticationAtCentralSystem"
+    },
+    CentralSystemFailedToAuthentication => "CentralSystemFailedToAuthentication",
+    FailedToAuthenticationAtCsms => "FailedToAuthenticationAtCsms",
+    CsmsFailedToAuthentication => "CsmsFailedToAuthentication",
+    SettingSystemTime => "SettingSystemTime",
+    StartupOfTheDevice => "StartupOfTheDevice",
+    ResetOrReboot => "ResetOrReboot",
+    SecurityLogWasCleared => "SecurityLogWasCleared",
+    ReconfigurationOfSecurityParameters => "ReconfigurationOfSecurityParameters",
+    MemoryExhaustion => "MemoryExhaustion",
+    InvalidMessages => "InvalidMessages",
+    AttemptedReplayAttacks => "AttemptedReplayAttacks",
+    TamperDetectionActivated => "TamperDetectionActivated",
+    InvalidFirmwareSignature => "InvalidFirmwareSignature",
+    InvalidFirmwareSigningCertificate => "InvalidFirmwareSigningCertificate",
+    InvalidCentralSystemCertificate => "InvalidCentralSystemCertificate",
+    InvalidChargePointCertificate => "InvalidChargePointCertificate",
+    InvalidCsmsCertificate => "InvalidCsmsCertificate",
+    InvalidChargingStationCertificate => "InvalidChargingStationCertificate",
+    DiscardedRenewedClientCertificate => "DiscardedRenewedClientCertificate",
+    InvalidTlsVersion => "InvalidTLSVersion",
+    InvalidTlsCipherSuite => "InvalidTLSCipherSuite",
+    MaintenanceLoginAccepted => "MaintenanceLoginAccepted",
+    MaintenanceLoginFailed => "MaintenanceLoginFailed",
+  }
+}
+
+impl serde::Serialize for SecurityEventType {
+  fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    serializer.serialize_str(self.as_str())
+  }
+}
+
+wire_enum! {
   pub enum StatusNotificationErrorCode {
     ConnectorLockFailure => "ConnectorLockFailure",
     EvCommunicationError => "EVCommunicationError",

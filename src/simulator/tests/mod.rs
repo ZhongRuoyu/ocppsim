@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::metering::{MeterReading, MeterUpdate};
-use crate::ocpp::Measurand;
+use crate::ocpp::{Measurand, SecurityEventType};
 
 use super::{
   BootRegistrationStatus, ConfigurationKey, ConnectorStatus, OcppVersion,

@@ -356,7 +356,7 @@ fn assert_representative_v1_6_security_payloads_validate(
 ) {
   simulator.queue.clear();
   simulator.connected = true;
-  simulator.record_security_event("SettingSystemTime", None);
+  simulator.record_security_event(SecurityEventType::SettingSystemTime, None);
   assert_schema_valid(
     "schemas/1.6/SecurityEventNotification.json",
     &queued_payload(simulator, "SecurityEventNotification"),
@@ -560,7 +560,7 @@ fn assert_representative_v2_x_payloads_validate(
 
   simulator.queue.clear();
   simulator.connected = true;
-  simulator.record_security_event("SettingSystemTime", None);
+  simulator.record_security_event(SecurityEventType::SettingSystemTime, None);
   assert_schema_valid(
     &schema_path(schema_dir, "SecurityEventNotificationRequest.json"),
     &queued_payload(&simulator, "SecurityEventNotification"),

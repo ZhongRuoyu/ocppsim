@@ -4,7 +4,7 @@ use super::super::{
   ConnectorStatus, OcppVersion, PendingContext, ResponseStatus, Result,
   Simulator, anyhow,
 };
-use crate::ocpp::is_valid_basic_auth_password;
+use crate::ocpp::{SecurityEventType, is_valid_basic_auth_password};
 
 const MAX_CERTIFICATE_CHAIN_SIZE: usize = 10_000;
 
@@ -96,7 +96,7 @@ impl Simulator {
       }
     }
     self.record_security_event(
-      "ReconfigurationOfSecurityParameters",
+      SecurityEventType::ReconfigurationOfSecurityParameters,
       Some("Basic authentication password changed".to_string()),
     );
     self.request_security_reconnect(SecurityProfileFallback::None);
@@ -130,7 +130,7 @@ impl Simulator {
     self.config.security_profile = self.security.security_profile;
     self.update_configuration_value(ConfigurationKey::SecurityProfile, value);
     self.record_security_event(
-      "ReconfigurationOfSecurityParameters",
+      SecurityEventType::ReconfigurationOfSecurityParameters,
       Some(format!("SecurityProfile changed to {profile}")),
     );
     self.request_security_reconnect(SecurityProfileFallback::Restore(

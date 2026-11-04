@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{Number, Value};
 
 use crate::metering::MeterReading;
-use crate::ocpp::MeterUnit;
+use crate::ocpp::{MeterUnit, SecurityEventType};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -188,7 +188,7 @@ pub(super) struct LogStatusPayload<'a> {
 #[serde(rename_all = "camelCase")]
 pub(super) struct SecurityEventNotificationRequest<'a> {
   #[serde(rename = "type")]
-  pub event_type: &'a str,
+  pub event_type: SecurityEventType,
   pub timestamp: &'a str,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tech_info: Option<&'a str>,

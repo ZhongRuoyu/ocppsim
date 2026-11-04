@@ -636,7 +636,8 @@ async fn pending_security_events_enqueue_when_queue_space_opens() {
   simulator.config.outbound_queue_limit = 1;
 
   simulator.enqueue_heartbeat();
-  simulator.record_security_event("InvalidFirmwareSignature", None);
+  simulator
+    .record_security_event(SecurityEventType::InvalidFirmwareSignature, None);
   assert_eq!(simulator.queue.len(), 1);
 
   simulator

@@ -164,7 +164,7 @@ fn signed_firmware_invalid_signature_records_security_event() {
   assert_eq!(simulator.security.events.len(), 1);
   assert_eq!(
     simulator.security.events[0].event_type,
-    "InvalidFirmwareSignature"
+    SecurityEventType::InvalidFirmwareSignature
   );
   assert_eq!(
     queued_payload(&simulator, "SignedFirmwareStatusNotification")["status"],
@@ -190,7 +190,7 @@ fn update_firmware_invalid_certificate_rejects_immediately() {
     assert_eq!(simulator.security.events.len(), 1);
     assert_eq!(
       simulator.security.events[0].event_type,
-      "InvalidFirmwareSigningCertificate"
+      SecurityEventType::InvalidFirmwareSigningCertificate
     );
     assert!(simulator.queue.is_empty());
   });
@@ -440,7 +440,7 @@ fn offline_security_events_replay_when_connection_becomes_available() {
   let mut simulator = simulator_for_tests();
 
   simulator.record_security_event(
-    "InvalidFirmwareSignature",
+    SecurityEventType::InvalidFirmwareSignature,
     Some("recorded while offline".to_string()),
   );
   assert!(simulator.queue.is_empty());
@@ -468,7 +468,7 @@ fn queued_security_events_replay_after_disconnect_queue_clear() {
   simulator.connected = true;
 
   simulator.record_security_event(
-    "ReconfigurationOfSecurityParameters",
+    SecurityEventType::ReconfigurationOfSecurityParameters,
     Some("queued before reconnect".to_string()),
   );
   assert_eq!(
@@ -492,18 +492,33 @@ fn security_event_limit_drops_sent_events_first() {
   let mut simulator = simulator_for_tests();
   simulator.config.security_event_limit = 2;
 
-  simulator.record_security_event("First", Some("sent".to_string()));
-  simulator.record_security_event("Second", Some("pending".to_string()));
+  simulator.record_security_event(
+    SecurityEventType::FirmwareUpdated,
+    Some("sent".to_string()),
+  );
+  simulator.record_security_event(
+    SecurityEventType::SettingSystemTime,
+    Some("pending".to_string()),
+  );
   simulator.mark_security_event_notification_sent(1);
-  simulator.record_security_event("Third", Some("new".to_string()));
+  simulator.record_security_event(
+    SecurityEventType::ReconfigurationOfSecurityParameters,
+    Some("new".to_string()),
+  );
 
   let events = simulator
     .security
     .events
     .iter()
-    .map(|event| event.event_type.as_str())
+    .map(|event| event.event_type)
     .collect::<Vec<_>>();
-  assert_eq!(events, vec!["Second", "Third"]);
+  assert_eq!(
+    events,
+    vec![
+      SecurityEventType::SettingSystemTime,
+      SecurityEventType::ReconfigurationOfSecurityParameters
+    ]
+  );
 }
 
 #[test]
@@ -512,11 +527,20 @@ fn security_event_limit_drops_oldest_unsent_event_when_full() {
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
   simulator.config.security_event_limit = 1;
 
-  simulator.record_security_event("First", Some("old".to_string()));
-  simulator.record_security_event("Second", Some("new".to_string()));
+  simulator.record_security_event(
+    SecurityEventType::FirmwareUpdated,
+    Some("old".to_string()),
+  );
+  simulator.record_security_event(
+    SecurityEventType::SettingSystemTime,
+    Some("new".to_string()),
+  );
 
   assert_eq!(simulator.security.events.len(), 1);
-  assert_eq!(simulator.security.events[0].event_type, "Second");
+  assert_eq!(
+    simulator.security.events[0].event_type,
+    SecurityEventType::SettingSystemTime
+  );
   let messages = drain_log_messages(&mut ui_rx);
   assert!(messages.iter().any(|message| {
     message.contains("Security event limit 1 reached")
@@ -919,10 +943,22 @@ async fn local_tls_setup_failure_does_not_record_security_event() {
 
 #[test]
 fn secure_connection_certificate_failure_records_version_specific_event() {
-  for (protocol, event_type) in [
-    (OcppVersion::V1_6, "InvalidCentralSystemCertificate"),
-    (OcppVersion::V2_0_1, "InvalidCsmsCertificate"),
-    (OcppVersion::V2_1, "InvalidCsmsCertificate"),
+  for (protocol, event_type, wire_type) in [
+    (
+      OcppVersion::V1_6,
+      SecurityEventType::InvalidCentralSystemCertificate,
+      "InvalidCentralSystemCertificate",
+    ),
+    (
+      OcppVersion::V2_0_1,
+      SecurityEventType::InvalidCsmsCertificate,
+      "InvalidCsmsCertificate",
+    ),
+    (
+      OcppVersion::V2_1,
+      SecurityEventType::InvalidCsmsCertificate,
+      "InvalidCsmsCertificate",
+    ),
   ] {
     let mut simulator = simulator_for_tests_with_protocol(protocol);
     simulator.security.security_profile = Some(2);
@@ -934,6 +970,51 @@ fn secure_connection_certificate_failure_records_version_specific_event() {
 
     assert_eq!(simulator.security.events.len(), 1);
     assert_eq!(simulator.security.events[0].event_type, event_type);
+    simulator.connected = true;
+    simulator.enqueue_pending_security_event_notifications();
+    assert_eq!(
+      queued_payload(&simulator, "SecurityEventNotification")["type"],
+      wire_type
+    );
+  }
+}
+
+#[test]
+fn rejected_signed_certificates_keep_version_specific_event_names() {
+  for (protocol, event_type, wire_type) in [
+    (
+      OcppVersion::V1_6,
+      SecurityEventType::InvalidChargePointCertificate,
+      "InvalidChargePointCertificate",
+    ),
+    (
+      OcppVersion::V2_0_1,
+      SecurityEventType::InvalidChargingStationCertificate,
+      "InvalidChargingStationCertificate",
+    ),
+    (
+      OcppVersion::V2_1,
+      SecurityEventType::InvalidChargingStationCertificate,
+      "InvalidChargingStationCertificate",
+    ),
+  ] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    let payload = json!({ "certificateChain": "invalid-certificate" });
+    let status = match protocol {
+      OcppVersion::V1_6 => simulator.certificate_signed_v1_6(&payload),
+      OcppVersion::V2_0_1 | OcppVersion::V2_1 => {
+        simulator.certificate_signed_v2_x(&payload)
+      }
+    }
+    .expect("certificate response");
+    assert_eq!(status, ResponseStatus::Rejected);
+    assert_eq!(simulator.security.events[0].event_type, event_type);
+    simulator.connected = true;
+    simulator.enqueue_pending_security_event_notifications();
+    assert_eq!(
+      queued_payload(&simulator, "SecurityEventNotification")["type"],
+      wire_type
+    );
   }
 }
 
@@ -952,11 +1033,22 @@ fn secure_connection_tls_failures_record_specific_security_events() {
   simulator.record_secure_connection_failure(&cipher_error);
 
   assert_eq!(simulator.security.events.len(), 2);
-  assert_eq!(simulator.security.events[0].event_type, "InvalidTLSVersion");
+  assert_eq!(
+    simulator.security.events[0].event_type,
+    SecurityEventType::InvalidTlsVersion
+  );
   assert_eq!(
     simulator.security.events[1].event_type,
-    "InvalidTLSCipherSuite"
+    SecurityEventType::InvalidTlsCipherSuite
   );
+  simulator.connected = true;
+  simulator.enqueue_pending_security_event_notifications();
+  let wire_types = simulator
+    .queue
+    .iter()
+    .map(|call| call.payload["type"].as_str().expect("security event type"))
+    .collect::<Vec<_>>();
+  assert_eq!(wire_types, ["InvalidTLSVersion", "InvalidTLSCipherSuite"]);
 }
 
 #[test]

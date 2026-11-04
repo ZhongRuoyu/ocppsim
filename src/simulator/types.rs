@@ -10,7 +10,7 @@ use crate::args::ResolvedCliArgs;
 use crate::metering::{MeterReading, MeterReadings, MeterUpdate};
 use crate::ocpp::{
   ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
-  OcppVersion, StopReason, TransactionTriggerReason,
+  OcppVersion, SecurityEventType, StopReason, TransactionTriggerReason,
 };
 
 #[derive(Debug, Clone)]
@@ -473,7 +473,7 @@ pub(in crate::simulator) struct CertificateHashData {
 #[derive(Debug, Clone)]
 pub(in crate::simulator) struct SecurityEvent {
   pub(in crate::simulator) id: u64,
-  pub(in crate::simulator) event_type: String,
+  pub(in crate::simulator) event_type: SecurityEventType,
   pub(in crate::simulator) timestamp: String,
   pub(in crate::simulator) tech_info: Option<String>,
   pub(in crate::simulator) notification_state: SecurityEventNotificationState,
