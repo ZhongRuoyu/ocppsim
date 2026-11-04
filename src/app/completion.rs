@@ -1,5 +1,5 @@
 use crate::ocpp::{
-  ConnectorStatus as OcppConnectorStatus, OcppVersion, StopReason,
+  ConnectorStatus as OcppConnectorStatus, Measurand, OcppVersion, StopReason,
 };
 
 const COMMAND_WORDS: &[&str] = &[
@@ -15,6 +15,8 @@ const COMMAND_WORDS: &[&str] = &[
   "send-meter",
   "soc",
   "send-soc",
+  "measurand",
+  "send-measurand",
   "heartbeat",
   "connector-status",
   "clear",
@@ -107,6 +109,10 @@ pub(super) fn completion_seed(
           STOP_REASON_HINTS_V2_1,
         ),
       }),
+    "measurand" | "send-measurand" => {
+      seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
+        .or_else(|| seed_for_measurands(&parts, ends_with_space, protocol))
+    }
     "heartbeat" => {
       seed_for_position(&parts, ends_with_space, 1, &["start", "stop"])
     }
@@ -124,6 +130,20 @@ pub(super) fn completion_seed(
     }
     _ => None,
   }
+}
+
+/// Completes canonical measurands defined by the active OCPP version.
+fn seed_for_measurands(
+  parts: &[&str],
+  ends_with_space: bool,
+  protocol: OcppVersion,
+) -> Option<(String, Vec<String>)> {
+  let words = Measurand::ALL
+    .iter()
+    .filter(|measurand| measurand.is_supported(protocol))
+    .map(|measurand| measurand.as_str().to_string())
+    .collect::<Vec<_>>();
+  seed_for_position_owned(parts, ends_with_space, 2, &words)
 }
 
 /// Produces completion candidates for `connect <profile>` and direct URLs.
@@ -306,6 +326,51 @@ fn completion_base(parts: &[&str], ends_with_space: bool) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn generic_measurand_completion_uses_active_protocol_and_canonical_names() {
+    assert_eq!(complete_static("meas", COMMAND_WORDS), ["measurand "]);
+    assert_eq!(
+      complete_static("send-meas", COMMAND_WORDS),
+      ["send-measurand "]
+    );
+    for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1]
+    {
+      for command in ["measurand", "send-measurand"] {
+        let (_, connectors) =
+          completion_seed(&format!("{command} "), protocol, &[1, 2], &[])
+            .unwrap();
+        assert_eq!(connectors, ["1 ", "2 "]);
+        let (_, names) =
+          completion_seed(&format!("{command} 1 "), protocol, &[1, 2], &[])
+            .unwrap();
+        assert_eq!(
+          names.contains(&"Temperature ".to_string()),
+          protocol == OcppVersion::V1_6
+        );
+        assert_eq!(
+          names.contains(&"Energy.Apparent.Net ".to_string()),
+          protocol != OcppVersion::V1_6
+        );
+        assert_eq!(
+          names.contains(&"Display.PresentSOC ".to_string()),
+          protocol == OcppVersion::V2_1
+        );
+        let (_, names) = completion_seed(
+          &format!("{} 1 eNeRgY.aCtIvE.iMpOrT.r", command.to_uppercase()),
+          protocol,
+          &[1],
+          &[],
+        )
+        .unwrap();
+        assert_eq!(names, ["Energy.Active.Import.Register "]);
+        assert!(
+          completion_seed(&format!("{command} 1 SoC "), protocol, &[1], &[],)
+            .is_none()
+        );
+      }
+    }
+  }
 
   #[test]
   fn metering_commands_share_connector_completion() {

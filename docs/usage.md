@@ -199,6 +199,27 @@ the mouse and remain available after `ocppsim` exits.
   SoC is initially unset; set it before adjusting or sending it.
   Adjustments must leave SoC between 0 and 100.
   Finalizing a transaction clears SoC; failed stops and reconnects preserve it.
+- `measurand`: show all set readings supported by the active protocol.
+- `measurand <connector>`: show set readings for one connector.
+- `measurand <connector> <measurand>`: show a named reading, or `unset`.
+- `measurand <connector> <measurand> <value>`: set the named reading.
+  Names are case insensitive and Tab completes connectors and measurands
+  supported by the active OCPP version.
+  Values use the [canonical units](ocpp-support.md#meter-readings).
+  Plain signed numbers set absolute readings.
+  Use `+=<value>` or `-=<value>` to adjust an existing reading in that unit.
+  For example, `measurand 1 Power.Active.Import 7200` sets 7200 W, and
+  `measurand 1 Power.Active.Import -=200` changes it to 7000 W.
+  `measurand 1 soc 75.5` sets the same reading as `soc 1 75.5`.
+  Unset or expired readings cannot be adjusted.
+  `Display.ChargingComplete` and `Display.InletHot` accept absolute values only.
+- `send-measurand <connector> <measurand> [<value>]`: send the named reading.
+  An optional value sets or adjusts the reading first using the same syntax
+  and validation as `measurand`.
+  For example, `send-measurand 1 Power.Active.Import +=100` adds 100 W and
+  sends the updated reading.
+  Omitting the value requires an existing, unexpired reading.
+  Invalid updates cancel the send.
 - `heartbeat`: send one heartbeat.
 - `heartbeat start <seconds>`: start periodic heartbeats.
 - `heartbeat stop`: stop periodic heartbeats.
@@ -210,15 +231,15 @@ the mouse and remain available after `ocppsim` exits.
   Ctrl-C and Ctrl-D leave the confirmation active.
 
 Adjustment operators and their operands form one token, such as `-=2.5`.
-Both send commands accept the same absolute and adjustment forms.
+All three send commands accept the same absolute and adjustment forms.
 An invalid adjustment leaves the reading unchanged and cancels the send.
-The `meter` and `soc` query forms work online or offline and do not change
-readings or send OCPP messages.
+The `meter`, `soc`, and `measurand` query forms work online or offline and
+do not change readings or send OCPP messages.
 
 Commands that send OCPP messages require an active connection.
 Local state commands can still update simulator state while disconnected.
-The optional values in `send-meter` and `send-soc` are stored locally even
-when sending is unavailable.
+The optional values in `send-meter`, `send-soc`, and `send-measurand`
+are stored locally even when sending is unavailable.
 Each command sends only its named measurand.
 During an active OCPP 2.x transaction, these sends use `TransactionEvent`;
 otherwise, they use `MeterValues`.

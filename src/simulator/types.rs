@@ -206,6 +206,10 @@ pub enum SimulatorCommand {
     connector: u16,
     reason: Option<String>,
   },
+  GetMeasurands {
+    connector: Option<u16>,
+    measurand: Option<Measurand>,
+  },
   GetMeterValue {
     connector: Option<u16>,
     measurand: Measurand,

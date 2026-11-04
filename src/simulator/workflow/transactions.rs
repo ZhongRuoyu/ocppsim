@@ -59,6 +59,7 @@ impl Simulator {
 
     {
       let connector_state = self.connector_mut(connector)?;
+      connector_state.meter_values.begin_transaction();
       connector_state.transaction = Some(TransactionState {
         local_id: local_tx_id,
         transaction_uid: format!("tx-{local_tx_id}"),

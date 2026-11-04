@@ -7,7 +7,7 @@ use super::super::{
 };
 
 impl Simulator {
-  /// Displays one measurand for one connector or all connectors, without sending.
+  /// Displays one measurand for selected connectors without sending.
   pub(in crate::simulator) fn show_meter_value(
     &self,
     connector: Option<u16>,
@@ -25,16 +25,63 @@ impl Simulator {
     };
     for connector in connectors {
       let state = self.connector_ref(connector)?;
-      let value = state.meter_values.get(measurand).map_or_else(
-        || "unset".to_string(),
-        |reading| format!("{}{}", reading.value, reading.unit),
-      );
-      self.log(
-        UiLogLevel::Info,
-        format!("Connector {connector} {label}={value}"),
+      self.log_meter_reading(
+        connector,
+        label,
+        state.meter_values.get(measurand),
       );
     }
     Ok(())
+  }
+
+  /// Shows set readings, optionally selecting a connector or measurand.
+  pub(in crate::simulator) fn show_measurands(
+    &self,
+    connector: Option<u16>,
+    measurand: Option<Measurand>,
+  ) -> Result<()> {
+    if let Some(measurand) = measurand {
+      self.ensure_measurand_supported(measurand)?;
+    }
+    let connectors = connector.map_or_else(
+      || self.connectors.keys().copied().collect(),
+      |connector| vec![connector],
+    );
+    for connector in connectors {
+      let readings = &self.connector_ref(connector)?.meter_values;
+      if let Some(measurand) = measurand {
+        self.log_meter_reading(
+          connector,
+          measurand.as_str(),
+          readings.get(measurand),
+        );
+      } else {
+        for reading in readings.for_protocol(self.config.protocol) {
+          self.log_meter_reading(
+            connector,
+            reading.measurand.as_str(),
+            Some(&reading),
+          );
+        }
+      }
+    }
+    Ok(())
+  }
+
+  fn log_meter_reading(
+    &self,
+    connector: u16,
+    label: &str,
+    reading: Option<&MeterReading>,
+  ) {
+    let value = reading.map_or_else(
+      || "unset".to_string(),
+      |reading| format!("{}{}", reading.value, reading.unit),
+    );
+    self.log(
+      UiLogLevel::Info,
+      format!("Connector {connector} {label}={value}"),
+    );
   }
 
   /// Applies a reading or a checked adjustment to the latest local value.
@@ -45,6 +92,11 @@ impl Simulator {
     connector: u16,
     update: MeterUpdate,
   ) -> Result<()> {
+    let measurand = match &update {
+      MeterUpdate::Set(reading) => reading.measurand,
+      MeterUpdate::Adjust(measurand, _) => *measurand,
+    };
+    self.ensure_measurand_supported(measurand)?;
     let reading = match update {
       MeterUpdate::Set(reading) => reading,
       MeterUpdate::Adjust(measurand, delta) => self

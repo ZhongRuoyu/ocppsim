@@ -272,6 +272,10 @@ fn handle_user_command(
       SimulatorCommand::SetConnectorStatus { connector, status },
       app,
     ),
+    UserCommand::GetMeasurands {
+      connector,
+      measurand,
+    } => get_measurands_command(cmd_tx, connector, measurand, app),
     UserCommand::GetMeterValue {
       connector,
       measurand,
@@ -323,6 +327,23 @@ fn resolve_connect_config(
     }
   };
   Ok(SimulatorConnectionConfig::from_resolved(&resolved))
+}
+
+/// Queues a generic local reading query without changing or sending values.
+fn get_measurands_command(
+  cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
+  connector: Option<u16>,
+  measurand: Option<Measurand>,
+  app: &mut TerminalApp,
+) -> bool {
+  send_command(
+    cmd_tx,
+    SimulatorCommand::GetMeasurands {
+      connector,
+      measurand,
+    },
+    app,
+  )
 }
 
 /// Queues a local reading query, returning true if the simulator is unavailable.
@@ -506,6 +527,65 @@ mod tests {
   }
 
   #[test]
+  fn send_measurand_dispatches_one_update_then_send_command() {
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    for (input, update) in [
+      ("send-measurand 2 Soc", None),
+      (
+        "send-measurand 2 Soc 75.5",
+        Some(MeterUpdate::Set(MeterReading::soc(75.5).unwrap())),
+      ),
+      (
+        "send-measurand 2 Soc -=2.5",
+        Some(MeterUpdate::Adjust(
+          Measurand::Soc,
+          crate::metering::MeterDelta::Float(-2.5),
+        )),
+      ),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::SendMeterValue {
+          connector: 2, measurand: Measurand::Soc, update: actual,
+        } if actual == update
+      ));
+      assert!(cmd_rx.try_recv().is_err());
+    }
+  }
+
+  #[test]
+  fn generic_measurand_commands_dispatch_queries_and_shared_updates() {
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    for (input, connector, measurand) in [
+      ("measurand", None, None),
+      ("measurand 2", Some(2), None),
+      ("measurand 2 Soc", Some(2), Some(Measurand::Soc)),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(next_command(&mut cmd_rx),
+        SimulatorCommand::GetMeasurands {
+          connector: actual_connector, measurand: actual,
+        } if actual_connector == connector && actual == measurand
+      ));
+      assert!(cmd_rx.try_recv().is_err());
+    }
+    assert!(!dispatch(
+      "measurand 2 sOC 75.5",
+      &cli_args,
+      &cmd_tx,
+      &mut app
+    ));
+    match next_command(&mut cmd_rx) {
+      SimulatorCommand::UpdateMeterValue {
+        connector: 2,
+        update: MeterUpdate::Set(reading),
+      } => assert_eq!(reading, MeterReading::soc(75.5).unwrap()),
+      other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(cmd_rx.try_recv().is_err());
+  }
+
+  #[test]
   fn meter_queries_dispatch_without_setting_or_sending() {
     let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
     for (input, expected_connector) in [("meter", None), ("meter 2", Some(2))] {
@@ -639,7 +719,7 @@ mod tests {
       ),
       (
         "soc 2 -=2.5",
-        MeterUpdate::Adjust(Measurand::Soc, delta.clone()),
+        MeterUpdate::Adjust(Measurand::Soc, delta.clone().into()),
       ),
     ] {
       assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
@@ -657,7 +737,7 @@ mod tests {
       ),
       (
         "send-soc 2 -=2.5",
-        Some(MeterUpdate::Adjust(Measurand::Soc, delta)),
+        Some(MeterUpdate::Adjust(Measurand::Soc, delta.into())),
       ),
     ] {
       assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));

@@ -18,6 +18,7 @@ mod boot;
 mod charging_profiles;
 mod configuration;
 mod connection;
+mod measurands;
 mod metering;
 mod schema_validation;
 mod security;

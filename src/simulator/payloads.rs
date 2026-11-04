@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::{Number, Value};
 
 use crate::metering::MeterReading;
+use crate::ocpp::MeterUnit;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +33,8 @@ pub(super) struct SampledValueV1_6<'a> {
   pub value: String,
   pub context: &'a str,
   pub measurand: &'a str,
-  pub unit: &'a str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub unit: Option<&'a str>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub location: Option<&'a str>,
 }
@@ -44,7 +46,8 @@ impl<'a> SampledValueV1_6<'a> {
       value: reading.value.to_string(),
       context,
       measurand: reading.measurand.as_str(),
-      unit: &reading.unit,
+      // 1.6 omits unrepresentable and dimensionless units: Hz, RPM, and ratios.
+      unit: MeterUnit::parse(&reading.unit).map(MeterUnit::as_str),
       location: reading
         .location
         .map(crate::ocpp::MeterValueLocation::as_str),
@@ -64,7 +67,8 @@ pub(super) struct SampledValue_V2_X<'a> {
   pub value: &'a Number,
   pub context: &'a str,
   pub measurand: &'a str,
-  pub unit_of_measure: UnitOfMeasure<'a>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub unit_of_measure: Option<UnitOfMeasure<'a>>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub location: Option<&'a str>,
 }
@@ -76,9 +80,9 @@ impl<'a> SampledValue_V2_X<'a> {
       value: &reading.value,
       context,
       measurand: reading.measurand.as_str(),
-      unit_of_measure: UnitOfMeasure {
+      unit_of_measure: (!reading.unit.is_empty()).then_some(UnitOfMeasure {
         unit: &reading.unit,
-      },
+      }),
       location: reading
         .location
         .map(crate::ocpp::MeterValueLocation::as_str),

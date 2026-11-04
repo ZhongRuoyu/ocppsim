@@ -333,7 +333,7 @@ fn generic_readings_are_filtered_when_the_protocol_changes() {
 fn soc_adjustment(delta: f64) -> MeterUpdate {
   MeterUpdate::Adjust(
     Measurand::Soc,
-    serde_json::Number::from_f64(delta).unwrap(),
+    serde_json::Number::from_f64(delta).unwrap().into(),
   )
 }
 

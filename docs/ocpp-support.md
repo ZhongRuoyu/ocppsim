@@ -311,47 +311,107 @@ conformance before any URI scheme is considered.
 
 ## Meter Readings
 
-The built-in metering commands support `Energy.Active.Import.Register` in
-integer Wh and `SoC` in percent, including decimal percentages from 0 to 100.
-SoC uses `location: "EV"` and the unit `Percent` in all supported versions.
-OCPP 1.6 encodes sample values as strings; OCPP 2.x uses JSON numbers.
-Energy registers retain integer precision.
+The `measurand` command reads and sets any measurand defined by the active
+OCPP 1.6, 2.0.1, or 2.1 schema.
+Names are case insensitive in commands and completion; outbound messages
+always use canonical OCPP names.
+Unknown or unsupported names are rejected.
+Lists include only set readings supported by the active protocol.
+Named queries show `unset` when no reading has been supplied.
 
-Readings are stored independently per connector and measurand.
-The energy register starts at zero; SoC is absent until explicitly set.
-`send-meter` sends the energy reading, and `send-soc` sends the SoC reading.
-Both accept an optional value to store before sending.
-The prefixes `+=` and `-=` adjust the stored value in Wh or percentage points.
-Plain signed numbers are absolute values, subject to the measurand's bounds.
-The operator and its operand form one token, such as `+=100` or `-=2.5`.
-Adjustments require a known reading; overflow or a resulting SoC outside
-0 to 100 leaves state unchanged and cancels sending.
-The `meter` and `soc` query forms display one connector or all connectors,
-showing `unset` for unknown SoC readings.
-OCPP 2.x uses `TransactionEvent` for these sends during active transactions.
+The command uses the following canonical units.
+OCPP permits scaled alternatives for some quantities, but the command has no
+unit argument, so input always uses the units below.
 
+| Quantity                                                | Input unit                   |
+| ------------------------------------------------------- | ---------------------------- |
+| Active energy, energy requests, battery capacity        | Wh                           |
+| Reactive energy                                         | varh                         |
+| Apparent energy                                         | VAh                          |
+| Active power, offered power, power limits and setpoints | W                            |
+| Reactive power                                          | var                          |
+| Current and current limits                              | A                            |
+| Voltage and voltage limits                              | V                            |
+| Frequency                                               | Hz                           |
+| Temperature                                             | Celsius                      |
+| Fan speed                                               | RPM                          |
+| SoC and display SoC values                              | Percent, from 0 to 100       |
+| Display remaining times                                 | s                            |
+| Power factor                                            | Unitless ratio, from -1 to 1 |
+| Display charging-complete and inlet-hot flags           | Unitless 0 or 1              |
+
+Values must be finite numbers.
+`Energy.Active.Import.Register` retains its signed integer Wh representation
+for compatibility with `meter` and OCPP 1.6 transaction boundaries.
+Other numeric readings accept decimals.
+Plain signed numbers set absolute values, allowing negative temperatures,
+net values, energy requests, and setpoints.
+The prefixes `+=` and `-=` adjust an existing reading in its canonical unit.
+The operator and operand form one token, such as `+=100` or `-=2.5`.
+This applies to `measurand`, `meter`, `soc`, and their send shorthands.
+
+Adjustments require a set, unexpired reading and validate the result using
+the same rules as absolute assignments.
+Invalid results and overflow leave the reading unchanged.
+`Display.ChargingComplete` and `Display.InletHot` are absolute-only flags,
+so all arithmetic on them is rejected, including zero adjustments.
+Integer arithmetic is exact across signed and unsigned 64-bit values.
+Integer literals and results outside the supported range are rejected
+instead of being rounded to floating point.
+Use integer operands for large integer readings; lossy mixed conversions
+and nonzero adjustments too small to change the stored value are rejected.
+
+OCPP 1.6 encodes values as strings and OCPP 2.x uses JSON numbers.
+Integer readings retain their precision.
+OCPP 1.6 omits the unit field for frequency, RPM, and power factor because
+its unit enumeration cannot represent Hz, RPM, or a unitless ratio.
+OCPP 2.x also omits the unit for unitless readings.
+EV parameters use location `EV`, station temperature and fan speed use
+`Body`, and frequency uses `Inlet`.
+Other readings use the default outlet location without a phase qualifier.
+
+Readings are shared between the generic command and the `meter`/`soc`
+aliases, independently for each connector.
+The Wh register starts at zero; other readings are unset until supplied.
+The `measurand` setter updates local state only.
+`send-measurand <connector> <measurand> [<value>]` sends one named reading,
+optionally setting or adjusting it first.
+It shares validation, case-insensitive names, and protocol-aware completion
+with `measurand`.
+Invalid updates cancel sending without changing stored readings.
+Valid updates remain local when disconnected or awaiting boot acceptance.
+The send uses `MeterValues`, or `TransactionEvent` during an active
+OCPP 2.x transaction.
 Triggered `MeterValues` and OCPP 2.x transaction-boundary or triggered
-`TransactionEvent` messages include all stored readings defined by the
-active protocol.
-OCPP 1.6 `meterStart` and `meterStop` continue to use only the Wh register.
-Readings have a shared lifetime policy.
-Connector-scoped readings, including the Wh register, persist until changed
-or the connector is removed.
-SoC is transaction-scoped: setting it while idle prepares the initial value
-for the next transaction.
-Starting that transaction preserves the prepared value.
-Without a prepared value, SoC remains unset.
+`TransactionEvent` messages include the set readings for the active protocol.
+`send-meter` and `send-soc` send only their respective measurands.
 
-SoC is cleared when a stop is acknowledged, an offline stop is finalized,
-or a created transaction is cancelled after a failed start.
-A rejected start that never creates a transaction leaves prepared SoC intact.
-Queued terminal messages keep their original reading snapshots.
-Suspension, disconnection, and failed stops retain SoC for the continuing
-transaction.
-After finalization, SoC queries show `unset`, and adjustments or sends
-require a new absolute value.
-Cleanup checks the local transaction ID, so an old response cannot clear a
-new transaction's reading or a value prepared while idle.
+The simulator assigns reading lifetimes by meaning:
+
+- Connector lifetime: cumulative active, reactive, and apparent energy
+  registers, including net and local-generation registers; frequency;
+  station temperature; and fan speed.
+  These persist until changed or the connector is removed.
+- Transaction lifetime: current, power, power factor, voltage, offered values
+  and limits, energy intervals, cable-loss energy, SoC, display parameters,
+  and EV energy requests.
+  Values set while idle prepare the next transaction.
+  They expire after an acknowledged stop, a finalized offline stop, or
+  cancellation of a created transaction.
+- OCPP 2.1 cable-loss energy resets to zero at transaction start when it has
+  been configured.
+  Unset readings remain unset.
+  The local-generation energy register remains cumulative; OCPP permits
+  retaining it across transactions.
+
+Queued terminal messages retain their original snapshots.
+Suspension, disconnection, and failed stops preserve the continuing
+transaction's readings.
+Rejected starts that never create a transaction preserve prepared values.
+Cleanup checks the local transaction ID, so old responses cannot clear
+new readings.
+These are manually controlled samples: interval and instantaneous values are
+not recalculated automatically within a transaction.
 
 ## Behavioral Semantics
 

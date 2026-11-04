@@ -1091,6 +1091,14 @@ wire_enum! {
 }
 
 impl Measurand {
+  /// Resolves a user-entered measurand without changing strict wire parsing.
+  pub fn parse_case_insensitive(value: &str) -> Option<Self> {
+    Self::ALL
+      .iter()
+      .copied()
+      .find(|measurand| measurand.as_str().eq_ignore_ascii_case(value))
+  }
+
   const V1_6: &'static [Self] = &[
     Self::EnergyActiveExportRegister,
     Self::EnergyActiveImportRegister,

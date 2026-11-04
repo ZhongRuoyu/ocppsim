@@ -641,9 +641,7 @@ impl Simulator {
     is_connected: bool,
   ) -> Result<()> {
     match command {
-      SimulatorCommand::Status => {
-        self.emit_snapshot();
-      }
+      SimulatorCommand::Status => self.emit_snapshot(),
       SimulatorCommand::Boot => {
         if !self.ensure_connected_for_command(is_connected, "BootNotification")
         {
@@ -697,12 +695,14 @@ impl Simulator {
           is_connected,
         )?;
       }
+      SimulatorCommand::GetMeasurands {
+        connector,
+        measurand,
+      } => self.show_measurands(connector, measurand)?,
       SimulatorCommand::GetMeterValue {
         connector,
         measurand,
-      } => {
-        self.show_meter_value(connector, measurand)?;
-      }
+      } => self.show_meter_value(connector, measurand)?,
       SimulatorCommand::UpdateMeterValue { connector, update } => {
         self.update_meter_value(connector, update)?;
       }

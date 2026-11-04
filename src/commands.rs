@@ -2,7 +2,7 @@ use std::ops::RangeBounds;
 
 use serde_json::Number;
 
-use crate::metering::{MeterReading, MeterUpdate};
+use crate::metering::{MeterDelta, MeterReading, MeterUpdate};
 use crate::ocpp::{
   Measurand, OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
   OcppVersion,
@@ -27,6 +27,10 @@ const USAGE_SOC: &str =
   "Usage: soc [<connector> [<percent>|+=<percent>|-=<percent>]]";
 const USAGE_SEND_SOC: &str =
   "Usage: send-soc <connector> [<percent>|+=<percent>|-=<percent>]";
+const USAGE_MEASURAND: &str =
+  "Usage: measurand [<connector> [<measurand> [<value>]]]";
+const USAGE_SEND_MEASURAND: &str =
+  "Usage: send-measurand <connector> <measurand> [<value>]";
 const USAGE_HEARTBEAT_START: &str = "Usage: heartbeat start <seconds>";
 const USAGE_HEARTBEAT_ALL: &str =
   "Usage: heartbeat | heartbeat start <seconds> | heartbeat stop";
@@ -58,6 +62,10 @@ pub enum UserCommand {
   Stop {
     connector: u16,
     reason: Option<String>,
+  },
+  GetMeasurands {
+    connector: Option<u16>,
+    measurand: Option<Measurand>,
   },
   GetMeterValue {
     connector: Option<u16>,
@@ -119,6 +127,8 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
     "meter" | "send-meter" | "soc" | "send-soc" => {
       parse_meter_command(&parts, command.as_str())
     }
+    "measurand" => parse_measurand_command(&parts, false),
+    "send-measurand" => parse_measurand_command(&parts, true),
     "heartbeat" => parse_heartbeat_command(&parts),
     _ => Err(format!(
       "Unknown command `{}`. Type `help` for available commands.",
@@ -341,7 +351,7 @@ fn parse_meter_update(
       if adjustment.is_some() {
         let delta = Number::from_f64(if subtract { -value } else { value })
           .ok_or_else(|| "SoC adjustment must be finite.".to_string())?;
-        Ok(MeterUpdate::Adjust(measurand, delta))
+        Ok(MeterUpdate::Adjust(measurand, delta.into()))
       } else {
         MeterReading::soc(value).map(MeterUpdate::Set)
       }
@@ -364,6 +374,96 @@ fn parse_energy_adjustment(
     value
   };
   i64::try_from(delta).map_err(|_| usage.to_string())
+}
+
+fn parse_measurand_command(
+  parts: &[&str],
+  send: bool,
+) -> Result<UserCommand, String> {
+  let usage = if send {
+    USAGE_SEND_MEASURAND
+  } else {
+    USAGE_MEASURAND
+  };
+  ensure_range(parts, (if send { 3 } else { 1 })..=4, usage)?;
+  let connector = parts
+    .get(1)
+    .map(|value| parse_u16(Some(value), usage))
+    .transpose()?;
+  let measurand = parts
+    .get(2)
+    .map(|name| {
+      Measurand::parse_case_insensitive(name)
+        .ok_or_else(|| format!("Unknown measurand `{name}`."))
+    })
+    .transpose()?;
+  let update = parts
+    .get(3)
+    .map(|value| {
+      parse_measurand_update(
+        measurand.expect("a value follows a measurand"),
+        value,
+      )
+    })
+    .transpose()?;
+  if send {
+    return Ok(UserCommand::SendMeterValue {
+      connector: connector.expect("send requires a connector"),
+      measurand: measurand.expect("send requires a measurand"),
+      update,
+    });
+  }
+  if let Some(update) = update {
+    Ok(UserCommand::UpdateMeterValue {
+      connector: connector.expect("a value follows a connector"),
+      update,
+    })
+  } else {
+    Ok(UserCommand::GetMeasurands {
+      connector,
+      measurand,
+    })
+  }
+}
+
+/// Parses shared value syntax for local updates and measurement sends.
+fn parse_measurand_update(
+  measurand: Measurand,
+  value: &str,
+) -> Result<MeterUpdate, String> {
+  if let Some(operand) = value.strip_prefix("+=") {
+    Ok(MeterUpdate::Adjust(
+      measurand,
+      parse_measurement_number(operand)?.into(),
+    ))
+  } else if let Some(operand) = value.strip_prefix("-=") {
+    let delta =
+      MeterDelta::from(parse_measurement_number(operand)?).negated()?;
+    Ok(MeterUpdate::Adjust(measurand, delta))
+  } else {
+    MeterReading::new(measurand, parse_measurement_number(value)?)
+      .map(MeterUpdate::Set)
+  }
+}
+
+/// Parses literal numeric values while keeping integer readings exact.
+fn parse_measurement_number(raw: &str) -> Result<Number, String> {
+  if let Ok(value) = raw.parse::<i64>() {
+    return Ok(value.into());
+  }
+  if let Ok(value) = raw.parse::<u64>() {
+    return Ok(value.into());
+  }
+  let digits = raw
+    .strip_prefix('+')
+    .or_else(|| raw.strip_prefix('-'))
+    .unwrap_or(raw);
+  if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+    return Err("Integer measurand value is out of range.".to_string());
+  }
+  let invalid = || "Measurand value must be a finite number.".to_string();
+  let value = raw.parse::<f64>().map_err(|_| invalid())?;
+  Number::from_f64(value).ok_or_else(invalid)
 }
 
 fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
@@ -428,6 +528,15 @@ pub fn help_text() -> &'static str {
     Use +=<percent> or -=<percent> to adjust it by percentage points.
   send-soc <connector> [<percent>]
     Optionally set or adjust state of charge, then send the stored SoC.
+  measurand [<connector> [<measurand> [<value>]]]
+    Show set readings for all connectors, one connector, or a named measurand.
+    A plain signed value sets the reading in its canonical OCPP unit.
+    Use +=<value> or -=<value> to adjust a stored numeric reading.
+    Display.ChargingComplete and Display.InletHot accept absolute values only.
+    Measurand names are case insensitive; use Tab to complete supported names.
+  send-measurand <connector> <measurand> [<value>]
+    Send a stored reading, optionally setting or adjusting it first.
+    Use the same names, units, and +=/-= syntax as measurand.
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
@@ -534,7 +643,7 @@ mod tests {
     ConnectTarget, USAGE_SEND_METER, UserCommand, help_text, parse_command,
     redact_sensitive_command,
   };
-  use crate::metering::{MeterReading, MeterUpdate};
+  use crate::metering::{MeterDelta, MeterReading, MeterUpdate};
   use crate::ocpp::Measurand;
 
   #[test]
@@ -598,6 +707,197 @@ mod tests {
         assert!(reason.is_none());
       }
       _ => panic!("unexpected command variant"),
+    }
+  }
+
+  #[test]
+  fn send_measurand_accepts_stored_absolute_and_relative_values() {
+    for (input, measurand, update) in [
+      ("send-measurand 1 soc", Measurand::Soc, None),
+      (
+        "SEND-MEASURAND 1 sOc 75.5",
+        Measurand::Soc,
+        Some(MeterUpdate::Set(MeterReading::soc(75.5).unwrap())),
+      ),
+      (
+        "send-measurand 1 Power.Active.Setpoint -7200",
+        Measurand::PowerActiveSetpoint,
+        Some(MeterUpdate::Set(
+          MeterReading::new(Measurand::PowerActiveSetpoint, (-7200).into())
+            .unwrap(),
+        )),
+      ),
+      (
+        "send-measurand 1 Power.Active.Import +=100",
+        Measurand::PowerActiveImport,
+        Some(MeterUpdate::Adjust(
+          Measurand::PowerActiveImport,
+          MeterDelta::Integer(100),
+        )),
+      ),
+      (
+        "send-measurand 1 Energy.Active.Net -=18446744073709551615",
+        Measurand::EnergyActiveNet,
+        Some(MeterUpdate::Adjust(
+          Measurand::EnergyActiveNet,
+          MeterDelta::Integer(-i128::from(u64::MAX)),
+        )),
+      ),
+    ] {
+      assert!(matches!(parse_command(input).unwrap(),
+        UserCommand::SendMeterValue {
+          connector: 1, measurand: actual, update: actual_update,
+        } if actual == measurand && actual_update == update
+      ));
+    }
+  }
+
+  #[test]
+  fn send_measurand_rejects_missing_targets_and_invalid_updates() {
+    for input in [
+      "send-measurand",
+      "send-measurand 1",
+      "send-measurand 0 SoC",
+      "send-measurand x SoC",
+      "send-measurand 1 unknown",
+      "send-measurand 1 SoC 101",
+      "send-measurand 1 SoC -1",
+      "send-measurand 1 Voltage NaN",
+      "send-measurand 1 Current.Import +=",
+      "send-measurand 1 SoC 50 extra",
+    ] {
+      assert!(parse_command(input).is_err(), "{input}");
+    }
+  }
+
+  #[test]
+  fn generic_measurand_queries_parse_optional_selectors() {
+    for (input, connector, measurand) in [
+      ("measurand", None, None),
+      ("measurand 2", Some(2), None),
+      (
+        "MEASURAND 2 eNeRgY.aCtIvE.iMpOrT.rEgIsTeR",
+        Some(2),
+        Some(Measurand::EnergyActiveImportRegister),
+      ),
+      ("measurand 1 sOc", Some(1), Some(Measurand::Soc)),
+    ] {
+      assert!(matches!(parse_command(input).unwrap(),
+        UserCommand::GetMeasurands {
+          connector: actual_connector,
+          measurand: actual,
+        }
+          if actual_connector == connector && actual == measurand
+      ));
+    }
+  }
+
+  #[test]
+  fn generic_measurand_values_are_absolute_and_preserve_integer_precision() {
+    for (input, measurand, value) in [
+      ("measurand 1 soc +5", Measurand::Soc, serde_json::json!(5)),
+      (
+        "measurand 1 temperature -5.5",
+        Measurand::Temperature,
+        serde_json::json!(-5.5),
+      ),
+      (
+        "measurand 1 Power.Active.Setpoint -7200",
+        Measurand::PowerActiveSetpoint,
+        serde_json::json!(-7200),
+      ),
+      (
+        "measurand 1 Energy.Active.Import.Register 9007199254740993",
+        Measurand::EnergyActiveImportRegister,
+        serde_json::json!(9_007_199_254_740_993_i64),
+      ),
+      (
+        "measurand 1 Energy.Active.Net 18446744073709551615",
+        Measurand::EnergyActiveNet,
+        serde_json::json!(u64::MAX),
+      ),
+    ] {
+      match parse_command(input).unwrap() {
+        UserCommand::UpdateMeterValue {
+          connector: 1,
+          update: MeterUpdate::Set(reading),
+        } => {
+          assert_eq!(reading.measurand, measurand);
+          assert_eq!(serde_json::Value::Number(reading.value), value);
+        }
+        other => panic!("unexpected command: {other:?}"),
+      }
+    }
+  }
+
+  #[test]
+  fn generic_adjustments_normalize_to_exact_signed_deltas() {
+    for (input, expected) in [
+      (
+        "measurand 1 Energy.Active.Net +=9007199254740993",
+        MeterDelta::Integer(9_007_199_254_740_993),
+      ),
+      (
+        "measurand 1 Energy.Active.Net +=18446744073709551615",
+        MeterDelta::Integer(i128::from(u64::MAX)),
+      ),
+      (
+        "measurand 1 Energy.Active.Net -=18446744073709551615",
+        MeterDelta::Integer(-i128::from(u64::MAX)),
+      ),
+      (
+        "measurand 1 Energy.Active.Net -=-9223372036854775808",
+        MeterDelta::Integer(-i128::from(i64::MIN)),
+      ),
+      ("measurand 1 SoC -=2.5", MeterDelta::Float(-2.5)),
+    ] {
+      match parse_command(input).unwrap() {
+        UserCommand::UpdateMeterValue {
+          connector: 1,
+          update: MeterUpdate::Adjust(_, delta),
+        } => assert_eq!(delta, expected),
+        other => panic!("unexpected command: {other:?}"),
+      }
+    }
+  }
+
+  #[test]
+  fn generic_integer_overflow_and_invalid_adjustments_are_rejected() {
+    for value in ["18446744073709551616", "-9223372036854775809"] {
+      for operator in ["", "+=", "-="] {
+        assert!(
+          parse_command(&format!(
+            "measurand 1 Energy.Active.Net {operator}{value}"
+          ))
+          .is_err()
+        );
+      }
+    }
+    for value in ["+=", "-=", "+==1", "-=--1", "+=NaN", "-=inf", "+=1e999"] {
+      assert!(
+        parse_command(&format!("measurand 1 Current.Import {value}")).is_err()
+      );
+    }
+  }
+
+  #[test]
+  fn generic_measurand_rejects_invalid_names_values_and_arity() {
+    for input in [
+      "measurand 0",
+      "measurand nope",
+      "measurand 1 unknown",
+      "measurand 1 SoC 101",
+      "measurand 1 SoC -1",
+      "measurand 1 Power.Active.Import NaN",
+      "measurand 1 Voltage inf",
+      "measurand 1 Voltage 1e999",
+      "measurand 1 SoC 50 extra",
+      "measurand 1 SoC 50%",
+      "measurand 1 Energy.Active.Import.Register 0.5",
+      "measurand 1 Display.ChargingComplete 2",
+      "measurand 1 Power.Factor 1.5",
+    ] {
+      assert!(parse_command(input).is_err(), "{input}");
     }
   }
 
@@ -765,7 +1065,7 @@ mod tests {
         other => panic!("unexpected command: {other:?}"),
       };
       assert!(matches!(update, MeterUpdate::Adjust(Measurand::Soc, actual)
-        if actual.as_f64() == Some(delta)));
+        if actual == MeterDelta::Float(delta)));
     }
     for name in ["soc", "send-soc"] {
       for value in [
