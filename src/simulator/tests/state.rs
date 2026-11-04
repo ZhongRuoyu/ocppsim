@@ -55,6 +55,14 @@ async fn profile_reload_synchronizes_an_overridden_heartbeat() {
     );
     let entry = &simulator.configuration[&ConfigurationKey::HeartbeatInterval];
     assert_eq!(entry.value, startup_interval.unwrap_or(30).to_string());
+    assert_eq!(
+      entry.origin,
+      if startup_interval.is_some() {
+        ConfigurationOrigin::Local
+      } else {
+        ConfigurationOrigin::Default
+      }
+    );
     simulator.stop_heartbeat();
   }
 }
@@ -78,7 +86,11 @@ async fn profile_reload_preserves_a_manual_pause_for_unchanged_settings() {
 fn profile_reload_refreshes_derived_organization_defaults() {
   let mut simulator = simulator_for_tests();
   assert_eq!(
-    simulator.set_configuration_value(ConfigurationKey::CpoName, ""),
+    simulator.set_configuration_value(
+      ConfigurationKey::CpoName,
+      "",
+      ConfigurationOrigin::Local,
+    ),
     ResponseStatus::Rejected
   );
   let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
@@ -92,34 +104,109 @@ fn profile_reload_refreshes_derived_organization_defaults() {
       ConfigurationKey::OrganizationName,
     ] {
       assert_eq!(simulator.configuration[&key].value, vendor);
+      assert_eq!(
+        simulator.configuration[&key].origin,
+        ConfigurationOrigin::Local
+      );
     }
   }
 }
 
 #[test]
 fn profile_reload_preserves_explicit_organization_names() {
-  for key in [
-    ConfigurationKey::CpoName,
-    ConfigurationKey::OrganizationName,
-  ] {
-    for value in ["ocppsim", "Explicit organization"] {
-      let mut simulator = simulator_for_tests();
-      assert_eq!(
-        simulator.set_configuration_value(key, value),
-        ResponseStatus::Accepted
-      );
-      let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
-      config.vendor = "New vendor".to_string();
-      simulator.apply_connection_config(config);
-      assert_eq!(simulator.security.cpo_name, value);
-      assert!(!simulator.security.cpo_name_is_derived);
-      for alias in [
-        ConfigurationKey::CpoName,
-        ConfigurationKey::OrganizationName,
-      ] {
-        assert_eq!(simulator.configuration[&alias].value, value);
+  for origin in [ConfigurationOrigin::Local, ConfigurationOrigin::Csms] {
+    for key in [
+      ConfigurationKey::CpoName,
+      ConfigurationKey::OrganizationName,
+    ] {
+      for value in ["ocppsim", "Explicit organization"] {
+        let mut simulator = simulator_for_tests();
+        assert_eq!(
+          simulator.set_configuration_value(key, value, origin),
+          ResponseStatus::Accepted
+        );
+        let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
+        config.vendor = "New vendor".to_string();
+        simulator.apply_connection_config(config);
+        assert_eq!(simulator.security.cpo_name, value);
+        assert!(!simulator.security.cpo_name_is_derived);
+        for alias in [
+          ConfigurationKey::CpoName,
+          ConfigurationKey::OrganizationName,
+        ] {
+          assert_eq!(simulator.configuration[&alias].value, value);
+          assert_eq!(simulator.configuration[&alias].origin, origin);
+        }
       }
     }
+  }
+}
+
+#[tokio::test]
+async fn connection_settings_refresh_only_affected_configuration_origins() {
+  let mut simulator = simulator_for_tests();
+  for (key, value) in [
+    ("HeartbeatInterval", "25"),
+    ("AuthorizeRemoteTxRequests", "false"),
+    ("CpoName", "CSMS organization"),
+    ("AuthorizationKey", "0123456789abcdef0123456789abcdef"),
+  ] {
+    assert_eq!(
+      simulator
+        .change_configuration_v1_6(&json!({ "key": key, "value": value }))
+        .expect("change configuration"),
+      ResponseStatus::Accepted
+    );
+  }
+  let preserved = [
+    ConfigurationKey::AuthorizeRemoteTxRequests,
+    ConfigurationKey::CpoName,
+    ConfigurationKey::OrganizationName,
+  ]
+  .map(|key| (key, simulator.configuration[&key].clone()));
+  for (key, entry) in &preserved {
+    assert_eq!(entry.origin, ConfigurationOrigin::Csms, "{key:?}");
+  }
+
+  let mut config = connection_config_for_state_tests(OcppVersion::V2_0_1);
+  config.heartbeat_seconds = Some(25);
+  config.security_profile = Some(1);
+  config.basic_auth_password = Some("local-password".to_string());
+  simulator.apply_connection_config(config.clone());
+  for key in [
+    ConfigurationKey::HeartbeatInterval,
+    ConfigurationKey::NumberOfConnectors,
+    ConfigurationKey::SecurityProfile,
+    ConfigurationKey::AuthorizationKey,
+    ConfigurationKey::BasicAuthPassword,
+  ] {
+    assert_eq!(
+      simulator.configuration[&key].origin,
+      ConfigurationOrigin::Local
+    );
+  }
+  assert_eq!(
+    simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+    "25"
+  );
+
+  config.heartbeat_seconds = None;
+  config.security_profile = None;
+  config.basic_auth_password = None;
+  simulator.apply_connection_config(config);
+  for key in [
+    ConfigurationKey::HeartbeatInterval,
+    ConfigurationKey::SecurityProfile,
+    ConfigurationKey::AuthorizationKey,
+    ConfigurationKey::BasicAuthPassword,
+  ] {
+    assert_eq!(
+      simulator.configuration[&key].origin,
+      ConfigurationOrigin::Default
+    );
+  }
+  for (key, entry) in preserved {
+    assert_eq!(simulator.configuration[&key], entry);
   }
 }
 

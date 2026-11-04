@@ -4,8 +4,9 @@ use super::super::payloads::{
   GetConfigurationV1_6Response, GetDiagnosticsV1_6Response, to_value,
 };
 use super::super::{
-  ChargingRateUnit, ConfigurationKey, ResponseStatus, Result, Simulator,
-  UiLogLevel, Value, anyhow, now_timestamp, required_string_field,
+  ChargingRateUnit, ConfigurationKey, ConfigurationOrigin, ResponseStatus,
+  Result, Simulator, UiLogLevel, Value, anyhow, now_timestamp,
+  required_string_field,
 };
 use super::request::{
   AvailabilityRequest, CancelReservationRequest,
@@ -76,7 +77,11 @@ impl Simulator {
     let Some(configuration_key) = ConfigurationKey::parse(key) else {
       return Ok(ResponseStatus::NotSupported);
     };
-    Ok(self.set_configuration_value(configuration_key, value))
+    Ok(self.set_configuration_value(
+      configuration_key,
+      value,
+      ConfigurationOrigin::Csms,
+    ))
   }
 
   /// Applies `ChangeAvailability.req` for one or all connectors in OCPP 1.6.

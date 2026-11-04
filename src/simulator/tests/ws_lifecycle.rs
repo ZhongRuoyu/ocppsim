@@ -705,7 +705,13 @@ async fn boot_retry_is_prioritized_when_registration_is_not_accepted() {
 
 #[tokio::test]
 async fn boot_response_starts_heartbeat_from_interval() {
-  let mut simulator = simulator_for_tests();
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    assert_boot_response_heartbeat_origin(protocol);
+  }
+}
+
+fn assert_boot_response_heartbeat_origin(protocol: OcppVersion) {
+  let mut simulator = simulator_for_tests_with_protocol(protocol);
   simulator
     .apply_call_result_context(
       &PendingContext::Boot,
@@ -728,11 +734,15 @@ async fn boot_response_starts_heartbeat_from_interval() {
       .map(|entry| entry.value.as_str()),
     Some("17")
   );
+  assert_eq!(
+    simulator.configuration[&ConfigurationKey::HeartbeatInterval].origin,
+    ConfigurationOrigin::Csms
+  );
   simulator.stop_heartbeat();
 }
 
 #[tokio::test]
-async fn ignored_boot_intervals_preserve_configuration() {
+async fn ignored_boot_intervals_preserve_configuration_origin() {
   for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
     for (status, interval) in [
       ("Accepted", 0),
@@ -742,10 +752,7 @@ async fn ignored_boot_intervals_preserve_configuration() {
       ("Rejected", 17),
     ] {
       let mut simulator = simulator_for_tests_with_protocol(protocol);
-      let original = simulator.configuration
-        [&ConfigurationKey::HeartbeatInterval]
-        .value
-        .clone();
+      let original = simulator.configuration.clone();
       simulator
         .apply_call_result_context(
           &PendingContext::Boot,
@@ -756,10 +763,7 @@ async fn ignored_boot_intervals_preserve_configuration() {
           }),
         )
         .expect("boot response should apply");
-      assert_eq!(
-        simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
-        original
-      );
+      assert_eq!(simulator.configuration, original);
       assert!(simulator.heartbeat.is_none());
     }
   }
@@ -938,6 +942,7 @@ async fn remote_start_v1_6_rejects_invalid_profile_before_immediate_start() {
     simulator.set_configuration_value(
       ConfigurationKey::AuthorizeRemoteTxRequests,
       "false",
+      ConfigurationOrigin::Local,
     ),
     ResponseStatus::Accepted
   );

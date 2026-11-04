@@ -204,6 +204,59 @@ async fn handshake_deadline_is_not_reset_by_incoming_commands() {
 }
 
 #[tokio::test]
+async fn failed_security_reconnect_restores_configuration_origin() {
+  for origin in [
+    ConfigurationOrigin::Default,
+    ConfigurationOrigin::Local,
+    ConfigurationOrigin::Csms,
+  ] {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let address = listener.local_addr().expect("address");
+    let client = TcpStream::connect(address).await.expect("initial client");
+    let (_server, _) = listener.accept().await.expect("initial server");
+    let stream = WebSocketStream::from_raw_socket(
+      MaybeTlsStream::Plain(client),
+      Role::Client,
+      None,
+    )
+    .await;
+    let (write, read) = stream.split();
+    let mut connection = Connection { write, read };
+    let mut simulator = simulator_for_tests();
+    simulator.connected = true;
+    // Fail both connection attempts before network I/O.
+    simulator.config.ws_url = Some("invalid URL".to_string());
+    simulator.config.security_profile = Some(2);
+    simulator.security.security_profile = Some(2);
+    simulator.update_configuration_value(
+      ConfigurationKey::SecurityProfile,
+      "2",
+      ConfigurationOrigin::Csms,
+    );
+    simulator.security.pending_reconnect = Some(SecurityReconnectPlan {
+      fallback_security_profile: SecurityProfileFallback::Restore {
+        profile: None,
+        origin,
+      },
+    });
+    let (_commands, mut cmd_rx) = mpsc::unbounded_channel();
+    let outcome = reconnect_after_security_change(
+      &mut simulator,
+      &mut connection,
+      &mut cmd_rx,
+    )
+    .await;
+
+    assert!(matches!(outcome, OfflineOutcome::Continue));
+    assert_eq!(simulator.config.security_profile, None);
+    assert_eq!(simulator.security.security_profile, None);
+    let entry = &simulator.configuration[&ConfigurationKey::SecurityProfile];
+    assert_eq!(entry.value, "0");
+    assert_eq!(entry.origin, origin);
+  }
+}
+
+#[tokio::test]
 async fn canceling_security_reconnect_does_not_start_fallback() {
   for command in [SimulatorCommand::Disconnect, SimulatorCommand::Shutdown] {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
@@ -223,7 +276,10 @@ async fn canceling_security_reconnect_does_not_start_fallback() {
     simulator.connected = true;
     simulator.config.ws_url = Some(format!("ws://{address}/ocpp/CP-TEST"));
     simulator.security.pending_reconnect = Some(SecurityReconnectPlan {
-      fallback_security_profile: SecurityProfileFallback::Restore(Some(1)),
+      fallback_security_profile: SecurityProfileFallback::Restore {
+        profile: Some(1),
+        origin: ConfigurationOrigin::Local,
+      },
     });
     let (commands, mut cmd_rx) = mpsc::unbounded_channel();
     let shutdown = matches!(command, SimulatorCommand::Shutdown);

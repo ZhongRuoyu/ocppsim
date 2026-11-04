@@ -3,13 +3,16 @@ use serde_json::json;
 use super::*;
 
 #[tokio::test]
-async fn heartbeat_commands_keep_the_interval_in_sync() {
+async fn heartbeat_commands_keep_the_interval_and_origin_in_sync() {
   for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
     for running in [false, true] {
       let mut simulator = simulator_for_tests_with_protocol(protocol);
       assert_eq!(
-        simulator
-          .set_configuration_value(ConfigurationKey::HeartbeatInterval, "17",),
+        simulator.set_configuration_value(
+          ConfigurationKey::HeartbeatInterval,
+          "17",
+          ConfigurationOrigin::Csms,
+        ),
         ResponseStatus::Accepted
       );
       if running {
@@ -25,18 +28,22 @@ async fn heartbeat_commands_keep_the_interval_in_sync() {
       let entry =
         &simulator.configuration[&ConfigurationKey::HeartbeatInterval];
       assert_eq!(entry.value, "20");
-      let expected = entry.value.clone();
+      assert_eq!(entry.origin, ConfigurationOrigin::Local);
+      let expected = entry.clone();
       simulator
         .handle_common_command(SimulatorCommand::StopHeartbeat, false)
         .unwrap();
       assert!(simulator.heartbeat.is_none());
       assert_eq!(
-        simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+        simulator.configuration[&ConfigurationKey::HeartbeatInterval],
         expected
       );
       assert_eq!(
-        simulator
-          .set_configuration_value(ConfigurationKey::HeartbeatInterval, "25"),
+        simulator.set_configuration_value(
+          ConfigurationKey::HeartbeatInterval,
+          "25",
+          ConfigurationOrigin::Local,
+        ),
         ResponseStatus::Accepted
       );
       assert!(simulator.heartbeat.is_none());
@@ -49,9 +56,7 @@ async fn heartbeat_commands_keep_the_interval_in_sync() {
 async fn invalid_heartbeat_commands_preserve_the_running_timer() {
   let mut simulator = simulator_for_tests();
   simulator.start_heartbeat(10);
-  let original = simulator.configuration[&ConfigurationKey::HeartbeatInterval]
-    .value
-    .clone();
+  let original = simulator.configuration.clone();
   for seconds in [0, 2_147_483_648, u64::MAX] {
     assert!(
       simulator
@@ -62,14 +67,100 @@ async fn invalid_heartbeat_commands_preserve_the_running_timer() {
         .is_err()
     );
     assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
-    assert_eq!(
-      simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
-      original
-    );
+    assert_eq!(simulator.configuration, original);
     simulator.start_heartbeat(seconds);
     assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
   }
   simulator.stop_heartbeat();
+}
+
+#[test]
+fn initial_configuration_distinguishes_defaults_and_local_settings() {
+  let mut config = simulator_test_config(OcppVersion::V1_6);
+  config.heartbeat_seconds = None;
+  let entries = crate::simulator::default_configuration_entries(&config);
+  for key in [
+    ConfigurationKey::AuthorizeRemoteTxRequests,
+    ConfigurationKey::HeartbeatInterval,
+    ConfigurationKey::SecurityProfile,
+    ConfigurationKey::AuthorizationKey,
+    ConfigurationKey::BasicAuthPassword,
+  ] {
+    assert_eq!(entries[&key].origin, ConfigurationOrigin::Default);
+  }
+  for key in [
+    ConfigurationKey::NumberOfConnectors,
+    ConfigurationKey::CpoName,
+    ConfigurationKey::OrganizationName,
+  ] {
+    assert_eq!(entries[&key].origin, ConfigurationOrigin::Local);
+  }
+
+  config.heartbeat_seconds = Some(30);
+  config.security_profile = Some(1);
+  config.basic_auth_password =
+    Some("0123456789abcdef0123456789abcdef".to_string());
+  let entries = crate::simulator::default_configuration_entries(&config);
+  for key in [
+    ConfigurationKey::HeartbeatInterval,
+    ConfigurationKey::SecurityProfile,
+    ConfigurationKey::AuthorizationKey,
+    ConfigurationKey::BasicAuthPassword,
+  ] {
+    assert_eq!(entries[&key].origin, ConfigurationOrigin::Local);
+  }
+  assert_eq!(entries[&ConfigurationKey::AuthorizationKey].value, "");
+  assert_eq!(entries[&ConfigurationKey::BasicAuthPassword].value, "");
+}
+
+#[test]
+fn accepted_configuration_write_records_origin_even_if_value_is_unchanged() {
+  let mut simulator = simulator_for_tests();
+  let key = ConfigurationKey::AuthorizeRemoteTxRequests;
+  assert_eq!(
+    simulator.configuration[&key].origin,
+    ConfigurationOrigin::Default
+  );
+  assert_eq!(
+    simulator
+      .change_configuration_v1_6(&json!({
+        "key": key.as_str(), "value": "true"
+      }))
+      .expect("change configuration"),
+    ResponseStatus::Accepted
+  );
+  assert_eq!(simulator.configuration[&key].value, "true");
+  assert_eq!(
+    simulator.configuration[&key].origin,
+    ConfigurationOrigin::Csms
+  );
+}
+
+#[test]
+fn rejected_configuration_writes_preserve_values_and_origins() {
+  let mut simulator = simulator_for_tests();
+  let original = simulator.configuration.clone();
+  for (key, value, status) in [
+    ("HeartbeatInterval", "0", ResponseStatus::Rejected),
+    ("NumberOfConnectors", "8", ResponseStatus::Rejected),
+    ("AuthorizationKey", "invalid", ResponseStatus::Rejected),
+    ("SecurityProfile", "9", ResponseStatus::Rejected),
+    ("MissingKey", "true", ResponseStatus::NotSupported),
+  ] {
+    assert_eq!(
+      simulator
+        .change_configuration_v1_6(&json!({"key": key, "value": value}))
+        .expect("change configuration"),
+      status
+    );
+    assert_eq!(simulator.configuration, original);
+  }
+  assert!(
+    simulator
+      .change_configuration_v1_6(&json!({"key": "CpoName", "value": ""}))
+      .is_err()
+  );
+  assert_eq!(simulator.configuration, original);
 }
 
 #[test]
@@ -120,6 +211,7 @@ fn change_configuration_updates_writable_key() {
     .get(&ConfigurationKey::HeartbeatInterval)
     .expect("key must exist");
   assert_eq!(entry.value, "25");
+  assert_eq!(entry.origin, ConfigurationOrigin::Csms);
 }
 
 #[test]
@@ -277,6 +369,7 @@ fn assert_set_variables_updates_configuration(
       "setVariableData": [
         set_variable_data("HeartbeatInterval", "20"),
         set_variable_data("NumberOfConnectors", "8"),
+        set_variable_data("AuthorizeRemoteTxRequests", "true"),
       ]
     }))
     .expect("set variables response");
@@ -295,6 +388,19 @@ fn assert_set_variables_updates_configuration(
       .get(&ConfigurationKey::HeartbeatInterval)
       .map(|entry| entry.value.as_str()),
     Some("20")
+  );
+  for key in [
+    ConfigurationKey::HeartbeatInterval,
+    ConfigurationKey::AuthorizeRemoteTxRequests,
+  ] {
+    assert_eq!(
+      simulator.configuration[&key].origin,
+      ConfigurationOrigin::Csms
+    );
+  }
+  assert_eq!(
+    simulator.configuration[&ConfigurationKey::NumberOfConnectors].origin,
+    ConfigurationOrigin::Local
   );
   assert_schema_valid(schema, &response);
 }

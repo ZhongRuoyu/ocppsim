@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::ocpp::{ConfigurationKey, OcppVersion, ResponseStatus, StopReason};
 use crate::sensitive::REDACTED_VALUE;
 
-use super::{ConfigurationEntry, SimulatorConfig};
+use super::{ConfigurationEntry, ConfigurationOrigin, SimulatorConfig};
 
 pub(in crate::simulator) const REDACTED_SENSITIVE_VALUE: &str = REDACTED_VALUE;
 
@@ -30,6 +30,7 @@ fn core_configuration_entries(
       ConfigurationEntry {
         value: "false".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -37,6 +38,7 @@ fn core_configuration_entries(
       ConfigurationEntry {
         value: "true".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -44,6 +46,11 @@ fn core_configuration_entries(
       ConfigurationEntry {
         value: heartbeat_interval,
         read_only: false,
+        origin: if config.heartbeat_seconds.is_some() {
+          ConfigurationOrigin::Local
+        } else {
+          ConfigurationOrigin::Default
+        },
       },
     ),
     (
@@ -51,6 +58,7 @@ fn core_configuration_entries(
       ConfigurationEntry {
         value: "60".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -58,6 +66,7 @@ fn core_configuration_entries(
       ConfigurationEntry {
         value: config.connectors.to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Local,
       },
     ),
     (
@@ -67,6 +76,7 @@ fn core_configuration_entries(
 SmartCharging,RemoteTrigger,Reservation,Security"
           .to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -74,6 +84,7 @@ SmartCharging,RemoteTrigger,Reservation,Security"
       ConfigurationEntry {
         value: "0".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
   ])
@@ -82,12 +93,13 @@ SmartCharging,RemoteTrigger,Reservation,Security"
 fn security_configuration_entries(
   config: &SimulatorConfig,
 ) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
-  BTreeMap::from([
+  let mut entries = BTreeMap::from([
     (
       ConfigurationKey::AdditionalRootCertificateCheck,
       ConfigurationEntry {
         value: "false".to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -95,20 +107,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "false".to_string(),
         read_only: false,
-      },
-    ),
-    (
-      ConfigurationKey::AuthorizationKey,
-      ConfigurationEntry {
-        value: String::new(),
-        read_only: false,
-      },
-    ),
-    (
-      ConfigurationKey::BasicAuthPassword,
-      ConfigurationEntry {
-        value: String::new(),
-        read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -116,6 +115,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "10000".to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -123,6 +123,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "10".to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -130,6 +131,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "3".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -137,6 +139,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "60".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -144,6 +147,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: config.vendor.clone(),
         read_only: false,
+        origin: ConfigurationOrigin::Local,
       },
     ),
     (
@@ -151,6 +155,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "10000".to_string(),
         read_only: true,
+        origin: ConfigurationOrigin::Default,
       },
     ),
     (
@@ -158,13 +163,7 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: config.vendor.clone(),
         read_only: false,
-      },
-    ),
-    (
-      ConfigurationKey::SecurityProfile,
-      ConfigurationEntry {
-        value: config.security_profile.unwrap_or(0).to_string(),
-        read_only: config.protocol != OcppVersion::V1_6,
+        origin: ConfigurationOrigin::Local,
       },
     ),
     (
@@ -172,6 +171,49 @@ fn security_configuration_entries(
       ConfigurationEntry {
         value: "HTTP,HTTPS".to_string(),
         read_only: false,
+        origin: ConfigurationOrigin::Default,
+      },
+    ),
+  ]);
+  entries.extend(security_transport_configuration_entries(config));
+  entries
+}
+
+fn security_transport_configuration_entries(
+  config: &SimulatorConfig,
+) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
+  let password_origin = if config.basic_auth_password.is_some() {
+    ConfigurationOrigin::Local
+  } else {
+    ConfigurationOrigin::Default
+  };
+  BTreeMap::from([
+    (
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationEntry {
+        value: String::new(),
+        read_only: false,
+        origin: password_origin,
+      },
+    ),
+    (
+      ConfigurationKey::BasicAuthPassword,
+      ConfigurationEntry {
+        value: String::new(),
+        read_only: false,
+        origin: password_origin,
+      },
+    ),
+    (
+      ConfigurationKey::SecurityProfile,
+      ConfigurationEntry {
+        value: config.security_profile.unwrap_or(0).to_string(),
+        read_only: config.protocol != OcppVersion::V1_6,
+        origin: if config.security_profile.is_some() {
+          ConfigurationOrigin::Local
+        } else {
+          ConfigurationOrigin::Default
+        },
       },
     ),
   ])

@@ -3,10 +3,11 @@ use std::time::Instant;
 use crate::ocpp::validate_heartbeat_interval;
 
 use super::super::{
-  BootRegistrationStatus, ConfigurationKey, ConnectorStatus,
-  DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, PendingContext,
-  REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator, StopReason,
-  TransactionTriggerReason, TxEventType, UiLogLevel, Value, authorize_status,
+  BootRegistrationStatus, ConfigurationKey, ConfigurationOrigin,
+  ConnectorStatus, DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL,
+  PendingContext, REDACTED_SENSITIVE_VALUE, ResponseStatus, Result, Simulator,
+  StopReason, TransactionTriggerReason, TxEventType, UiLogLevel, Value,
+  authorize_status,
 };
 
 impl Simulator {
@@ -490,12 +491,11 @@ impl Simulator {
       );
       return;
     }
-    if let Some(entry) = self
-      .configuration
-      .get_mut(&ConfigurationKey::HeartbeatInterval)
-    {
-      entry.value = seconds.to_string();
-    }
+    self.update_configuration_value(
+      ConfigurationKey::HeartbeatInterval,
+      &seconds.to_string(),
+      ConfigurationOrigin::Csms,
+    );
     self.start_heartbeat(seconds);
   }
 }

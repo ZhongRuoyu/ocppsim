@@ -211,6 +211,16 @@ fn basic_auth_password_is_write_only() {
     simulator.security.basic_auth_password.as_deref(),
     Some(password)
   );
+  for key in [
+    ConfigurationKey::AuthorizationKey,
+    ConfigurationKey::BasicAuthPassword,
+  ] {
+    assert_eq!(
+      simulator.configuration[&key].origin,
+      ConfigurationOrigin::Csms
+    );
+    assert_eq!(simulator.configuration[&key].value, "");
+  }
 
   let response = crate::simulator::payloads::to_value(
     &simulator.configuration_response_v1_6(&json!({
@@ -231,6 +241,17 @@ fn basic_auth_password_is_write_only() {
       response["setVariableResult"][0]["attributeStatus"],
       ResponseStatus::Accepted.as_str()
     );
+
+    for key in [
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationKey::BasicAuthPassword,
+    ] {
+      assert_eq!(
+        simulator.configuration[&key].origin,
+        ConfigurationOrigin::Csms
+      );
+      assert_eq!(simulator.configuration[&key].value, "");
+    }
 
     let response = simulator
       .get_variables_v2_x(&json!({
@@ -592,7 +613,14 @@ fn security_configuration_changes_request_reconnect_when_connected() {
     .expect("profile reconnect");
   assert_eq!(
     reconnect.fallback_security_profile,
-    SecurityProfileFallback::Restore(None)
+    SecurityProfileFallback::Restore {
+      profile: None,
+      origin: ConfigurationOrigin::Default,
+    }
+  );
+  assert_eq!(
+    simulator.configuration[&ConfigurationKey::SecurityProfile].origin,
+    ConfigurationOrigin::Csms
   );
 }
 

@@ -456,7 +456,10 @@ pub(in crate::simulator) struct SecurityReconnectPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::simulator) enum SecurityProfileFallback {
   None,
-  Restore(Option<u8>),
+  Restore {
+    profile: Option<u8>,
+    origin: ConfigurationOrigin,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -542,10 +545,22 @@ impl Drop for HeartbeatTask {
   }
 }
 
-#[derive(Debug, Clone)]
+/// Identifies the source of a configuration entry's current value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulator) enum ConfigurationOrigin {
+  /// A built-in simulator default.
+  Default,
+  /// A value derived from resolved local simulator settings.
+  Local,
+  /// A value supplied by the CSMS, including a boot response interval.
+  Csms,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::simulator) struct ConfigurationEntry {
   pub(in crate::simulator) value: String,
   pub(in crate::simulator) read_only: bool,
+  pub(in crate::simulator) origin: ConfigurationOrigin,
 }
 
 pub(in crate::simulator) struct Simulator {

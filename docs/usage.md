@@ -221,10 +221,11 @@ the mouse and remain available after `ocppsim` exits.
   Omitting the value requires an existing, unexpired reading.
   Invalid updates cancel the send.
 - `heartbeat`: send one heartbeat.
-- `heartbeat start <seconds>`: set `HeartbeatInterval`, then start or restart
-  periodic heartbeats.
+- `heartbeat start <seconds>`: set `HeartbeatInterval` with origin `local`,
+  then start or restart periodic heartbeats.
+
 - `heartbeat stop`: pause periodic heartbeats while retaining the configured
-  interval.
+  interval and its origin.
 - `standards`: show the active protocol summary.
 - `help`: show command help.
 - `exit`: exit the simulator. If active transactions, pending OCPP messages,

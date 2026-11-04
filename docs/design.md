@@ -94,15 +94,22 @@ OCPP 1.6 exposes that map through `GetConfiguration` and
 OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
 `GetVariables` and `SetVariables` for component `ChargingStation` or
 `SecurityCtrlr`.
+Each entry tracks the origin of its current value: a built-in default, a value
+derived from resolved local simulator settings, or a value supplied by the CSMS.
 Vendor-derived organization defaults are tracked separately from explicit writes
 so profile changes can refresh defaults while preserving overrides.
+Accepted writes update the origin even if the value is unchanged.
+Rejected writes preserve it, and security-profile rollback restores the previous
+origin along with the value.
+This metadata remains internal and is not included in OCPP responses.
 The mapping table and unsupported variable scope live in
 [`ocpp-support.md`](ocpp-support.md).
 
 Accepted `BootNotification` responses update the local `HeartbeatInterval`
 configuration value and start or restart periodic heartbeats with the interval
 returned by the CSMS.
-The `heartbeat start` command updates that same entry before starting the timer.
+The `heartbeat start` command updates that same entry with origin `local` before
+starting the timer.
 Manual pauses retain the configured interval.
 Heartbeat commands, startup settings, configuration writes, and boot responses
 share the same positive interval bounds; startup settings additionally accept 0

@@ -1,8 +1,8 @@
 use super::super::types::{SecurityProfileFallback, SecurityReconnectPlan};
 use super::super::{
-  CertificateType, ConfigurationEntry, ConfigurationKey, ConnectorState,
-  ConnectorStatus, OcppVersion, PendingContext, ResponseStatus, Result,
-  Simulator, anyhow,
+  CertificateType, ConfigurationEntry, ConfigurationKey, ConfigurationOrigin,
+  ConnectorState, ConnectorStatus, OcppVersion, PendingContext, ResponseStatus,
+  Result, Simulator, anyhow,
 };
 use crate::ocpp::{
   SecurityEventType, is_valid_basic_auth_password, validate_heartbeat_interval,
@@ -21,6 +21,7 @@ impl Simulator {
     if self.set_configuration_value(
       ConfigurationKey::HeartbeatInterval,
       &seconds.to_string(),
+      ConfigurationOrigin::Local,
     ) != ResponseStatus::Accepted
     {
       return Err(anyhow!(
@@ -33,11 +34,12 @@ impl Simulator {
     Ok(())
   }
 
-  /// Updates a configuration value and applies key-specific side effects.
+  /// Applies a configuration write and records its origin only on success.
   pub(in crate::simulator) fn set_configuration_value(
     &mut self,
     key: ConfigurationKey,
     value: &str,
+    origin: ConfigurationOrigin,
   ) -> ResponseStatus {
     let Some(entry) = self.configuration.get(&key) else {
       return ResponseStatus::NotSupported;
@@ -46,14 +48,14 @@ impl Simulator {
       return ResponseStatus::Rejected;
     }
 
-    if let Some(status) = self.set_heartbeat_configuration(key, value) {
+    if let Some(status) = self.set_heartbeat_configuration(key, value, origin) {
       return status;
     }
-    if let Some(status) = self.set_security_configuration(key, value) {
+    if let Some(status) = self.set_security_configuration(key, value, origin) {
       return status;
     }
 
-    self.update_configuration_value(key, value);
+    self.update_configuration_value(key, value, origin);
     ResponseStatus::Accepted
   }
 
@@ -61,6 +63,7 @@ impl Simulator {
     &mut self,
     key: ConfigurationKey,
     value: &str,
+    origin: ConfigurationOrigin,
   ) -> Option<ResponseStatus> {
     if key != ConfigurationKey::HeartbeatInterval {
       return None;
@@ -72,7 +75,7 @@ impl Simulator {
     else {
       return Some(ResponseStatus::Rejected);
     };
-    self.update_configuration_value(key, value);
+    self.update_configuration_value(key, value, origin);
     if self.heartbeat.is_some() {
       self.start_heartbeat(seconds);
     }
@@ -83,25 +86,28 @@ impl Simulator {
     &mut self,
     key: ConfigurationKey,
     value: &str,
+    origin: ConfigurationOrigin,
   ) -> Option<ResponseStatus> {
     let status = match key {
       ConfigurationKey::AuthorizationKey
       | ConfigurationKey::BasicAuthPassword => {
-        self.set_basic_auth_password(value)
+        self.set_basic_auth_password(value, origin)
       }
-      ConfigurationKey::SecurityProfile => self.set_security_profile(value),
+      ConfigurationKey::SecurityProfile => {
+        self.set_security_profile(value, origin)
+      }
       ConfigurationKey::AdditionalRootCertificateCheck => {
-        self.set_additional_root_certificate_check(value)
+        self.set_additional_root_certificate_check(value, origin)
       }
       ConfigurationKey::CertificateSignedMaxChainSize
       | ConfigurationKey::MaxCertificateChainSize => {
-        self.set_certificate_chain_size(value)
+        self.set_certificate_chain_size(value, origin)
       }
       ConfigurationKey::CpoName | ConfigurationKey::OrganizationName => {
-        self.set_security_organization_name(value)
+        self.set_security_organization_name(value, origin)
       }
       ConfigurationKey::SupportedFileTransferProtocols => {
-        self.set_supported_file_transfer_protocols(value)
+        self.set_supported_file_transfer_protocols(value, origin)
       }
       ConfigurationKey::CertificateStoreMaxLength => ResponseStatus::Rejected,
       _ => return None,
@@ -109,7 +115,11 @@ impl Simulator {
     Some(status)
   }
 
-  fn set_basic_auth_password(&mut self, value: &str) -> ResponseStatus {
+  fn set_basic_auth_password(
+    &mut self,
+    value: &str,
+    origin: ConfigurationOrigin,
+  ) -> ResponseStatus {
     if !is_valid_basic_auth_password(self.config.protocol, value) {
       return ResponseStatus::Rejected;
     }
@@ -118,9 +128,7 @@ impl Simulator {
       ConfigurationKey::AuthorizationKey,
       ConfigurationKey::BasicAuthPassword,
     ] {
-      if let Some(entry) = self.configuration.get_mut(&key) {
-        entry.value.clear();
-      }
+      self.update_configuration_value(key, "", origin);
     }
     self.record_security_event(
       SecurityEventType::ReconfigurationOfSecurityParameters,
@@ -130,7 +138,11 @@ impl Simulator {
     ResponseStatus::Accepted
   }
 
-  fn set_security_profile(&mut self, value: &str) -> ResponseStatus {
+  fn set_security_profile(
+    &mut self,
+    value: &str,
+    origin: ConfigurationOrigin,
+  ) -> ResponseStatus {
     let Some(profile) = value.parse::<u8>().ok().filter(|item| *item <= 3)
     else {
       return ResponseStatus::Rejected;
@@ -153,16 +165,23 @@ impl Simulator {
       return ResponseStatus::Rejected;
     }
     let previous_profile = self.security.security_profile;
+    let previous_origin =
+      self.configuration[&ConfigurationKey::SecurityProfile].origin;
     self.security.security_profile = (profile != 0).then_some(profile);
     self.config.security_profile = self.security.security_profile;
-    self.update_configuration_value(ConfigurationKey::SecurityProfile, value);
+    self.update_configuration_value(
+      ConfigurationKey::SecurityProfile,
+      value,
+      origin,
+    );
     self.record_security_event(
       SecurityEventType::ReconfigurationOfSecurityParameters,
       Some(format!("SecurityProfile changed to {profile}")),
     );
-    self.request_security_reconnect(SecurityProfileFallback::Restore(
-      previous_profile,
-    ));
+    self.request_security_reconnect(SecurityProfileFallback::Restore {
+      profile: previous_profile,
+      origin: previous_origin,
+    });
     ResponseStatus::Accepted
   }
 
@@ -207,6 +226,7 @@ impl Simulator {
   fn set_additional_root_certificate_check(
     &mut self,
     value: &str,
+    origin: ConfigurationOrigin,
   ) -> ResponseStatus {
     let Some(enabled) = parse_bool(value) else {
       return ResponseStatus::Rejected;
@@ -215,11 +235,16 @@ impl Simulator {
     self.update_configuration_value(
       ConfigurationKey::AdditionalRootCertificateCheck,
       value,
+      origin,
     );
     ResponseStatus::Accepted
   }
 
-  fn set_certificate_chain_size(&mut self, value: &str) -> ResponseStatus {
+  fn set_certificate_chain_size(
+    &mut self,
+    value: &str,
+    origin: ConfigurationOrigin,
+  ) -> ResponseStatus {
     let Some(size) = value
       .parse::<usize>()
       .ok()
@@ -231,10 +256,12 @@ impl Simulator {
     self.update_configuration_value(
       ConfigurationKey::CertificateSignedMaxChainSize,
       value,
+      origin,
     );
     self.update_configuration_value(
       ConfigurationKey::MaxCertificateChainSize,
       value,
+      origin,
     );
     ResponseStatus::Accepted
   }
@@ -251,20 +278,29 @@ impl Simulator {
     }
   }
 
-  fn set_security_organization_name(&mut self, value: &str) -> ResponseStatus {
+  fn set_security_organization_name(
+    &mut self,
+    value: &str,
+    origin: ConfigurationOrigin,
+  ) -> ResponseStatus {
     if value.is_empty() {
       return ResponseStatus::Rejected;
     }
     self.security.cpo_name = value.to_string();
     self.security.cpo_name_is_derived = false;
-    self.update_configuration_value(ConfigurationKey::CpoName, value);
-    self.update_configuration_value(ConfigurationKey::OrganizationName, value);
+    self.update_configuration_value(ConfigurationKey::CpoName, value, origin);
+    self.update_configuration_value(
+      ConfigurationKey::OrganizationName,
+      value,
+      origin,
+    );
     ResponseStatus::Accepted
   }
 
   fn set_supported_file_transfer_protocols(
     &mut self,
     value: &str,
+    origin: ConfigurationOrigin,
   ) -> ResponseStatus {
     let protocols = value
       .split(',')
@@ -279,13 +315,21 @@ impl Simulator {
     self.update_configuration_value(
       ConfigurationKey::SupportedFileTransferProtocols,
       value,
+      origin,
     );
     ResponseStatus::Accepted
   }
 
-  fn update_configuration_value(&mut self, key: ConfigurationKey, value: &str) {
+  /// Updates an existing entry after validation or a local state change.
+  pub(in crate::simulator) fn update_configuration_value(
+    &mut self,
+    key: ConfigurationKey,
+    value: &str,
+    origin: ConfigurationOrigin,
+  ) {
     if let Some(entry) = self.configuration.get_mut(&key) {
       entry.value = value.to_string();
+      entry.origin = origin;
     }
   }
 

@@ -48,10 +48,10 @@ pub(in crate::simulator) use support::{
   required_u16_field, required_u64_field, validate_negotiated_subprotocol,
 };
 pub(in crate::simulator) use types::{
-  BootRegistrationStatus, ConfigurationEntry, ConnectorState, ConnectorStatus,
-  HeartbeatTask, PendingCall, PendingContext, QueuedCall,
-  SecurityProfileFallback, SecurityState, Simulator, TransactionEventRequest,
-  TransactionState, TxEventType, normalize_identifier,
+  BootRegistrationStatus, ConfigurationEntry, ConfigurationOrigin,
+  ConnectorState, ConnectorStatus, HeartbeatTask, PendingCall, PendingContext,
+  QueuedCall, SecurityProfileFallback, SecurityState, Simulator,
+  TransactionEventRequest, TransactionState, TxEventType, normalize_identifier,
 };
 pub use types::{
   ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
@@ -353,17 +353,16 @@ async fn reconnect_after_security_change(
         UiLogLevel::Error,
         format!("Reconnect after security parameter change failed: {error}"),
       );
-      if let SecurityProfileFallback::Restore(fallback) =
+      if let SecurityProfileFallback::Restore { profile, origin } =
         plan.fallback_security_profile
       {
-        simulator.security.security_profile = fallback;
-        simulator.config.security_profile = fallback;
-        if let Some(entry) = simulator
-          .configuration
-          .get_mut(&ConfigurationKey::SecurityProfile)
-        {
-          entry.value = fallback.unwrap_or(0).to_string();
-        }
+        simulator.security.security_profile = profile;
+        simulator.config.security_profile = profile;
+        simulator.update_configuration_value(
+          ConfigurationKey::SecurityProfile,
+          &profile.unwrap_or(0).to_string(),
+          origin,
+        );
         simulator.log(
           UiLogLevel::Warn,
           "Falling back to the previous security profile.",
@@ -844,35 +843,31 @@ impl Simulator {
   }
 
   fn refresh_runtime_configuration_entries(&mut self) {
+    let mut local_entries = default_configuration_entries(&self.config);
     if self.security.cpo_name_is_derived {
       self.security.cpo_name.clone_from(&self.config.vendor);
-      for key in [
-        ConfigurationKey::CpoName,
-        ConfigurationKey::OrganizationName,
-      ] {
-        if let Some(entry) = self.configuration.get_mut(&key) {
-          entry.value.clone_from(&self.config.vendor);
-        }
+    }
+    for key in [
+      ConfigurationKey::NumberOfConnectors,
+      ConfigurationKey::HeartbeatInterval,
+      ConfigurationKey::SecurityProfile,
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationKey::BasicAuthPassword,
+      ConfigurationKey::CpoName,
+      ConfigurationKey::OrganizationName,
+    ] {
+      if matches!(
+        key,
+        ConfigurationKey::CpoName | ConfigurationKey::OrganizationName
+      ) && !self.security.cpo_name_is_derived
+      {
+        continue;
       }
-    }
-    if let Some(entry) = self
-      .configuration
-      .get_mut(&ConfigurationKey::NumberOfConnectors)
-    {
-      entry.value = self.config.connectors.to_string();
-    }
-    if let Some(entry) = self
-      .configuration
-      .get_mut(&ConfigurationKey::HeartbeatInterval)
-    {
-      entry.value = self.config.heartbeat_seconds.unwrap_or(30).to_string();
-    }
-    if let Some(entry) = self
-      .configuration
-      .get_mut(&ConfigurationKey::SecurityProfile)
-    {
-      entry.value = self.config.security_profile.unwrap_or(0).to_string();
-      entry.read_only = self.config.protocol != OcppVersion::V1_6;
+      if let Some(entry) = self.configuration.get_mut(&key)
+        && let Some(local_entry) = local_entries.remove(&key)
+      {
+        *entry = local_entry;
+      }
     }
     for key in [
       ConfigurationKey::AdditionalRootCertificateCheck,

@@ -5,8 +5,9 @@ use super::super::payloads::{
   to_value,
 };
 use super::super::{
-  ChargingRateUnit, ResponseStatus, Result, Simulator, UiLogLevel, Value,
-  VariableAttributeType, anyhow, normalize_identifier, now_timestamp,
+  ChargingRateUnit, ConfigurationOrigin, ResponseStatus, Result, Simulator,
+  UiLogLevel, Value, VariableAttributeType, anyhow, normalize_identifier,
+  now_timestamp,
 };
 use super::request::{
   AvailabilityRequest, CancelReservationRequest,
@@ -357,7 +358,11 @@ impl Simulator {
     };
     VariableResult_V2_X {
       attribute_status: self
-        .set_configuration_value(configuration_key, attribute_value)
+        .set_configuration_value(
+          configuration_key,
+          attribute_value,
+          ConfigurationOrigin::Csms,
+        )
         .as_str(),
       ..base
     }

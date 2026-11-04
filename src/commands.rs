@@ -538,7 +538,7 @@ pub fn help_text() -> &'static str {
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
-    Set HeartbeatInterval and start periodic heartbeats.
+    Set HeartbeatInterval with origin local and start periodic heartbeats.
     Seconds must be an integer from 1 to 2147483647.
   heartbeat stop
     Pause periodic heartbeats while retaining the configured interval.
