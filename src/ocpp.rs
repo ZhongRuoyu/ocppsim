@@ -17,6 +17,21 @@ const OCPP_V2_1_ID_TOKEN_MAX_CHARS: usize = 255;
 const OCPP_DATA_TRANSFER_VENDOR_ID_MAX_CHARS: usize = 255;
 const OCPP_DATA_TRANSFER_MESSAGE_ID_MAX_CHARS: usize = 50;
 
+/// Largest heartbeat interval supported by OCPP's signed 32-bit interval field.
+pub const MAX_HEARTBEAT_INTERVAL_SECONDS: u64 = 2_147_483_647;
+
+/// Validates a positive heartbeat interval before configuring a timer.
+pub fn validate_heartbeat_interval(seconds: u64) -> Result<(), String> {
+  if (1..=MAX_HEARTBEAT_INTERVAL_SECONDS).contains(&seconds) {
+    Ok(())
+  } else {
+    Err(format!(
+      "Heartbeat interval must be between 1 and \
+      {MAX_HEARTBEAT_INTERVAL_SECONDS} seconds."
+    ))
+  }
+}
+
 /// Returns the human-readable Basic Auth password requirement for a protocol.
 pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
   match protocol {

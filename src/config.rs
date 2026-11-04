@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::ocpp::{
   OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
-  validate_boot_notification_fields,
+  validate_boot_notification_fields, validate_heartbeat_interval,
 };
 
 /// Built-in defaults used when profile/global config entries are omitted.
@@ -210,7 +210,7 @@ pub fn resolve_config(
       .unwrap_or(defaults.request_timeout_seconds),
     heartbeat_seconds: normalize_heartbeat_seconds(
       profile.heartbeat_seconds.or(global.heartbeat_seconds),
-    ),
+    )?,
     outbound_queue_limit: profile
       .outbound_queue_limit
       .or(global.outbound_queue_limit)
@@ -365,11 +365,16 @@ fn parse_protocol_label(label: &str) -> Result<OcppVersion> {
   }
 }
 
-/// Normalizes heartbeat interval semantics for config values.
+/// Validates and normalizes a startup heartbeat interval.
 ///
 /// A value of `0` disables heartbeats and becomes `None`.
-fn normalize_heartbeat_seconds(value: Option<u64>) -> Option<u64> {
-  value.filter(|&seconds| seconds != 0)
+pub fn normalize_heartbeat_seconds(value: Option<u64>) -> Result<Option<u64>> {
+  let value = value.filter(|&seconds| seconds != 0);
+  if let Some(seconds) = value {
+    validate_heartbeat_interval(seconds)
+      .map_err(|error| anyhow!("heartbeat-seconds: {error}"))?;
+  }
+  Ok(value)
 }
 
 #[cfg(test)]

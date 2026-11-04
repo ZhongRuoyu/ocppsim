@@ -2,6 +2,76 @@ use serde_json::json;
 
 use super::*;
 
+#[tokio::test]
+async fn heartbeat_commands_keep_the_interval_in_sync() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for running in [false, true] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      assert_eq!(
+        simulator
+          .set_configuration_value(ConfigurationKey::HeartbeatInterval, "17",),
+        ResponseStatus::Accepted
+      );
+      if running {
+        simulator.start_heartbeat(17);
+      }
+      simulator
+        .handle_common_command(
+          SimulatorCommand::StartHeartbeat { seconds: 20 },
+          false,
+        )
+        .unwrap();
+      assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 20);
+      let entry =
+        &simulator.configuration[&ConfigurationKey::HeartbeatInterval];
+      assert_eq!(entry.value, "20");
+      let expected = entry.value.clone();
+      simulator
+        .handle_common_command(SimulatorCommand::StopHeartbeat, false)
+        .unwrap();
+      assert!(simulator.heartbeat.is_none());
+      assert_eq!(
+        simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+        expected
+      );
+      assert_eq!(
+        simulator
+          .set_configuration_value(ConfigurationKey::HeartbeatInterval, "25"),
+        ResponseStatus::Accepted
+      );
+      assert!(simulator.heartbeat.is_none());
+      assert!(simulator.queue.is_empty());
+    }
+  }
+}
+
+#[tokio::test]
+async fn invalid_heartbeat_commands_preserve_the_running_timer() {
+  let mut simulator = simulator_for_tests();
+  simulator.start_heartbeat(10);
+  let original = simulator.configuration[&ConfigurationKey::HeartbeatInterval]
+    .value
+    .clone();
+  for seconds in [0, 2_147_483_648, u64::MAX] {
+    assert!(
+      simulator
+        .handle_common_command(
+          SimulatorCommand::StartHeartbeat { seconds },
+          false,
+        )
+        .is_err()
+    );
+    assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
+    assert_eq!(
+      simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+      original
+    );
+    simulator.start_heartbeat(seconds);
+    assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
+  }
+  simulator.stop_heartbeat();
+}
+
 #[test]
 fn get_configuration_empty_keys_returns_all_settings() {
   let simulator = simulator_for_tests();

@@ -732,6 +732,40 @@ async fn boot_response_starts_heartbeat_from_interval() {
 }
 
 #[tokio::test]
+async fn ignored_boot_intervals_preserve_configuration() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    for (status, interval) in [
+      ("Accepted", 0),
+      ("Accepted", 2_147_483_648),
+      ("Accepted", u64::MAX),
+      ("Pending", 17),
+      ("Rejected", 17),
+    ] {
+      let mut simulator = simulator_for_tests_with_protocol(protocol);
+      let original = simulator.configuration
+        [&ConfigurationKey::HeartbeatInterval]
+        .value
+        .clone();
+      simulator
+        .apply_call_result_context(
+          &PendingContext::Boot,
+          &json!({
+            "status": status,
+            "currentTime": now_timestamp(),
+            "interval": interval
+          }),
+        )
+        .expect("boot response should apply");
+      assert_eq!(
+        simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+        original
+      );
+      assert!(simulator.heartbeat.is_none());
+    }
+  }
+}
+
+#[tokio::test]
 async fn mock_csms_boot_lifecycle_updates_heartbeat() {
   let (mut write, mut read, mut server_write, mut server_read) =
     in_memory_ws_pair().await;

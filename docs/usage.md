@@ -221,8 +221,10 @@ the mouse and remain available after `ocppsim` exits.
   Omitting the value requires an existing, unexpired reading.
   Invalid updates cancel the send.
 - `heartbeat`: send one heartbeat.
-- `heartbeat start <seconds>`: start periodic heartbeats.
-- `heartbeat stop`: stop periodic heartbeats.
+- `heartbeat start <seconds>`: set `HeartbeatInterval`, then start or restart
+  periodic heartbeats.
+- `heartbeat stop`: pause periodic heartbeats while retaining the configured
+  interval.
 - `standards`: show the active protocol summary.
 - `help`: show command help.
 - `exit`: exit the simulator. If active transactions, pending OCPP messages,
@@ -311,8 +313,14 @@ profile and attempts one fallback reconnect.
 
 An accepted `BootNotification` response starts or restarts periodic
 heartbeats using the CSMS-provided `interval` value.
+Invalid heartbeat intervals leave the configured value and running timer intact.
 Use `heartbeat stop` after boot when you want to suppress periodic heartbeats
 for a manual test.
+Reloading connection settings reapplies their heartbeat interval to a running
+timer, even when those settings match the original startup settings.
+A manually paused timer stays paused when the startup setting is unchanged.
+Vendor-derived `CpoName` and `OrganizationName` defaults follow profile changes
+until either alias is explicitly configured.
 
 ## Resource Limits
 

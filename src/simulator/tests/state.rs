@@ -32,6 +32,98 @@ fn connection_config_for_state_tests(
 }
 
 #[tokio::test]
+async fn profile_reload_synchronizes_an_overridden_heartbeat() {
+  for startup_interval in [None, Some(10)] {
+    let mut simulator = simulator_for_tests();
+    let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
+    config.heartbeat_seconds = startup_interval;
+    simulator.apply_connection_config(config.clone());
+    simulator
+      .apply_call_result_context(
+        &PendingContext::Boot,
+        &json!({
+          "status": "Accepted", "currentTime": now_timestamp(), "interval": 25
+        }),
+      )
+      .unwrap();
+    assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 25);
+    simulator.handle_disconnect("test disconnect");
+    simulator.apply_connection_config(config);
+    assert_eq!(
+      simulator.heartbeat.as_ref().map(|task| task.seconds),
+      startup_interval
+    );
+    let entry = &simulator.configuration[&ConfigurationKey::HeartbeatInterval];
+    assert_eq!(entry.value, startup_interval.unwrap_or(30).to_string());
+    simulator.stop_heartbeat();
+  }
+}
+
+#[tokio::test]
+async fn profile_reload_preserves_a_manual_pause_for_unchanged_settings() {
+  let mut simulator = simulator_for_tests();
+  simulator.start_local_heartbeat(20).unwrap();
+  simulator.stop_heartbeat();
+  simulator.apply_connection_config(connection_config_for_state_tests(
+    OcppVersion::V1_6,
+  ));
+  assert!(simulator.heartbeat.is_none());
+  assert_eq!(
+    simulator.configuration[&ConfigurationKey::HeartbeatInterval].value,
+    "10"
+  );
+}
+
+#[test]
+fn profile_reload_refreshes_derived_organization_defaults() {
+  let mut simulator = simulator_for_tests();
+  assert_eq!(
+    simulator.set_configuration_value(ConfigurationKey::CpoName, ""),
+    ResponseStatus::Rejected
+  );
+  let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
+  for vendor in ["First vendor", "Second vendor"] {
+    config.vendor = vendor.to_string();
+    simulator.apply_connection_config(config.clone());
+    assert_eq!(simulator.security.cpo_name, vendor);
+    assert!(simulator.security.cpo_name_is_derived);
+    for key in [
+      ConfigurationKey::CpoName,
+      ConfigurationKey::OrganizationName,
+    ] {
+      assert_eq!(simulator.configuration[&key].value, vendor);
+    }
+  }
+}
+
+#[test]
+fn profile_reload_preserves_explicit_organization_names() {
+  for key in [
+    ConfigurationKey::CpoName,
+    ConfigurationKey::OrganizationName,
+  ] {
+    for value in ["ocppsim", "Explicit organization"] {
+      let mut simulator = simulator_for_tests();
+      assert_eq!(
+        simulator.set_configuration_value(key, value),
+        ResponseStatus::Accepted
+      );
+      let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
+      config.vendor = "New vendor".to_string();
+      simulator.apply_connection_config(config);
+      assert_eq!(simulator.security.cpo_name, value);
+      assert!(!simulator.security.cpo_name_is_derived);
+      for alias in [
+        ConfigurationKey::CpoName,
+        ConfigurationKey::OrganizationName,
+      ] {
+        assert_eq!(simulator.configuration[&alias].value, value);
+      }
+    }
+  }
+}
+
+#[tokio::test]
 async fn connect_without_target_warns_and_stays_offline() {
   let (mut simulator, mut ui_rx) =
     simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);

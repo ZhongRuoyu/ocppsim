@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use crate::ocpp::validate_heartbeat_interval;
+
 use super::super::{
   BootRegistrationStatus, ConfigurationKey, ConnectorStatus,
   DEFAULT_BOOT_RETRY_INTERVAL, MAX_BOOT_RETRY_INTERVAL, PendingContext,
@@ -479,10 +481,12 @@ impl Simulator {
 
   /// Applies an accepted `BootNotification.conf.interval` to heartbeats.
   fn apply_boot_heartbeat_interval(&mut self, seconds: u64) {
-    if seconds == 0 {
+    if let Err(error) = validate_heartbeat_interval(seconds) {
       self.log(
         UiLogLevel::Warn,
-        "BootNotification returned heartbeat interval 0; ignoring.",
+        format!(
+          "Ignoring BootNotification heartbeat interval {seconds}: {error}"
+        ),
       );
       return;
     }

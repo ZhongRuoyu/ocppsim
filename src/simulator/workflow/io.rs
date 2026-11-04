@@ -5,13 +5,14 @@ use super::super::{
   Value, WsMessageSink, anyhow, build_call_error, build_call_result,
   build_call_result_error, json, sanitized_trace_frame_text,
 };
+use crate::ocpp::validate_heartbeat_interval;
 use crate::sensitive::{redact_url_secrets, sanitize_log_text};
 
 impl Simulator {
   /// Starts or restarts periodic heartbeat scheduling.
   pub(in crate::simulator) fn start_heartbeat(&mut self, seconds: u64) {
-    if seconds == 0 {
-      self.log(UiLogLevel::Warn, "Heartbeat interval must be positive.");
+    if let Err(error) = validate_heartbeat_interval(seconds) {
+      self.log(UiLogLevel::Warn, error);
       return;
     }
 

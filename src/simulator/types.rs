@@ -413,6 +413,8 @@ pub(in crate::simulator) struct SecurityState {
   pub(in crate::simulator) certificate_store_max_length: usize,
   pub(in crate::simulator) certificate_signed_max_chain_size: usize,
   pub(in crate::simulator) cpo_name: String,
+  /// Whether the organization name still follows the local vendor default.
+  pub(in crate::simulator) cpo_name_is_derived: bool,
   pub(in crate::simulator) supported_file_transfer_protocols: Vec<String>,
   pub(in crate::simulator) certificates: Vec<InstalledCertificate>,
   pub(in crate::simulator) events: Vec<SecurityEvent>,
@@ -431,6 +433,7 @@ impl SecurityState {
       certificate_store_max_length: 10,
       certificate_signed_max_chain_size: 10_000,
       cpo_name: config.vendor.clone(),
+      cpo_name_is_derived: true,
       supported_file_transfer_protocols: vec![
         "HTTP".to_string(),
         "HTTPS".to_string(),

@@ -5,7 +5,7 @@ use serde_json::Number;
 use crate::metering::{MeterDelta, MeterReading, MeterUpdate};
 use crate::ocpp::{
   Measurand, OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
-  OcppVersion,
+  OcppVersion, validate_heartbeat_interval,
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
 
@@ -472,9 +472,7 @@ fn parse_heartbeat_command(parts: &[&str]) -> Result<UserCommand, String> {
   }
   if parts.len() == 3 && parts[1].eq_ignore_ascii_case("start") {
     let seconds = parse_u64(parts.get(2), USAGE_HEARTBEAT_START)?;
-    if seconds == 0 {
-      return Err("Heartbeat interval must be positive.".to_string());
-    }
+    validate_heartbeat_interval(seconds)?;
     return Ok(UserCommand::HeartbeatStart { seconds });
   }
   if parts.len() == 2 && parts[1].eq_ignore_ascii_case("stop") {
@@ -540,9 +538,10 @@ pub fn help_text() -> &'static str {
   heartbeat
     Send one Heartbeat now.
   heartbeat start <seconds>
-    Start periodic heartbeats (seconds must be > 0).
+    Set HeartbeatInterval and start periodic heartbeats.
+    Seconds must be an integer from 1 to 2147483647.
   heartbeat stop
-    Stop periodic heartbeats.
+    Pause periodic heartbeats while retaining the configured interval.
   clear
     Clear the visible terminal screen (does not affect simulator state).
   standards
@@ -1109,6 +1108,19 @@ mod tests {
     assert!(help.contains("connector-status <connector> <status>"));
     assert!(help.contains("Valid statuses:"));
     assert!(help.contains("exit | quit"));
+  }
+
+  #[test]
+  fn heartbeat_start_enforces_the_configuration_interval_range() {
+    for seconds in [1, 20, 2_147_483_647] {
+      assert!(matches!(
+        parse_command(&format!("heartbeat start {seconds}")).unwrap(),
+        UserCommand::HeartbeatStart { seconds: actual } if actual == seconds
+      ));
+    }
+    for seconds in ["0", "-1", "1.5", "2147483648", "18446744073709551615"] {
+      assert!(parse_command(&format!("heartbeat start {seconds}")).is_err());
+    }
   }
 
   #[test]

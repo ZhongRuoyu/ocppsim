@@ -8,7 +8,9 @@ use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
-use crate::config::{ConfigDefaults, profile_names, resolve_config};
+use crate::config::{
+  ConfigDefaults, normalize_heartbeat_seconds, profile_names, resolve_config,
+};
 use crate::ocpp::{
   OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
   validate_boot_notification_fields,
@@ -187,7 +189,7 @@ pub struct CliArgs {
   pub request_timeout_seconds: Option<u64>,
 
   /// Startup periodic heartbeat interval in seconds (0 disables periodic
-  /// heartbeats)
+  /// heartbeats; maximum 2147483647)
   #[arg(long)]
   pub heartbeat_seconds: Option<u64>,
 
@@ -464,7 +466,7 @@ fn apply_cli_overrides(
     resolved.request_timeout_seconds = seconds;
   }
   if let Some(seconds) = cli.heartbeat_seconds {
-    resolved.heartbeat_seconds = normalize_heartbeat_seconds(Some(seconds));
+    resolved.heartbeat_seconds = normalize_heartbeat_seconds(Some(seconds))?;
   }
   if let Some(limit) = cli.outbound_queue_limit {
     resolved.outbound_queue_limit = limit;
@@ -549,13 +551,6 @@ fn validate_charge_point_identity(
   }
 
   Ok(())
-}
-
-/// Converts heartbeat seconds into an optional interval.
-///
-/// A value of `0` disables periodic heartbeats and becomes `None`.
-fn normalize_heartbeat_seconds(value: Option<u64>) -> Option<u64> {
-  value.filter(|&seconds| seconds != 0)
 }
 
 /// Expands `~` and `~/...` paths against the current `HOME` directory.
@@ -1399,6 +1394,65 @@ security-event-limit = 34
     assert_eq!(resolved.security_event_limit, 20);
 
     let _ = fs::remove_file(path);
+  }
+
+  #[test]
+  fn cli_heartbeat_interval_uses_the_configuration_bounds() {
+    for seconds in [0, 1, 2_147_483_647] {
+      let resolved = resolve_args(CliArgs {
+        heartbeat_seconds: Some(seconds),
+        ..base_args()
+      })
+      .expect("valid heartbeat interval");
+      assert_eq!(
+        resolved.heartbeat_seconds,
+        (seconds != 0).then_some(seconds)
+      );
+    }
+    for seconds in [2_147_483_648, u64::MAX] {
+      let error = resolve_args(CliArgs {
+        heartbeat_seconds: Some(seconds),
+        ..base_args()
+      })
+      .expect_err("oversized heartbeat interval");
+      assert!(error.to_string().contains("heartbeat-seconds"));
+    }
+  }
+
+  #[test]
+  fn global_and_profile_heartbeat_intervals_use_the_configuration_bounds() {
+    for profile in [None, Some("demo")] {
+      for seconds in [0, 2_147_483_647, 2_147_483_648] {
+        let content = if profile.is_some() {
+          format!(
+            "[charge-points.demo]\nws-url = \"ws://localhost/ocpp\"\n\
+            id = \"CP-TEST\"\nheartbeat-seconds = {seconds}\n"
+          )
+        } else {
+          format!("heartbeat-seconds = {seconds}\n")
+        };
+        let path = write_temp_config(&content);
+        let result = resolve_args(CliArgs {
+          profile: profile.map(str::to_string),
+          config_path: Some(path.clone()),
+          ..base_args()
+        });
+        fs::remove_file(path).expect("remove test configuration");
+        if seconds > 2_147_483_647 {
+          assert!(
+            result
+              .unwrap_err()
+              .to_string()
+              .contains("heartbeat-seconds")
+          );
+        } else {
+          assert_eq!(
+            result.unwrap().heartbeat_seconds,
+            (seconds != 0).then_some(seconds)
+          );
+        }
+      }
+    }
   }
 
   #[test]

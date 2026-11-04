@@ -720,7 +720,7 @@ impl Simulator {
         self.enqueue_heartbeat();
       }
       SimulatorCommand::StartHeartbeat { seconds } => {
-        self.start_heartbeat(seconds);
+        self.start_local_heartbeat(seconds)?;
       }
       SimulatorCommand::StopHeartbeat => {
         self.stop_heartbeat();
@@ -825,7 +825,14 @@ impl Simulator {
   }
 
   fn apply_heartbeat_config(&mut self, heartbeat_seconds: Option<u64>) {
-    if self.config.heartbeat_seconds == heartbeat_seconds {
+    // An unchanged startup setting may differ from a runtime override.
+    // Preserve a manual pause when the startup setting itself is unchanged.
+    if self.config.heartbeat_seconds == heartbeat_seconds
+      && self
+        .heartbeat
+        .as_ref()
+        .is_none_or(|task| Some(task.seconds) == heartbeat_seconds)
+    {
       return;
     }
     self.config.heartbeat_seconds = heartbeat_seconds;
@@ -837,6 +844,17 @@ impl Simulator {
   }
 
   fn refresh_runtime_configuration_entries(&mut self) {
+    if self.security.cpo_name_is_derived {
+      self.security.cpo_name.clone_from(&self.config.vendor);
+      for key in [
+        ConfigurationKey::CpoName,
+        ConfigurationKey::OrganizationName,
+      ] {
+        if let Some(entry) = self.configuration.get_mut(&key) {
+          entry.value.clone_from(&self.config.vendor);
+        }
+      }
+    }
     if let Some(entry) = self
       .configuration
       .get_mut(&ConfigurationKey::NumberOfConnectors)

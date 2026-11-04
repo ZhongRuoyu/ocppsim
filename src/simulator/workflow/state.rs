@@ -4,11 +4,35 @@ use super::super::{
   ConnectorStatus, OcppVersion, PendingContext, ResponseStatus, Result,
   Simulator, anyhow,
 };
-use crate::ocpp::{SecurityEventType, is_valid_basic_auth_password};
+use crate::ocpp::{
+  SecurityEventType, is_valid_basic_auth_password, validate_heartbeat_interval,
+};
 
 const MAX_CERTIFICATE_CHAIN_SIZE: usize = 10_000;
 
 impl Simulator {
+  /// Sets the heartbeat interval and starts its timer, including if paused.
+  pub(in crate::simulator) fn start_local_heartbeat(
+    &mut self,
+    seconds: u64,
+  ) -> Result<()> {
+    validate_heartbeat_interval(seconds).map_err(anyhow::Error::msg)?;
+    let was_running = self.heartbeat.is_some();
+    if self.set_configuration_value(
+      ConfigurationKey::HeartbeatInterval,
+      &seconds.to_string(),
+    ) != ResponseStatus::Accepted
+    {
+      return Err(anyhow!(
+        "HeartbeatInterval configuration change was rejected."
+      ));
+    }
+    if !was_running {
+      self.start_heartbeat(seconds);
+    }
+    Ok(())
+  }
+
   /// Updates a configuration value and applies key-specific side effects.
   pub(in crate::simulator) fn set_configuration_value(
     &mut self,
@@ -41,7 +65,10 @@ impl Simulator {
     if key != ConfigurationKey::HeartbeatInterval {
       return None;
     }
-    let Some(seconds) = value.parse::<u64>().ok().filter(|item| *item > 0)
+    let Some(seconds) = value
+      .parse::<u64>()
+      .ok()
+      .filter(|seconds| validate_heartbeat_interval(*seconds).is_ok())
     else {
       return Some(ResponseStatus::Rejected);
     };
@@ -229,6 +256,7 @@ impl Simulator {
       return ResponseStatus::Rejected;
     }
     self.security.cpo_name = value.to_string();
+    self.security.cpo_name_is_derived = false;
     self.update_configuration_value(ConfigurationKey::CpoName, value);
     self.update_configuration_value(ConfigurationKey::OrganizationName, value);
     ResponseStatus::Accepted
