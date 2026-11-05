@@ -1,9 +1,12 @@
 use crate::ocpp::{
-  ConnectorStatus as OcppConnectorStatus, Measurand, OcppVersion, StopReason,
+  ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
+  OcppVersion, StopReason,
 };
+use crate::simulator::ConfigurationSnapshot;
 
 const COMMAND_WORDS: &[&str] = &[
   "status",
+  "config",
   "connect",
   "disconnect",
   "boot",
@@ -130,6 +133,135 @@ pub(super) fn completion_seed(
     }
     _ => None,
   }
+}
+
+/// Completes configuration keys and writable values from the simulator snapshot.
+pub(super) fn configuration_completion_seed(
+  input: &str,
+  configuration: &[ConfigurationSnapshot],
+) -> Option<(String, Vec<String>)> {
+  let parts = input.split_whitespace().collect::<Vec<_>>();
+  if !parts
+    .first()
+    .is_some_and(|word| word.eq_ignore_ascii_case("config"))
+  {
+    return None;
+  }
+  let ends_with_space = input.ends_with(char::is_whitespace);
+  seed_for_position(&parts, ends_with_space, 1, &["list", "get", "set"])
+    .or_else(|| {
+      let subcommand = parts.get(1)?;
+      if !subcommand.eq_ignore_ascii_case("get")
+        && !subcommand.eq_ignore_ascii_case("set")
+      {
+        return None;
+      }
+      let mut names = configuration
+        .iter()
+        .map(|item| item.key.as_str().to_string())
+        .collect::<Vec<_>>();
+      names.sort_unstable();
+      seed_for_position_owned(&parts, ends_with_space, 2, &names)
+    })
+    .or_else(|| {
+      seed_for_configuration_values(
+        input,
+        &parts,
+        ends_with_space,
+        configuration,
+      )
+    })
+}
+
+fn seed_for_configuration_values(
+  input: &str,
+  parts: &[&str],
+  ends_with_space: bool,
+  configuration: &[ConfigurationSnapshot],
+) -> Option<(String, Vec<String>)> {
+  if !parts.get(1)?.eq_ignore_ascii_case("set") {
+    return None;
+  }
+  let key = ConfigurationKey::parse(parts.get(2)?)?;
+  configuration
+    .iter()
+    .find(|item| item.key == key && !item.read_only)?;
+  let options = key.value_options();
+  if options.is_empty() {
+    return None;
+  }
+  if key == ConfigurationKey::SupportedFileTransferProtocols {
+    seed_for_configuration_list(input, parts, options)
+  } else {
+    if parts
+      .get(3)
+      .is_some_and(|value| value.starts_with(['"', '\'']))
+    {
+      return None;
+    }
+    seed_for_position(parts, ends_with_space, 3, options)
+  }
+}
+
+/// Completes the current list member while retaining prior members and spacing.
+fn seed_for_configuration_list(
+  input: &str,
+  parts: &[&str],
+  options: &[&str],
+) -> Option<(String, Vec<String>)> {
+  let mut value = input;
+  for part in &parts[..3] {
+    value = value.trim_start().strip_prefix(part)?;
+  }
+  let value = value.trim_start();
+  if value.contains(['\n', '\r']) {
+    return None;
+  }
+  let quoted = value.starts_with('"');
+  let value = value.strip_prefix('"').unwrap_or(value);
+  // Only complete an unfinished token. Unquoted lists cannot contain spaces.
+  if value.contains(['"', '\'', '\\'])
+    || (!quoted && value.chars().any(char::is_whitespace))
+  {
+    return None;
+  }
+  let (previous, prefix) = value.rsplit_once(',').unwrap_or(("", value));
+  let prefix = prefix.trim_start();
+  if prefix.chars().any(char::is_whitespace) {
+    return None;
+  }
+  let selected = previous.split(',').map(str::trim).collect::<Vec<_>>();
+  if value.contains(',')
+    && selected.iter().any(|item| {
+      !options
+        .iter()
+        .any(|option| option.eq_ignore_ascii_case(item))
+    })
+  {
+    return None;
+  }
+  let remaining = options
+    .iter()
+    .copied()
+    .filter(|option| {
+      !selected
+        .iter()
+        .any(|item| option.eq_ignore_ascii_case(item))
+    })
+    .collect::<Vec<_>>();
+  // Leave room for another comma unless this completes the entire option set.
+  let suffix = match (remaining.len(), quoted) {
+    (1, true) => "\" ",
+    (1, false) => " ",
+    _ => "",
+  };
+  Some((
+    input[..input.len() - prefix.len()].to_string(),
+    complete_static(prefix, &remaining)
+      .into_iter()
+      .map(|candidate| format!("{}{suffix}", candidate.trim_end()))
+      .collect(),
+  ))
 }
 
 /// Completes canonical measurands defined by the active OCPP version.
@@ -326,6 +458,211 @@ fn completion_base(parts: &[&str], ends_with_space: bool) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn configuration_completion_uses_current_supported_keys() {
+    assert_eq!(complete_static("conf", COMMAND_WORDS), ["config "]);
+    let keys = [
+      ConfigurationKey::HeartbeatInterval,
+      ConfigurationKey::CpoName,
+    ]
+    .map(|key| ConfigurationSnapshot {
+      key,
+      read_only: false,
+    });
+    assert_eq!(
+      configuration_completion_seed("config ", &keys).unwrap().1,
+      ["list ", "get ", "set "]
+    );
+    assert_eq!(
+      configuration_completion_seed("config g", &keys).unwrap(),
+      ("config ".to_string(), vec!["get ".to_string()])
+    );
+    for command in ["get", "set"] {
+      assert_eq!(
+        configuration_completion_seed(&format!("config {command} "), &keys)
+          .unwrap()
+          .1,
+        ["CpoName ", "HeartbeatInterval "]
+      );
+      assert_eq!(
+        configuration_completion_seed(&format!("CONFIG {command} hea"), &keys)
+          .unwrap()
+          .1,
+        ["HeartbeatInterval "]
+      );
+    }
+    assert!(configuration_completion_seed("config list ", &keys).is_none());
+    assert!(
+      configuration_completion_seed("config set CpoName ", &keys).is_none()
+    );
+    assert_eq!(
+      configuration_completion_seed("config get Meter", &keys)
+        .unwrap()
+        .1,
+      Vec::<String>::new()
+    );
+  }
+
+  #[test]
+  fn configuration_value_completion_filters_enumerated_values() {
+    for key in [
+      ConfigurationKey::AuthorizeRemoteTxRequests,
+      ConfigurationKey::AllowOfflineTxForUnknownId,
+      ConfigurationKey::AllowSecurityProfileDowngrade,
+    ] {
+      let configuration = [ConfigurationSnapshot {
+        key,
+        read_only: false,
+      }];
+      for (prefix, expected) in [
+        ("", vec!["false ", "true "]),
+        ("T", vec!["true "]),
+        ("fa", vec!["false "]),
+        ("yes", vec![]),
+      ] {
+        let base = format!("CONFIG SET {} ", key.as_str().to_ascii_lowercase());
+        let (actual_base, candidates) = configuration_completion_seed(
+          &format!("{base}{prefix}"),
+          &configuration,
+        )
+        .unwrap();
+        assert_eq!(actual_base, base);
+        assert_eq!(candidates, expected);
+      }
+    }
+    let configuration = [ConfigurationSnapshot {
+      key: ConfigurationKey::SecurityProfile,
+      read_only: false,
+    }];
+    assert_eq!(
+      configuration_completion_seed(
+        "config set SecurityProfile ",
+        &configuration
+      )
+      .unwrap()
+      .1,
+      ["0 ", "1 ", "2 ", "3 "]
+    );
+  }
+
+  #[test]
+  fn configuration_list_completion_preserves_prior_members_and_spacing() {
+    let configuration = [ConfigurationSnapshot {
+      key: ConfigurationKey::SupportedFileTransferProtocols,
+      read_only: false,
+    }];
+    let command = "config set SupportedFileTransferProtocols ";
+    for (value, base_suffix, expected) in [
+      ("", "", vec!["HTTP", "HTTPS", "FTP", "FTPS"]),
+      ("ht", "", vec!["HTTP", "HTTPS"]),
+      ("ftpS", "", vec!["FTPS"]),
+      ("HTTP,", "HTTP,", vec!["HTTPS", "FTP", "FTPS"]),
+      (r#""http,  ft"#, r#""http,  "#, vec!["FTP", "FTPS"]),
+      (r#""HTTP, "#, r#""HTTP, "#, vec!["HTTPS", "FTP", "FTPS"]),
+      (r#""ht"#, "\"", vec!["HTTP", "HTTPS"]),
+      (r#""ftpS"#, "\"", vec!["FTPS"]),
+      ("HTTP,HTTPS,FTPS,F", "HTTP,HTTPS,FTPS,", vec!["FTP "]),
+      (
+        r#""HTTP,HTTPS,FTPS,F"#,
+        r#""HTTP,HTTPS,FTPS,"#,
+        vec!["FTP\" "],
+      ),
+      (
+        r#""http,ftp,https, "#,
+        r#""http,ftp,https, "#,
+        vec!["FTPS\" "],
+      ),
+      ("HTTP,HTTPS,FTP,FTPS,", "HTTP,HTTPS,FTP,FTPS,", vec![]),
+    ] {
+      let (base, candidates) = configuration_completion_seed(
+        &format!("{command}{value}"),
+        &configuration,
+      )
+      .unwrap();
+      assert_eq!(base, format!("{command}{base_suffix}"));
+      assert_eq!(candidates, expected);
+      for candidate in candidates {
+        let mut completed = format!("{base}{candidate}");
+        if value.starts_with('"') && !candidate.ends_with("\" ") {
+          assert!(crate::commands::parse_command(&completed).is_err());
+          completed.push('"');
+        }
+        assert!(
+          crate::commands::parse_command(&completed).is_ok(),
+          "{completed}"
+        );
+      }
+    }
+    for value in [
+      ",H",
+      "HTTP,,H",
+      "SMTP,H",
+      "HTTP garbage",
+      "HTTP ",
+      "http,  ft",
+      "HTTP, ",
+      "'ht",
+      "'HTTP' ",
+      "'HTTP'",
+      r#""HTTP""#,
+      "'HTTP' F",
+      "'HTTP\n,F",
+    ] {
+      assert!(
+        configuration_completion_seed(
+          &format!("{command}{value}"),
+          &configuration,
+        )
+        .is_none()
+      );
+    }
+  }
+
+  #[test]
+  fn configuration_value_completion_requires_a_writable_enumerated_item() {
+    let configuration = [
+      (ConfigurationKey::AdditionalRootCertificateCheck, true),
+      (ConfigurationKey::SecurityProfile, true),
+      (ConfigurationKey::AuthorizeRemoteTxRequests, false),
+      (ConfigurationKey::BasicAuthPassword, false),
+      (ConfigurationKey::HeartbeatInterval, false),
+      (ConfigurationKey::CpoName, false),
+    ]
+    .map(|(key, read_only)| ConfigurationSnapshot { key, read_only });
+    for input in [
+      "config set AdditionalRootCertificateCheck ",
+      "config set SecurityProfile ",
+      "config set BasicAuthPassword ",
+      "config set HeartbeatInterval ",
+      "config set CpoName ",
+      "config set UnsupportedKey ",
+      "config set SupportedFileTransferProtocols ",
+      "config get AuthorizeRemoteTxRequests ",
+      "config set AuthorizeRemoteTxRequests true ",
+      "config set AuthorizeRemoteTxRequests true false",
+      "config set AuthorizeRemoteTxRequests 'tr",
+      "config set AuthorizeRemoteTxRequests \"tr",
+    ] {
+      assert!(
+        configuration_completion_seed(input, &configuration).is_none(),
+        "{input}"
+      );
+    }
+    let mut cycle = CompletionState::new(
+      "config set AuthorizeRemoteTxRequests ".to_string(),
+      vec!["false ".to_string(), "true ".to_string()],
+      0,
+    );
+    assert_eq!(
+      cycle.next_value(false),
+      "config set AuthorizeRemoteTxRequests true "
+    );
+    assert_eq!(
+      cycle.next_value(true),
+      "config set AuthorizeRemoteTxRequests false "
+    );
+  }
 
   #[test]
   fn generic_measurand_completion_uses_active_protocol_and_canonical_names() {

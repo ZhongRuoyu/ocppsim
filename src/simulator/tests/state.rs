@@ -85,14 +85,7 @@ async fn profile_reload_preserves_a_manual_pause_for_unchanged_settings() {
 #[test]
 fn profile_reload_refreshes_derived_organization_defaults() {
   let mut simulator = simulator_for_tests();
-  assert_eq!(
-    simulator.set_configuration_value(
-      ConfigurationKey::CpoName,
-      "",
-      ConfigurationOrigin::Local,
-    ),
-    ResponseStatus::Rejected
-  );
+  assert!(simulator.set_local_configuration("CpoName", "").is_err());
   let mut config = connection_config_for_state_tests(OcppVersion::V1_6);
   for vendor in ["First vendor", "Second vendor"] {
     config.vendor = vendor.to_string();

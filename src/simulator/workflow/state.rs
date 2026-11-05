@@ -4,36 +4,12 @@ use super::super::{
   ConnectorState, ConnectorStatus, OcppVersion, PendingContext, ResponseStatus,
   Result, Simulator, anyhow,
 };
-use crate::ocpp::{
-  SecurityEventType, is_valid_basic_auth_password, validate_heartbeat_interval,
-};
+use super::configuration::validate_configuration_value;
+use crate::ocpp::{SecurityEventType, is_valid_basic_auth_password};
 
 const MAX_CERTIFICATE_CHAIN_SIZE: usize = 10_000;
 
 impl Simulator {
-  /// Sets the heartbeat interval and starts its timer, including if paused.
-  pub(in crate::simulator) fn start_local_heartbeat(
-    &mut self,
-    seconds: u64,
-  ) -> Result<()> {
-    validate_heartbeat_interval(seconds).map_err(anyhow::Error::msg)?;
-    let was_running = self.heartbeat.is_some();
-    if self.set_configuration_value(
-      ConfigurationKey::HeartbeatInterval,
-      &seconds.to_string(),
-      ConfigurationOrigin::Local,
-    ) != ResponseStatus::Accepted
-    {
-      return Err(anyhow!(
-        "HeartbeatInterval configuration change was rejected."
-      ));
-    }
-    if !was_running {
-      self.start_heartbeat(seconds);
-    }
-    Ok(())
-  }
-
   /// Applies a configuration write and records its origin only on success.
   pub(in crate::simulator) fn set_configuration_value(
     &mut self,
@@ -45,6 +21,9 @@ impl Simulator {
       return ResponseStatus::NotSupported;
     };
     if entry.read_only {
+      return ResponseStatus::Rejected;
+    }
+    if validate_configuration_value(self.config.protocol, key, value).is_err() {
       return ResponseStatus::Rejected;
     }
 
@@ -68,10 +47,7 @@ impl Simulator {
     if key != ConfigurationKey::HeartbeatInterval {
       return None;
     }
-    let Some(seconds) = value
-      .parse::<u64>()
-      .ok()
-      .filter(|seconds| validate_heartbeat_interval(*seconds).is_ok())
+    let Some(seconds) = value.parse::<u64>().ok().filter(|item| *item > 0)
     else {
       return Some(ResponseStatus::Rejected);
     };
@@ -130,10 +106,12 @@ impl Simulator {
     ] {
       self.update_configuration_value(key, "", origin);
     }
-    self.record_security_event(
-      SecurityEventType::ReconfigurationOfSecurityParameters,
-      Some("Basic authentication password changed".to_string()),
-    );
+    if origin == ConfigurationOrigin::Csms {
+      self.record_security_event(
+        SecurityEventType::ReconfigurationOfSecurityParameters,
+        Some("Basic authentication password changed".to_string()),
+      );
+    }
     self.request_security_reconnect(SecurityProfileFallback::None);
     ResponseStatus::Accepted
   }
@@ -174,10 +152,12 @@ impl Simulator {
       value,
       origin,
     );
-    self.record_security_event(
-      SecurityEventType::ReconfigurationOfSecurityParameters,
-      Some(format!("SecurityProfile changed to {profile}")),
-    );
+    if origin == ConfigurationOrigin::Csms {
+      self.record_security_event(
+        SecurityEventType::ReconfigurationOfSecurityParameters,
+        Some(format!("SecurityProfile changed to {profile}")),
+      );
+    }
     self.request_security_reconnect(SecurityProfileFallback::Restore {
       profile: previous_profile,
       origin: previous_origin,

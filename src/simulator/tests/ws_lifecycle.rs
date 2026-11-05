@@ -15,6 +15,58 @@ type TestWsStream = WebSocketStream<DuplexStream>;
 type TestWsWrite = SplitSink<TestWsStream, Message>;
 type TestWsRead = SplitStream<TestWsStream>;
 
+#[tokio::test]
+async fn local_security_configuration_reconnects_without_exposing_passwords() {
+  let password = "0123456789abcdef0123456789abcdef";
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let (mut write, _read, _server_write, _server_read) =
+      in_memory_ws_pair().await;
+    let (mut simulator, mut events) =
+      simulator_for_tests_with_protocol_and_ui(protocol);
+    simulator.connected = true;
+    let outcome = simulator
+      .handle_connected_command(
+        SimulatorCommand::SetConfiguration {
+          key: "BasicAuthPassword".to_string(),
+          value: password.to_string(),
+        },
+        &mut write,
+      )
+      .await
+      .unwrap();
+    assert!(matches!(
+      outcome,
+      crate::simulator::CommandOutcome::Reconnect
+    ));
+    assert_eq!(
+      simulator.security.basic_auth_password.as_deref(),
+      Some(password)
+    );
+    assert!(simulator.security.pending_reconnect.is_some());
+    assert!(simulator.security.events.is_empty());
+    assert!(simulator.queue.is_empty());
+    for key in [
+      ConfigurationKey::AuthorizationKey,
+      ConfigurationKey::BasicAuthPassword,
+    ] {
+      assert_eq!(
+        simulator.configuration[&key].origin,
+        ConfigurationOrigin::Local
+      );
+      assert_eq!(simulator.configuration[&key].value, "");
+    }
+    simulator.show_configuration(None).unwrap();
+    simulator
+      .show_configuration(Some("AuthorizationKey"))
+      .unwrap();
+    let logs = drain_log_messages(&mut events);
+    assert!(logs.iter().all(|line| !line.contains(password)));
+    assert!(logs.contains(
+      &"AuthorizationKey=<redacted> (write-only, origin=local)".to_string()
+    ));
+  }
+}
+
 fn format_violation_code(protocol: OcppVersion) -> &'static str {
   match protocol {
     OcppVersion::V1_6 => "FormationViolation",

@@ -1,9 +1,9 @@
 use super::super::{
-  ConnectorSnapshot, Duration, HeartbeatTask, Message, MissedTickBehavior,
-  OcppErrorCode, OcppVersion, Result, Simulator, SimulatorCommand,
-  SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent, UiLogLevel,
-  Value, WsMessageSink, anyhow, build_call_error, build_call_result,
-  build_call_result_error, json, sanitized_trace_frame_text,
+  ConfigurationSnapshot, ConnectorSnapshot, Duration, HeartbeatTask, Message,
+  MissedTickBehavior, OcppErrorCode, OcppVersion, Result, Simulator,
+  SimulatorCommand, SimulatorRuntimeState, SimulatorSnapshot, SinkExt, UiEvent,
+  UiLogLevel, Value, WsMessageSink, anyhow, build_call_error,
+  build_call_result, build_call_result_error, json, sanitized_trace_frame_text,
 };
 use crate::ocpp::validate_heartbeat_interval;
 use crate::sensitive::{redact_url_secrets, sanitize_log_text};
@@ -209,6 +209,14 @@ impl Simulator {
     );
 
     let snapshot = SimulatorSnapshot {
+      configuration: self
+        .configuration
+        .iter()
+        .map(|(key, entry)| ConfigurationSnapshot {
+          key: *key,
+          read_only: entry.read_only,
+        })
+        .collect(),
       profile: self.config.profile.clone(),
       cp_id: self.config.cp_id.clone(),
       protocol: self.config.protocol,

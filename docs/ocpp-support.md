@@ -282,6 +282,20 @@ Unknown components return `UnknownComponent`, and unknown variables return
 `UnknownVariable`.
 Read-only variables reject writes.
 
+The local `config list`, `config get`, and `config set` commands use the same
+configuration map and write validation.
+Boolean values accept `true` or `false`, ignoring case.
+Intervals and retry counts accept integers from 0 to 2147483647, except
+`HeartbeatInterval`, which must be positive.
+Organization names must be nonempty, and file-transfer protocol lists accept
+`HTTP`, `HTTPS`, `FTP`, and `FTPS`.
+Security passwords and profile changes retain their protocol-specific checks.
+Values must fit the active protocol's configuration-value length limit and
+cannot contain control characters.
+Invalid writes leave values and origins unchanged.
+Local writes record origin `local` and do not emit configuration-change events.
+Variable monitoring remains unsupported.
+
 | Key                              | Writable | Notes                                              |
 | -------------------------------- | -------- | -------------------------------------------------- |
 | `AdditionalRootCertificateCheck` | No       | Read-only SecurityCtrlr capability flag.           |
@@ -292,6 +306,8 @@ Read-only variables reject writes.
 | `BasicAuthPassword`              | Yes      | Write-only 2.x Basic Auth password.                |
 | `CertificateSignedMaxChainSize`  | No       | Read-only compatibility alias.                     |
 | `CertificateStoreMaxLength`      | No       | Maximum in-memory certificate entries.             |
+| `CertSigningRepeatTimes`         | Yes      | Stored as configuration only.                      |
+| `CertSigningWaitMinimum`         | Yes      | Stored as configuration only.                      |
 | `CpoName`                        | Yes      | Stored security organization name.                 |
 | `HeartbeatInterval`              | Yes      | Boot/config changes can restart heartbeats.        |
 | `MaxCertificateChainSize`        | No       | Read-only certificate chain size limit, max 10000. |

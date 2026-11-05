@@ -54,7 +54,7 @@ pub(in crate::simulator) use types::{
   TransactionEventRequest, TransactionState, TxEventType, normalize_identifier,
 };
 pub use types::{
-  ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
+  ConfigurationSnapshot, ConnectorSnapshot, SimulatorCommand, SimulatorConfig,
   SimulatorConnectionConfig, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
   UiLogLevel,
 };
@@ -486,7 +486,11 @@ impl Simulator {
       }
       other => {
         self.handle_common_command(other, true)?;
-        Ok(CommandOutcome::Continue)
+        Ok(if self.security.pending_reconnect.is_some() {
+          CommandOutcome::Reconnect
+        } else {
+          CommandOutcome::Continue
+        })
       }
     }
   }
@@ -641,6 +645,12 @@ impl Simulator {
   ) -> Result<()> {
     match command {
       SimulatorCommand::Status => self.emit_snapshot(),
+      SimulatorCommand::GetConfiguration { key } => {
+        self.show_configuration(key.as_deref())?;
+      }
+      SimulatorCommand::SetConfiguration { key, value } => {
+        self.set_local_configuration(&key, &value)?;
+      }
       SimulatorCommand::Boot => {
         if !self.ensure_connected_for_command(is_connected, "BootNotification")
         {
@@ -672,16 +682,7 @@ impl Simulator {
         connector,
         id_token,
       } => {
-        if !self.ensure_can_mutate_ocpp_transaction(is_connected) {
-          return Ok(());
-        }
-        self.start_transaction(
-          connector,
-          id_token,
-          false,
-          None,
-          is_connected,
-        )?;
+        self.start_transaction_command(connector, id_token, is_connected)?;
       }
       SimulatorCommand::StopTransaction { connector, reason } => {
         if !self.ensure_can_mutate_ocpp_transaction(is_connected) {
@@ -721,9 +722,7 @@ impl Simulator {
       SimulatorCommand::StartHeartbeat { seconds } => {
         self.start_local_heartbeat(seconds)?;
       }
-      SimulatorCommand::StopHeartbeat => {
-        self.stop_heartbeat();
-      }
+      SimulatorCommand::StopHeartbeat => self.stop_heartbeat(),
       SimulatorCommand::SetConnectorStatus { connector, status } => {
         let notify = is_connected && self.post_boot_ocpp_requests_allowed();
         self.set_connector_status(connector, &status, notify)?;
@@ -738,6 +737,19 @@ impl Simulator {
       | SimulatorCommand::Shutdown => {}
     }
     Ok(())
+  }
+
+  /// Applies boot-registration gating to a locally requested transaction start.
+  fn start_transaction_command(
+    &mut self,
+    connector: u16,
+    id_token: String,
+    is_connected: bool,
+  ) -> Result<()> {
+    if !self.ensure_can_mutate_ocpp_transaction(is_connected) {
+      return Ok(());
+    }
+    self.start_transaction(connector, id_token, false, None, is_connected)
   }
 
   /// Applies an interactive connection target before opening the WebSocket.

@@ -164,6 +164,38 @@ Logs are printed into normal terminal scrollback, so they can be selected with
 the mouse and remain available after `ocppsim` exits.
 
 - `status`: show current simulator state.
+- `config list`: show all supported configuration items, their values, access
+  modes, and origins (`default`, `local`, or `csms`).
+- `config get <key>`: show one configuration item.
+- `config set <key> <value>`: validate and set a writable item locally.
+  A successful write sets its origin to `local`, including when the value is
+  unchanged.
+  Keys are case insensitive, and Tab completes subcommands and supported keys.
+  For writable items, Tab also completes booleans, security profile numbers,
+  and file-transfer protocols, including after a comma in a protocol list.
+  Value prefixes are case insensitive; protocols already in the list are
+  skipped.
+  Protocol-list completion adds a closing quote (when quoted) and trailing
+  space only after all available protocols have been selected.
+  Supply a single value; strings may be JSON-quoted.
+  Strings containing spaces or quotation marks require JSON quotes, for example
+  `config set CpoName "Example Operator"`.
+  JSON quotes decode escape sequences such as `\"`, `\\`, `\n`, and `\u0041`.
+  `config set CpoName Example` and `config set CpoName "Example"` both store
+  `Example`.
+  To store `"Example"` including its quotes, use `"\"Example\""`.
+  Booleans and numbers must be unquoted, for example
+  `config set AuthorizeRemoteTxRequests false` or
+  `config set HeartbeatInterval 20`.
+  Quotes must close on the same line.
+  Escapes are decoded before normal configuration validation, so a decoded
+  control character such as a newline is still rejected by that validation.
+  Password values are masked in output and command history.
+  All three commands work online or offline.
+  Edits do not send configuration-change notifications; the CSMS reads values
+  through `GetConfiguration` in OCPP 1.6 or `GetVariables` in OCPP 2.x.
+  Existing effects still apply: heartbeat changes restart an active timer, and
+  security password/profile changes reconnect an active connection.
 - `connect`: open the configured WebSocket target.
   A new `BootNotification` is sent when registration is not accepted yet or the
   boot payload changed since the previous connection.
@@ -223,7 +255,7 @@ the mouse and remain available after `ocppsim` exits.
 - `heartbeat`: send one heartbeat.
 - `heartbeat start <seconds>`: set `HeartbeatInterval` with origin `local`,
   then start or restart periodic heartbeats.
-
+  Accepts integers from 1 to 2147483647, as does `config set HeartbeatInterval`.
 - `heartbeat stop`: pause periodic heartbeats while retaining the configured
   interval and its origin.
 - `standards`: show the active protocol summary.
@@ -321,7 +353,7 @@ Reloading connection settings reapplies their heartbeat interval to a running
 timer, even when those settings match the original startup settings.
 A manually paused timer stays paused when the startup setting is unchanged.
 Vendor-derived `CpoName` and `OrganizationName` defaults follow profile changes
-until either alias is explicitly configured.
+until either alias is explicitly set locally or by the CSMS.
 
 ## Resource Limits
 

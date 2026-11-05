@@ -38,14 +38,9 @@ async fn heartbeat_commands_keep_the_interval_and_origin_in_sync() {
         simulator.configuration[&ConfigurationKey::HeartbeatInterval],
         expected
       );
-      assert_eq!(
-        simulator.set_configuration_value(
-          ConfigurationKey::HeartbeatInterval,
-          "25",
-          ConfigurationOrigin::Local,
-        ),
-        ResponseStatus::Accepted
-      );
+      simulator
+        .set_local_configuration("HeartbeatInterval", "25")
+        .unwrap();
       assert!(simulator.heartbeat.is_none());
       assert!(simulator.queue.is_empty());
     }
@@ -71,6 +66,206 @@ async fn invalid_heartbeat_commands_preserve_the_running_timer() {
     simulator.start_heartbeat(seconds);
     assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 10);
   }
+  simulator.stop_heartbeat();
+}
+
+#[test]
+fn local_configuration_queries_show_origins_without_side_effects() {
+  for connected in [false, true] {
+    let (mut simulator, mut events) =
+      simulator_for_tests_with_protocol_and_ui(OcppVersion::V1_6);
+    simulator.connected = connected;
+    simulator
+      .change_configuration_v1_6(&json!({
+        "key": "HeartbeatInterval", "value": "25"
+      }))
+      .unwrap();
+    simulator
+      .handle_common_command(
+        SimulatorCommand::SetConfiguration {
+          key: "authorizeremotetxrequests".to_string(),
+          value: "false".to_string(),
+        },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(
+      drain_log_messages(&mut events),
+      ["AuthorizeRemoteTxRequests=false (read-write, origin=local)"]
+    );
+    let original = simulator.configuration.clone();
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::GetConfiguration { key: None },
+        connected,
+      )
+      .unwrap();
+    let lines = drain_log_messages(&mut events);
+    assert_eq!(lines.len(), simulator.configuration.len());
+    assert!(lines.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(
+      lines.contains(
+        &"HeartbeatInterval=25 (read-write, origin=csms)".to_string()
+      )
+    );
+    assert!(lines.contains(
+      &"MeterValueSampleInterval=60 (read-write, origin=default)".to_string()
+    ));
+    assert!(
+      lines.contains(
+        &"NumberOfConnectors=2 (read-only, origin=local)".to_string()
+      )
+    );
+
+    simulator
+      .handle_common_command(
+        SimulatorCommand::GetConfiguration {
+          key: Some("heartbeat-interval".to_string()),
+        },
+        connected,
+      )
+      .unwrap();
+    assert_eq!(
+      drain_log_messages(&mut events),
+      ["HeartbeatInterval=25 (read-write, origin=csms)"]
+    );
+    assert_eq!(simulator.configuration, original);
+    assert!(simulator.queue.is_empty());
+    assert!(simulator.security.events.is_empty());
+  }
+}
+
+#[test]
+fn local_configuration_changes_are_visible_to_csms_queries() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    simulator.connected = true;
+    for (key, value) in [
+      ("AuthorizeRemoteTxRequests", "false"),
+      ("AllowOfflineTxForUnknownId", "TRUE"),
+      ("AllowSecurityProfileDowngrade", "false"),
+      ("HeartbeatInterval", "25"),
+      ("MeterValueSampleInterval", "0"),
+      ("WebSocketPingInterval", "0"),
+      ("CertSigningRepeatTimes", "0"),
+      ("CertSigningWaitMinimum", "60"),
+      ("CpoName", "Example Operator"),
+      ("SupportedFileTransferProtocols", "HTTP, HTTPS, FTP, FTPS"),
+    ] {
+      simulator
+        .handle_common_command(
+          SimulatorCommand::SetConfiguration {
+            key: key.to_string(),
+            value: value.to_string(),
+          },
+          true,
+        )
+        .unwrap();
+      let key = ConfigurationKey::parse(key).unwrap();
+      assert_eq!(simulator.configuration[&key].value, value);
+      assert_eq!(
+        simulator.configuration[&key].origin,
+        ConfigurationOrigin::Local
+      );
+    }
+    if protocol == OcppVersion::V1_6 {
+      let response = simulator.configuration_response_v1_6(&json!({
+        "key": ["AuthorizeRemoteTxRequests"]
+      }));
+      assert_eq!(response.configuration_key[0].value, Some("false"));
+    } else {
+      let response = simulator
+        .get_variables_v2_x(&json!({
+          "getVariableData": [get_variable_data("AuthorizeRemoteTxRequests")]
+        }))
+        .unwrap();
+      assert_eq!(response["getVariableResult"][0]["attributeValue"], "false");
+    }
+    assert!(!simulator.authorize_remote_tx_requests());
+    assert_eq!(simulator.security.cpo_name, "Example Operator");
+    assert_eq!(
+      simulator.configuration[&ConfigurationKey::OrganizationName].origin,
+      ConfigurationOrigin::Local
+    );
+    assert!(simulator.queue.is_empty());
+    assert!(simulator.security.events.is_empty());
+  }
+}
+
+#[test]
+fn invalid_local_configuration_changes_preserve_state() {
+  for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1] {
+    let mut simulator = simulator_for_tests_with_protocol(protocol);
+    let original = simulator.configuration.clone();
+    for (key, value) in [
+      ("MissingKey", "true"),
+      ("LightIntensity", "50"),
+      ("NumberOfConnectors", "3"),
+      ("AuthorizeRemoteTxRequests", "yes"),
+      ("AllowOfflineTxForUnknownId", "1"),
+      ("AllowSecurityProfileDowngrade", "enabled"),
+      ("HeartbeatInterval", "0"),
+      ("HeartbeatInterval", "18446744073709551615"),
+      ("MeterValueSampleInterval", "-1"),
+      ("WebSocketPingInterval", "1.5"),
+      ("CertSigningRepeatTimes", "-1"),
+      ("CertSigningWaitMinimum", "never"),
+      ("CpoName", " "),
+      ("OrganizationName", "Example\nOperator"),
+      ("SupportedFileTransferProtocols", "HTTPS,"),
+      ("SupportedFileTransferProtocols", "SMTP"),
+      ("AuthorizationKey", "invalid"),
+      ("SecurityProfile", "9"),
+      ("SecurityProfile", "1"),
+    ] {
+      assert!(
+        simulator
+          .handle_common_command(
+            SimulatorCommand::SetConfiguration {
+              key: key.to_string(),
+              value: value.to_string(),
+            },
+            false
+          )
+          .is_err(),
+        "{protocol:?}: {key}"
+      );
+      assert_eq!(simulator.configuration, original);
+      assert!(simulator.queue.is_empty());
+      assert!(simulator.security.events.is_empty());
+      assert!(simulator.security.basic_auth_password.is_none());
+    }
+    assert!(simulator.show_configuration(Some("MissingKey")).is_err());
+    let max_length = match protocol {
+      OcppVersion::V1_6 => 500,
+      OcppVersion::V2_0_1 => 1_000,
+      OcppVersion::V2_1 => 2_500,
+    };
+    assert!(
+      simulator
+        .set_local_configuration("CpoName", &"a".repeat(max_length + 1))
+        .is_err()
+    );
+    assert_eq!(simulator.configuration, original);
+  }
+}
+
+#[tokio::test]
+async fn local_configuration_write_restarts_active_heartbeat() {
+  let mut simulator = simulator_for_tests();
+  simulator.start_heartbeat(10);
+  simulator
+    .handle_common_command(
+      SimulatorCommand::SetConfiguration {
+        key: "HeartbeatInterval".to_string(),
+        value: "25".to_string(),
+      },
+      true,
+    )
+    .unwrap();
+  assert_eq!(simulator.heartbeat.as_ref().unwrap().seconds, 25);
+  assert!(simulator.queue.is_empty());
   simulator.stop_heartbeat();
 }
 
@@ -141,6 +336,18 @@ fn rejected_configuration_writes_preserve_values_and_origins() {
   let mut simulator = simulator_for_tests();
   let original = simulator.configuration.clone();
   for (key, value, status) in [
+    ("AuthorizeRemoteTxRequests", "yes", ResponseStatus::Rejected),
+    ("WebSocketPingInterval", "-1", ResponseStatus::Rejected),
+    (
+      "CertSigningRepeatTimes",
+      "invalid",
+      ResponseStatus::Rejected,
+    ),
+    (
+      "SupportedFileTransferProtocols",
+      "HTTPS,",
+      ResponseStatus::Rejected,
+    ),
     ("HeartbeatInterval", "0", ResponseStatus::Rejected),
     ("NumberOfConnectors", "8", ResponseStatus::Rejected),
     ("AuthorizationKey", "invalid", ResponseStatus::Rejected),

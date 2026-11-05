@@ -95,7 +95,8 @@ OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
 `GetVariables` and `SetVariables` for component `ChargingStation` or
 `SecurityCtrlr`.
 Each entry tracks the origin of its current value: a built-in default, a value
-derived from resolved local simulator settings, or a value supplied by the CSMS.
+from local simulator settings or a `config set` command, or a value supplied by
+the CSMS.
 Vendor-derived organization defaults are tracked separately from explicit writes
 so profile changes can refresh defaults while preserving overrides.
 Accepted writes update the origin even if the value is unchanged.

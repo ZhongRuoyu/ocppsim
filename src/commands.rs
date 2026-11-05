@@ -4,12 +4,14 @@ use serde_json::Number;
 
 use crate::metering::{MeterDelta, MeterReading, MeterUpdate};
 use crate::ocpp::{
-  Measurand, OCPP_V1_6_SUPPORTED_ACTIONS, OCPP_V2_X_COMMON_SUPPORTED_ACTIONS,
-  OcppVersion, validate_heartbeat_interval,
+  ConfigurationKey, Measurand, OCPP_V1_6_SUPPORTED_ACTIONS,
+  OCPP_V2_X_COMMON_SUPPORTED_ACTIONS, OcppVersion, validate_heartbeat_interval,
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
 
 const USAGE_STATUS: &str = "Usage: status";
+const USAGE_CONFIG: &str =
+  "Usage: config list | config get <key> | config set <key> <value>";
 const USAGE_CONNECT: &str = "Usage: connect [<profile> | <ws-url> <cp-id>]";
 const USAGE_DISCONNECT: &str = "Usage: disconnect";
 const USAGE_BOOT: &str = "Usage: boot";
@@ -42,6 +44,13 @@ const USAGE_EXIT: &str = "Usage: exit";
 #[derive(Debug, Clone)]
 pub enum UserCommand {
   Status,
+  GetConfiguration {
+    key: Option<String>,
+  },
+  SetConfiguration {
+    key: String,
+    value: String,
+  },
   Connect {
     target: ConnectTarget,
   },
@@ -118,6 +127,7 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
   }
 
   match command.as_str() {
+    "config" => parse_config_command(input, &parts),
     "connect" => parse_connect_command(&parts),
     "authorize" => parse_authorize_command(&parts),
     "data-transfer" => parse_data_transfer_command(&parts),
@@ -145,6 +155,16 @@ pub fn redact_sensitive_command(input: &str) -> String {
   };
 
   match command.to_ascii_lowercase().as_str() {
+    "config"
+      if parts.len() >= 4
+        && parts[1].eq_ignore_ascii_case("set")
+        && ConfigurationKey::parse(parts[2])
+          .is_some_and(ConfigurationKey::is_sensitive) =>
+    {
+      parts.truncate(3);
+      parts.push(REDACTED_VALUE);
+      parts.join(" ")
+    }
     "authorize" if parts.len() >= 2 => {
       parts[1] = REDACTED_VALUE;
       parts.join(" ")
@@ -215,6 +235,71 @@ fn parse_connect_command(parts: &[&str]) -> Result<UserCommand, String> {
     }),
     _ => Err(USAGE_CONNECT.to_string()),
   }
+}
+
+fn parse_config_command(
+  input: &str,
+  parts: &[&str],
+) -> Result<UserCommand, String> {
+  if input.contains(['\n', '\r']) {
+    return Err("Configuration commands must fit on one line.".to_string());
+  }
+  let subcommand = parts.get(1).map(|value| value.to_ascii_lowercase());
+  match subcommand.as_deref() {
+    Some("list") if parts.len() == 2 => {
+      Ok(UserCommand::GetConfiguration { key: None })
+    }
+    Some("get") if parts.len() == 3 => Ok(UserCommand::GetConfiguration {
+      key: Some(parts[2].to_string()),
+    }),
+    Some("set") if parts.len() >= 4 => {
+      // A JSON-quoted value may contain whitespace.
+      let mut value = input;
+      for part in &parts[..3] {
+        value = value.trim_start().strip_prefix(part).expect("parsed token");
+      }
+      Ok(UserCommand::SetConfiguration {
+        key: parts[2].to_string(),
+        value: parse_configuration_argument(parts[2], value.trim())?,
+      })
+    }
+    _ => Err(USAGE_CONFIG.to_string()),
+  }
+}
+
+fn parse_configuration_argument(
+  key: &str,
+  value: &str,
+) -> Result<String, String> {
+  if !value.starts_with('"') {
+    if value
+      .chars()
+      .any(|c| c.is_whitespace() || matches!(c, '"' | '\''))
+    {
+      return Err(format!(
+        "{USAGE_CONFIG}. Expected a single value; use JSON quotes for \
+        strings containing spaces or quotation marks."
+      ));
+    }
+    return Ok(value.to_string());
+  }
+  if ConfigurationKey::parse(key).is_some_and(|key| !key.is_string()) {
+    return Err(
+      "Boolean and numeric configuration values must not be quoted."
+        .to_string(),
+    );
+  }
+
+  // JSON parsing checks escapes and trailing input. Keep errors value-free
+  // because the argument may contain a password.
+  serde_json::from_str::<String>(value).map_err(|error| {
+    if error.is_eof() {
+      "Unterminated JSON string; close the quote on the same line.".to_string()
+    } else {
+      "Expected a single JSON-quoted string with valid escape sequences."
+        .to_string()
+    }
+  })
 }
 
 fn parse_zero_arg_command(
@@ -486,6 +571,16 @@ pub fn help_text() -> &'static str {
   "Interactive commands:
   status
     Show current simulator snapshot (connection, queue, connectors).
+  config list
+    Show all configuration items with values, access modes, and origins.
+  config get <key>
+    Show a configuration item. Password values are masked.
+  config set <key> <value>
+    Set a writable item locally after validation, with origin local.
+    Supply a single value; strings may be JSON-quoted.
+    Use JSON quotes for strings containing spaces or quotation marks.
+    Keep quotes on one line. Do not quote boolean or numeric values.
+    Use Tab to complete subcommands, keys, and enumerable writable values.
   connect [<profile> | <ws-url> <cp-id>]
     Open WebSocket to CSMS and send boot/status notifications.
   disconnect
@@ -1104,6 +1199,9 @@ mod tests {
   fn help_text_is_descriptive() {
     let help = help_text();
     assert!(help.contains("Show current simulator snapshot"));
+    assert!(help.contains("config list"));
+    assert!(help.contains("config get <key>"));
+    assert!(help.contains("config set <key> <value>"));
     assert!(help.contains("connect [<profile> | <ws-url> <cp-id>]"));
     assert!(help.contains("connector-status <connector> <status>"));
     assert!(help.contains("Valid statuses:"));
@@ -1121,6 +1219,183 @@ mod tests {
     for seconds in ["0", "-1", "1.5", "2147483648", "18446744073709551615"] {
       assert!(parse_command(&format!("heartbeat start {seconds}")).is_err());
     }
+  }
+
+  #[test]
+  fn parses_configuration_commands_and_preserves_string_values() {
+    assert!(matches!(
+      parse_command("config list").unwrap(),
+      UserCommand::GetConfiguration { key: None }
+    ));
+    assert!(matches!(
+      parse_command("CONFIG GET HeartbeatInterval").unwrap(),
+      UserCommand::GetConfiguration { key: Some(key) }
+        if key == "HeartbeatInterval"
+    ));
+    assert!(matches!(
+      parse_command("config set AuthorizeRemoteTxRequests false").unwrap(),
+      UserCommand::SetConfiguration { key, value }
+        if key == "AuthorizeRemoteTxRequests" && value == "false"
+    ));
+    assert!(matches!(
+      parse_command(r#"  config   set  CpoName  "Example  Operator"  "#)
+        .unwrap(),
+      UserCommand::SetConfiguration { key, value }
+        if key == "CpoName" && value == "Example  Operator"
+    ));
+    for input in [
+      "config",
+      "config unknown",
+      "config list extra",
+      "config get",
+      "config get key extra",
+      "config set",
+      "config set key",
+      "config set key   ",
+    ] {
+      assert_eq!(parse_command(input).unwrap_err(), super::USAGE_CONFIG);
+    }
+  }
+
+  #[test]
+  fn configuration_string_arguments_decode_quotes_and_escapes() {
+    for (argument, expected) in [
+      ("Y", "Y"),
+      (r#""Y""#, "Y"),
+      (r#""\"Y\"""#, r#""Y""#),
+      (r#""Example  Operator""#, "Example  Operator"),
+      (r#""  Example  Operator  ""#, "  Example  Operator  "),
+      (r#""""#, ""),
+      (r#""O'Brien""#, "O'Brien"),
+      (r#""a\\b\nc\rd\te\b\f""#, "a\\b\nc\rd\te\u{8}\u{c}"),
+      (r#""\u0041\u00e9""#, "A\u{e9}"),
+      (r#""\uD83D\uDE42""#, "\u{1f642}"),
+      (r#""https:\/\/example.test""#, "https://example.test"),
+      (r#""backslash\\""#, "backslash\\"),
+    ] {
+      let input = format!("config set CpoName {argument}");
+      assert!(
+        matches!(
+          parse_command(&input).unwrap(),
+          UserCommand::SetConfiguration { key, value }
+            if key == "CpoName" && value == expected
+        ),
+        "{input}"
+      );
+    }
+    // Numeric-looking passwords and string lists still have string types.
+    for key in [
+      "AuthorizationKey",
+      "basic-auth-password",
+      "organization-name",
+      "SupportedFileTransferProtocols",
+    ] {
+      assert!(matches!(
+        parse_command(&format!(r#"config set {key} "1234""#)).unwrap(),
+        UserCommand::SetConfiguration { value, .. } if value == "1234"
+      ));
+    }
+  }
+
+  #[test]
+  fn configuration_boolean_and_numeric_arguments_must_be_unquoted() {
+    for (key, value) in [
+      ("AuthorizeRemoteTxRequests", "true"),
+      ("AllowOfflineTxForUnknownId", "false"),
+      ("AllowSecurityProfileDowngrade", "false"),
+      ("AdditionalRootCertificateCheck", "true"),
+      ("HeartbeatInterval", "20"),
+      ("MeterValueSampleInterval", "5"),
+      ("WebSocketPingInterval", "30"),
+      ("CertSigningRepeatTimes", "3"),
+      ("CertSigningWaitMinimum", "60"),
+      ("SecurityProfile", "2"),
+      ("NumberOfConnectors", "1"),
+    ] {
+      assert!(parse_command(&format!("config set {key} {value}")).is_ok());
+      let input = format!(r#"config set {key} "{value}""#);
+      assert!(
+        parse_command(&input)
+          .unwrap_err()
+          .contains("must not be quoted")
+      );
+    }
+  }
+
+  #[test]
+  fn configuration_arguments_reject_extra_parts_and_invalid_quotes() {
+    for value in [
+      "Example Operator",
+      "'Y'",
+      "''",
+      "'",
+      "'Example",
+      "'Example' 'Operator'",
+      r#""Example" extra"#,
+      r#""Example"suffix"#,
+      "'Example'suffix",
+      r#""Example"'Operator'"#,
+      r#""""Example""""#,
+      "'''Example'''",
+      "O'Brien",
+      r#"a"b"#,
+      r#""Example" # comment"#,
+    ] {
+      let input = format!("config set CpoName {value}");
+      assert!(parse_command(&input).is_err(), "{input}");
+    }
+    for value in ["\"", r#""Example\""#, r#""Example\\"#] {
+      let input = format!("config set CpoName {value}");
+      assert!(parse_command(&input).unwrap_err().contains("Unterminated"));
+    }
+    for value in [
+      r#""bad\q""#,
+      r#""bad\u00xy""#,
+      r#""bad\uD800""#,
+      r#""bad\U00110000""#,
+      r#""\U0001F642""#,
+      r#""\x41""#,
+      r#""\e""#,
+    ] {
+      let input = format!("config set CpoName {value}");
+      assert!(
+        parse_command(&input)
+          .unwrap_err()
+          .contains("escape sequence")
+      );
+    }
+    for value in ["'Example\nOperator'", "\"Example\rOperator\"", "Y\nZ"] {
+      let input = format!("config set CpoName {value}");
+      assert!(parse_command(&input).unwrap_err().contains("one line"));
+    }
+  }
+
+  #[test]
+  fn configuration_password_commands_redact_the_entire_value() {
+    for key in [
+      "AuthorizationKey",
+      "BasicAuthPassword",
+      "basic-auth-password",
+    ] {
+      for value in [
+        "secret with spaces",
+        "'secret with spaces'",
+        r#""secret\" with spaces""#,
+        "'unterminated secret",
+        r#""secret\q""#,
+      ] {
+        let input = format!("CONFIG SET {key} {value}");
+        assert_eq!(
+          redact_sensitive_command(&input),
+          format!("CONFIG SET {key} <redacted>")
+        );
+        if let Err(error) = parse_command(&input) {
+          assert!(!error.contains("secret"));
+        }
+      }
+    }
+    let input = "config set CpoName Example Operator";
+    assert_eq!(redact_sensitive_command(input), input);
   }
 
   #[test]

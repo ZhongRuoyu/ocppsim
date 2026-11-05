@@ -477,6 +477,45 @@ pub enum ConfigurationKey {
 }
 
 impl ConfigurationKey {
+  /// Returns whether the value is a string, including comma-separated lists.
+  pub const fn is_string(self) -> bool {
+    matches!(
+      self,
+      Self::AuthorizationKey
+        | Self::BasicAuthPassword
+        | Self::ConnectorPhaseRotation
+        | Self::CpoName
+        | Self::MeterValuesAlignedData
+        | Self::MeterValuesSampledData
+        | Self::StopTxnAlignedData
+        | Self::StopTxnSampledData
+        | Self::SupportedFeatureProfiles
+        | Self::ChargingScheduleAllowedChargingRateUnit
+        | Self::OrganizationName
+        | Self::SupportedFileTransferProtocols
+    )
+  }
+
+  /// Returns finite value choices, or an empty slice for free-form values.
+  ///
+  /// File-transfer protocol choices describe individual list members.
+  pub const fn value_options(self) -> &'static [&'static str] {
+    match self {
+      Self::AllowOfflineTxForUnknownId
+      | Self::AuthorizeRemoteTxRequests
+      | Self::AllowSecurityProfileDowngrade
+      | Self::AdditionalRootCertificateCheck => &["false", "true"],
+      Self::SecurityProfile => &["0", "1", "2", "3"],
+      Self::SupportedFileTransferProtocols => &["HTTP", "HTTPS", "FTP", "FTPS"],
+      _ => &[],
+    }
+  }
+
+  /// Returns whether this key contains a password that must not be displayed.
+  pub const fn is_sensitive(self) -> bool {
+    matches!(self, Self::AuthorizationKey | Self::BasicAuthPassword)
+  }
+
   // Kept as a manifest of standard keys, including keys this simulator does
   // not currently expose.
   #[allow(dead_code)]

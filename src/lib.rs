@@ -216,20 +216,16 @@ fn handle_user_command(
 
   match command {
     UserCommand::Status => send_command(cmd_tx, SimulatorCommand::Status, app),
+    UserCommand::GetConfiguration { key } => {
+      send_command(cmd_tx, SimulatorCommand::GetConfiguration { key }, app)
+    }
+    UserCommand::SetConfiguration { key, value } => send_command(
+      cmd_tx,
+      SimulatorCommand::SetConfiguration { key, value },
+      app,
+    ),
     UserCommand::Connect { target } => {
-      match resolve_connect_config(target, cli_args) {
-        Ok(config) => send_command(
-          cmd_tx,
-          SimulatorCommand::Connect {
-            config: config.map(Box::new),
-          },
-          app,
-        ),
-        Err(error) => {
-          app.push_error(error.to_string());
-          false
-        }
-      }
+      connect_command(target, cli_args, cmd_tx, app)
     }
     UserCommand::Disconnect => {
       send_command(cmd_tx, SimulatorCommand::Disconnect, app)
@@ -310,6 +306,27 @@ fn handle_user_command(
       false
     }
     UserCommand::Exit => app.request_exit(),
+  }
+}
+
+fn connect_command(
+  target: ConnectTarget,
+  cli_args: &CliArgs,
+  cmd_tx: &mpsc::UnboundedSender<SimulatorCommand>,
+  app: &mut TerminalApp,
+) -> bool {
+  match resolve_connect_config(target, cli_args) {
+    Ok(config) => send_command(
+      cmd_tx,
+      SimulatorCommand::Connect {
+        config: config.map(Box::new),
+      },
+      app,
+    ),
+    Err(error) => {
+      app.push_error(error.to_string());
+      false
+    }
   }
 }
 
@@ -551,6 +568,34 @@ mod tests {
       ));
       assert!(cmd_rx.try_recv().is_err());
     }
+  }
+
+  #[test]
+  fn configuration_commands_dispatch_to_the_simulator() {
+    let (cli_args, cmd_tx, mut cmd_rx, mut app) = command_test_context();
+    for (input, key) in [
+      ("config list", None),
+      ("config get HeartbeatInterval", Some("HeartbeatInterval")),
+    ] {
+      assert!(!dispatch(input, &cli_args, &cmd_tx, &mut app));
+      assert!(matches!(
+        next_command(&mut cmd_rx),
+        SimulatorCommand::GetConfiguration { key: actual }
+          if actual.as_deref() == key
+      ));
+    }
+    assert!(!dispatch(
+      r#"config set CpoName "Example Operator""#,
+      &cli_args,
+      &cmd_tx,
+      &mut app
+    ));
+    assert!(matches!(
+      next_command(&mut cmd_rx),
+      SimulatorCommand::SetConfiguration { key, value }
+        if key == "CpoName" && value == "Example Operator"
+    ));
+    assert!(cmd_rx.try_recv().is_err());
   }
 
   #[test]

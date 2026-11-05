@@ -26,14 +26,16 @@ use ratatui::text::Line;
 use crate::ocpp::OcppVersion;
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
 use crate::simulator::{
-  ConnectorSnapshot, SimulatorRuntimeState, SimulatorSnapshot, UiEvent,
-  UiLogLevel,
+  ConfigurationSnapshot, ConnectorSnapshot, SimulatorRuntimeState,
+  SimulatorSnapshot, UiEvent, UiLogLevel,
 };
 
 mod completion;
 mod history;
 
-use completion::{CompletionState, completion_seed};
+use completion::{
+  CompletionState, completion_seed, configuration_completion_seed,
+};
 use history::CommandHistory;
 
 const MAX_LOG_LINES: usize = 10_000;
@@ -534,6 +536,7 @@ pub struct TerminalApp {
   cursor: usize,
   history: CommandHistory,
   known_connectors: Vec<u16>,
+  configuration: Vec<ConfigurationSnapshot>,
   profile_completions: Vec<String>,
   completion: Option<CompletionState>,
   log_sink: Option<FileLogSink>,
@@ -555,6 +558,7 @@ impl TerminalApp {
       cursor: 0,
       history: CommandHistory::new(),
       known_connectors: Vec::new(),
+      configuration: Vec::new(),
       profile_completions: Vec::new(),
       completion: None,
       log_sink: None,
@@ -875,12 +879,18 @@ impl TerminalApp {
       return;
     }
 
-    let Some((base, candidates)) = completion_seed(
-      &self.input,
-      self.protocol,
-      &self.known_connectors,
-      &self.profile_completions,
-    ) else {
+    let Some((base, candidates)) =
+      configuration_completion_seed(&self.input, &self.configuration).or_else(
+        || {
+          completion_seed(
+            &self.input,
+            self.protocol,
+            &self.known_connectors,
+            &self.profile_completions,
+          )
+        },
+      )
+    else {
       return;
     };
     if candidates.is_empty() {
@@ -1107,6 +1117,7 @@ impl TerminalApp {
 
     self.known_connectors =
       snapshot.connectors.iter().map(|item| item.id).collect();
+    self.configuration = snapshot.configuration;
     self.profile_name.clone_from(&snapshot.profile);
     self.ws_url.clone_from(&snapshot.connection_url);
     self.connected = snapshot.connected;

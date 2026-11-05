@@ -162,6 +162,7 @@ pub struct SimulatorRuntimeState {
 
 #[derive(Debug, Clone)]
 pub struct SimulatorSnapshot {
+  pub configuration: Vec<ConfigurationSnapshot>,
   pub profile: Option<String>,
   pub cp_id: Option<String>,
   pub protocol: OcppVersion,
@@ -171,6 +172,13 @@ pub struct SimulatorSnapshot {
   pub queue_depth: usize,
   pub pending_action: Option<String>,
   pub connectors: Vec<ConnectorSnapshot>,
+}
+
+/// Configuration metadata for completion without exposing stored values.
+#[derive(Debug, Clone, Copy)]
+pub struct ConfigurationSnapshot {
+  pub key: ConfigurationKey,
+  pub read_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +197,13 @@ pub enum SimulatorCommand {
   },
   Disconnect,
   Status,
+  GetConfiguration {
+    key: Option<String>,
+  },
+  SetConfiguration {
+    key: String,
+    value: String,
+  },
   Boot,
   Authorize {
     id_token: String,
@@ -550,10 +565,21 @@ impl Drop for HeartbeatTask {
 pub(in crate::simulator) enum ConfigurationOrigin {
   /// A built-in simulator default.
   Default,
-  /// A value derived from resolved local simulator settings.
+  /// A value from local simulator settings or an interactive configuration write.
   Local,
   /// A value supplied by the CSMS, including a boot response interval.
   Csms,
+}
+
+impl ConfigurationOrigin {
+  /// Returns the origin label used by local configuration queries.
+  pub(in crate::simulator) const fn label(self) -> &'static str {
+    match self {
+      Self::Default => "default",
+      Self::Local => "local",
+      Self::Csms => "csms",
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
