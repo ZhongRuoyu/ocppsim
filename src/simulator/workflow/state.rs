@@ -5,7 +5,10 @@ use super::super::{
   Result, Simulator, anyhow,
 };
 use super::configuration::validate_configuration_value;
-use crate::ocpp::{SecurityEventType, is_valid_basic_auth_password};
+use crate::ocpp::{
+  SecurityEventType, is_valid_basic_auth_password,
+  parse_file_transfer_protocols,
+};
 
 const MAX_CERTIFICATE_CHAIN_SIZE: usize = 10_000;
 
@@ -282,12 +285,7 @@ impl Simulator {
     value: &str,
     origin: ConfigurationOrigin,
   ) -> ResponseStatus {
-    let protocols = value
-      .split(',')
-      .map(str::trim)
-      .filter(|item| !item.is_empty())
-      .map(str::to_ascii_uppercase)
-      .collect::<Vec<_>>();
+    let protocols = parse_file_transfer_protocols(value);
     if protocols.is_empty() {
       return ResponseStatus::Rejected;
     }

@@ -6,3 +6,5 @@ mod metering;
 mod state;
 mod transactions;
 mod trigger;
+
+pub(super) use configuration::validate_configuration_value;

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
@@ -9,11 +10,11 @@ use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 
 use crate::config::{
-  ConfigDefaults, normalize_heartbeat_seconds, profile_names, resolve_config,
+  ConfigDefaults, ConfigOverrides, profile_names, resolve_config,
 };
 use crate::ocpp::{
-  OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
-  validate_boot_notification_fields,
+  ConfigurationKey, OcppVersion, basic_auth_password_requirement,
+  is_valid_basic_auth_password, validate_boot_notification_fields,
 };
 
 const DEFAULT_CONNECTORS: u16 = 1;
@@ -250,6 +251,8 @@ pub fn write_completion_script(
 /// Fully resolved runtime arguments after merging CLI and config profile data.
 #[derive(Debug, Clone)]
 pub struct ResolvedCliArgs {
+  pub ocpp_configs: BTreeMap<ConfigurationKey, String>,
+  pub config_warnings: Vec<String>,
   pub profile: Option<String>,
   pub config_path: Option<PathBuf>,
   pub ws_url: Option<String>,
@@ -277,11 +280,8 @@ pub struct ResolvedCliArgs {
 impl CliArgs {
   /// Resolves CLI arguments into effective simulator settings.
   ///
-  /// This method merges, in order of precedence:
-  /// 1. Built-in defaults.
-  /// 2. Global defaults from config.
-  /// 3. Charge-point profile values.
-  /// 4. Explicit CLI overrides.
+  /// CLI options override charge-point native settings, charge-point OCPP
+  /// configs, global native settings, global OCPP configs, and defaults.
   ///
   /// Returns an error when partial direct-mode flags are provided, when profile
   /// constraints are violated, or when overrides are invalid.
@@ -324,8 +324,17 @@ impl CliArgs {
       self.profile.as_deref(),
       &defaults,
       self.config_path.is_none(),
+      &ConfigOverrides {
+        protocol: self.protocol.map(ProtocolArg::to_version),
+        connectors: self.connectors,
+        heartbeat_seconds: self.heartbeat_seconds,
+        security_profile: self.security_profile,
+        basic_auth_password: self.basic_auth_password.clone(),
+      },
     )?;
     let mut resolved = ResolvedCliArgs {
+      ocpp_configs: config.ocpp_configs,
+      config_warnings: config.config_warnings,
       profile: self.profile.clone(),
       config_path: Some(config_path),
       ws_url: self.ws_url.clone().or(config.ws_url),
@@ -354,7 +363,7 @@ impl CliArgs {
         .map(|path| expand_tilde_path(&path)),
     };
 
-    apply_cli_overrides(&mut resolved, &self)?;
+    apply_cli_overrides(&mut resolved, &self);
     validate_basic_auth_password(
       resolved.protocol,
       resolved.basic_auth_password.as_deref(),
@@ -424,25 +433,10 @@ impl ProtocolArg {
   }
 }
 
-/// Applies optional CLI overrides on top of already-resolved settings.
-///
-/// This function mutates `resolved` and validates override-specific
-/// constraints, such as positive connector counts.
-fn apply_cli_overrides(
-  resolved: &mut ResolvedCliArgs,
-  cli: &CliArgs,
-) -> Result<()> {
+/// Applies command-line fields that do not overlap OCPP configuration keys.
+fn apply_cli_overrides(resolved: &mut ResolvedCliArgs, cli: &CliArgs) {
   if cli.no_append_cp_id {
     resolved.append_cp_id = false;
-  }
-  if let Some(connectors) = cli.connectors {
-    if connectors == 0 {
-      bail!("--connectors must be positive.");
-    }
-    resolved.connectors = connectors;
-  }
-  if let Some(protocol) = cli.protocol {
-    resolved.protocol = protocol.to_version();
   }
   if let Some(vendor) = &cli.vendor {
     resolved.vendor.clone_from(vendor);
@@ -465,26 +459,11 @@ fn apply_cli_overrides(
   if let Some(seconds) = cli.request_timeout_seconds {
     resolved.request_timeout_seconds = seconds;
   }
-  if let Some(seconds) = cli.heartbeat_seconds {
-    resolved.heartbeat_seconds = normalize_heartbeat_seconds(Some(seconds))?;
-  }
   if let Some(limit) = cli.outbound_queue_limit {
     resolved.outbound_queue_limit = limit;
   }
   if let Some(limit) = cli.security_event_limit {
     resolved.security_event_limit = limit;
-  }
-  if let Some(profile) = cli.security_profile {
-    validate_security_profile(profile)?;
-    resolved.security_profile = Some(profile);
-  }
-  if let Some(password) = &cli.basic_auth_password {
-    validate_basic_auth_password(
-      resolved.protocol,
-      Some(password),
-      "--basic-auth-password",
-    )?;
-    resolved.basic_auth_password = Some(password.clone());
   }
   if let Some(path) = &cli.ca_cert {
     resolved.ca_cert_path = Some(expand_tilde_path(path));
@@ -494,15 +473,6 @@ fn apply_cli_overrides(
   }
   if let Some(path) = &cli.client_key {
     resolved.client_key_path = Some(expand_tilde_path(path));
-  }
-  Ok(())
-}
-
-fn validate_security_profile(profile: u8) -> Result<()> {
-  if (1..=3).contains(&profile) {
-    Ok(())
-  } else {
-    bail!("security profile must be 1, 2, or 3.")
   }
 }
 

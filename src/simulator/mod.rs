@@ -265,6 +265,7 @@ async fn handle_connected_ws_message(
 }
 
 fn initialize_simulator_runtime(simulator: &mut Simulator) {
+  simulator.log_config_warnings();
   simulator.log(
     UiLogLevel::Info,
     "OCPP framing follows CALL/CALLRESULT/CALLERROR arrays from OCPP-J.",
@@ -405,7 +406,7 @@ impl Simulator {
         },
       );
     }
-    let security = SecurityState::new(&config);
+    let security = SecurityState::new(&config, &configuration);
 
     Self {
       config,
@@ -755,6 +756,8 @@ impl Simulator {
   /// Applies an interactive connection target before opening the WebSocket.
   fn apply_connection_config(&mut self, config: SimulatorConnectionConfig) {
     let previous_boot_scope = self.boot_registration_scope();
+    self.config.ocpp_configs = config.ocpp_configs;
+    self.config.config_warnings = config.config_warnings;
     self.config.profile = config.profile;
     self.config.ws_url = Some(config.ws_url);
     self.config.cp_id = Some(config.cp_id);
@@ -782,7 +785,14 @@ impl Simulator {
     self.resize_connectors(config.connectors);
     self.apply_heartbeat_config(config.heartbeat_seconds);
     self.refresh_runtime_configuration_entries();
+    self.log_config_warnings();
     self.emit_snapshot();
+  }
+
+  fn log_config_warnings(&self) {
+    for warning in &self.config.config_warnings {
+      self.log(UiLogLevel::Warn, warning.clone());
+    }
   }
 
   fn boot_registration_scope(&self) -> BootRegistrationScope {
@@ -856,31 +866,52 @@ impl Simulator {
 
   fn refresh_runtime_configuration_entries(&mut self) {
     let mut local_entries = default_configuration_entries(&self.config);
-    if self.security.cpo_name_is_derived {
-      self.security.cpo_name.clone_from(&self.config.vendor);
+    let refresh_organization = self.security.cpo_name_is_derived
+      || self
+        .config
+        .ocpp_configs
+        .contains_key(&ConfigurationKey::CpoName)
+      || self.configuration[&ConfigurationKey::CpoName].origin
+        == ConfigurationOrigin::Profile;
+    if refresh_organization {
+      self
+        .security
+        .cpo_name
+        .clone_from(&local_entries[&ConfigurationKey::CpoName].value);
+      self.security.cpo_name_is_derived = !self
+        .config
+        .ocpp_configs
+        .contains_key(&ConfigurationKey::CpoName);
     }
-    for key in [
-      ConfigurationKey::NumberOfConnectors,
-      ConfigurationKey::HeartbeatInterval,
-      ConfigurationKey::SecurityProfile,
-      ConfigurationKey::AuthorizationKey,
-      ConfigurationKey::BasicAuthPassword,
-      ConfigurationKey::CpoName,
-      ConfigurationKey::OrganizationName,
-    ] {
-      if matches!(
+    for (key, entry) in &mut self.configuration {
+      let connection_setting = matches!(
+        key,
+        ConfigurationKey::NumberOfConnectors
+          | ConfigurationKey::HeartbeatInterval
+          | ConfigurationKey::SecurityProfile
+          | ConfigurationKey::AuthorizationKey
+          | ConfigurationKey::BasicAuthPassword
+      );
+      let organization = matches!(
         key,
         ConfigurationKey::CpoName | ConfigurationKey::OrganizationName
-      ) && !self.security.cpo_name_is_derived
-      {
-        continue;
-      }
-      if let Some(entry) = self.configuration.get_mut(&key)
-        && let Some(local_entry) = local_entries.remove(&key)
-      {
+      );
+      // A profile replaces declared values and clears its old values, but
+      // leaves unrelated explicit runtime overrides intact.
+      let refresh = connection_setting
+        || (organization && refresh_organization)
+        || (!organization
+          && (entry.origin == ConfigurationOrigin::Profile
+            || self.config.ocpp_configs.contains_key(&key.canonical())));
+      if refresh && let Some(local_entry) = local_entries.remove(key) {
         *entry = local_entry;
       }
     }
+    self.security.supported_file_transfer_protocols =
+      crate::ocpp::parse_file_transfer_protocols(
+        &self.configuration[&ConfigurationKey::SupportedFileTransferProtocols]
+          .value,
+      );
     for key in [
       ConfigurationKey::AdditionalRootCertificateCheck,
       ConfigurationKey::CertificateSignedMaxChainSize,

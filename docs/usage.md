@@ -98,6 +98,53 @@ An explicit `--config-path` or a selected profile requires the file to exist.
 Invalid configuration files report an error in every mode.
 Profile values override global defaults, and CLI flags override both.
 
+OCPP configuration items can be set in a global `[configs]` table or a
+`[charge-points.<name>.configs]` table.
+Values may be TOML booleans, integers, or quoted strings and use the same
+value-format validation as the interactive `config set` command.
+Use a quoted comma-separated string for protocol lists, such as `"HTTP,HTTPS"`.
+Unknown items, unsupported items, and invalid values reject the load.
+
+For items that also have a native setting, precedence is highest to lowest:
+
+1. Command-line option.
+2. Charge-point native setting.
+3. Charge-point OCPP config.
+4. Global native setting.
+5. Global OCPP config.
+6. Built-in default.
+
+| OCPP config                             | Native setting / command-line option            |
+| --------------------------------------- | ----------------------------------------------- |
+| `HeartbeatInterval`                     | `heartbeat-seconds` / `--heartbeat-seconds`     |
+| `NumberOfConnectors`                    | `connectors` / `--connectors`                   |
+| `SecurityProfile`                       | `security-profile` / `--security-profile`       |
+| `AuthorizationKey`, `BasicAuthPassword` | `basic-auth-password` / `--basic-auth-password` |
+
+Startup `NumberOfConnectors` and `SecurityProfile` values configure the native
+simulator state even when their OCPP readback is read-only.
+Other read-only configuration items cannot be overridden in `[configs]`.
+`heartbeat-seconds = 0` retains its meaning of disabling startup heartbeats;
+`HeartbeatInterval` itself must be positive.
+`vendor` supplies an organization-name fallback and is not an alias for
+`CpoName`.
+
+Conflicting OCPP and native values in the same scope produce a warning when
+loaded, including at startup and through `connect <profile>`.
+The native setting wins within that scope, even if a higher scope or CLI option
+ultimately wins overall.
+Matching values and cross-scope overrides do not produce conflict warnings.
+Warnings name the settings without exposing their values.
+
+Configuration aliases share precedence: for example, a profile's
+`OrganizationName` overrides a global `CpoName`.
+Conflicting aliases within one `[configs]` table are rejected.
+An explicitly loaded value replaces an existing local edit or CSMS value.
+Native connection settings continue to be reapplied on profile load.
+For other OCPP items, values owned by the previous profile return to defaults
+when omitted by the new profile; unrelated local or CSMS overrides remain
+intact.
+
 Below is a sample config file with all available options.
 
 ```toml
@@ -120,11 +167,20 @@ ca-cert = "./csms-root.pem"
 client-cert = "./charge-point.pem"
 client-key = "./charge-point-key.pem"
 
+[configs]
+AuthorizeRemoteTxRequests = true
+CpoName = "ocppsim"
+
 [charge-points.example]
 ws-url = "wss://csms.example.com/ocpp"
 id = "CP-001"
 append-cp-id = true
 connectors = 1
+
+[charge-points.example.configs]
+AuthorizeRemoteTxRequests = false
+CpoName = "example-cpo"
+HeartbeatInterval = 20
 
 [charge-points.yard]
 ws-url = "wss://csms.example.com/ocpp"
@@ -165,7 +221,8 @@ the mouse and remain available after `ocppsim` exits.
 
 - `status`: show current simulator state.
 - `config list`: show all supported configuration items, their values, access
-  modes, and origins (`default`, `local`, or `csms`).
+  modes, and origins (`default`, `local`, `profile`, or `csms`).
+  `profile` identifies a value loaded from either TOML `[configs]` table.
 - `config get <key>`: show one configuration item.
 - `config set <key> <value>`: validate and set a writable item locally.
   A successful write sets its origin to `local`, including when the value is

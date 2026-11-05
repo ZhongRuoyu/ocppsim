@@ -20,6 +20,7 @@ mod configuration;
 mod connection;
 mod measurands;
 mod metering;
+mod profiles;
 mod schema_validation;
 mod security;
 mod state;
@@ -29,6 +30,8 @@ mod ws_lifecycle;
 
 fn simulator_test_config(protocol: OcppVersion) -> SimulatorConfig {
   SimulatorConfig {
+    ocpp_configs: std::collections::BTreeMap::new(),
+    config_warnings: Vec::new(),
     profile: None,
     ws_url: Some("ws://localhost:9000/ocpp".to_string()),
     cp_id: Some("CP-TEST".to_string()),

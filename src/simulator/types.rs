@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use anyhow::Result;
+
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -11,10 +13,13 @@ use crate::metering::{MeterReading, MeterReadings, MeterUpdate};
 use crate::ocpp::{
   ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
   OcppVersion, SecurityEventType, StopReason, TransactionTriggerReason,
+  parse_file_transfer_protocols,
 };
 
 #[derive(Debug, Clone)]
 pub struct SimulatorConfig {
+  pub ocpp_configs: BTreeMap<ConfigurationKey, String>,
+  pub config_warnings: Vec<String>,
   pub profile: Option<String>,
   pub ws_url: Option<String>,
   pub cp_id: Option<String>,
@@ -38,9 +43,11 @@ pub struct SimulatorConfig {
 }
 
 impl SimulatorConfig {
-  /// Converts resolved CLI arguments into simulator runtime configuration.
-  pub fn from_resolved(args: &ResolvedCliArgs) -> Self {
-    Self {
+  /// Converts resolved arguments and validates OCPP values before applying them.
+  pub fn from_resolved(args: &ResolvedCliArgs) -> Result<Self> {
+    let config = Self {
+      ocpp_configs: args.ocpp_configs.clone(),
+      config_warnings: args.config_warnings.clone(),
       profile: args.profile.clone(),
       ws_url: args.ws_url.clone(),
       cp_id: args.cp_id.clone(),
@@ -61,12 +68,24 @@ impl SimulatorConfig {
       ca_cert_path: args.ca_cert_path.clone(),
       client_cert_path: args.client_cert_path.clone(),
       client_key_path: args.client_key_path.clone(),
-    }
+    };
+    super::support::validate_profile_configuration(&config).map_err(
+      |error| {
+        let path = args.config_path.as_deref().map_or_else(
+          || "configuration".to_string(),
+          |path| path.display().to_string(),
+        );
+        anyhow::anyhow!("Invalid OCPP configs in {path}: {error}")
+      },
+    )?;
+    Ok(config)
   }
 }
 
 #[derive(Debug, Clone)]
 pub struct SimulatorConnectionConfig {
+  pub ocpp_configs: BTreeMap<ConfigurationKey, String>,
+  pub config_warnings: Vec<String>,
   pub profile: Option<String>,
   pub ws_url: String,
   pub cp_id: String,
@@ -92,12 +111,17 @@ pub struct SimulatorConnectionConfig {
 impl SimulatorConnectionConfig {
   /// Converts resolved arguments into a connection target.
   ///
-  /// Returns `None` for offline-only arguments without a WebSocket URL or
-  /// charge point ID.
-  pub fn from_resolved(args: &ResolvedCliArgs) -> Option<Self> {
-    let ws_url = args.ws_url.clone()?;
-    let cp_id = args.cp_id.clone()?;
-    Some(Self {
+  /// Rejects invalid OCPP values before a profile can change runtime state.
+  /// Returns `Ok(None)` when a WebSocket URL or charge point ID is absent.
+  pub fn from_resolved(args: &ResolvedCliArgs) -> Result<Option<Self>> {
+    SimulatorConfig::from_resolved(args)?;
+    let (Some(ws_url), Some(cp_id)) = (args.ws_url.clone(), args.cp_id.clone())
+    else {
+      return Ok(None);
+    };
+    Ok(Some(Self {
+      ocpp_configs: args.ocpp_configs.clone(),
+      config_warnings: args.config_warnings.clone(),
       profile: args.profile.clone(),
       ws_url,
       cp_id,
@@ -118,7 +142,7 @@ impl SimulatorConnectionConfig {
       ca_cert_path: args.ca_cert_path.clone(),
       client_cert_path: args.client_cert_path.clone(),
       client_key_path: args.client_key_path.clone(),
-    })
+    }))
   }
 }
 
@@ -440,19 +464,23 @@ pub(in crate::simulator) struct SecurityState {
 }
 
 impl SecurityState {
-  pub(in crate::simulator) fn new(config: &SimulatorConfig) -> Self {
+  pub(in crate::simulator) fn new(
+    config: &SimulatorConfig,
+    configuration: &BTreeMap<ConfigurationKey, ConfigurationEntry>,
+  ) -> Self {
     Self {
       security_profile: config.security_profile,
       basic_auth_password: config.basic_auth_password.clone(),
       additional_root_certificate_check: false,
       certificate_store_max_length: 10,
       certificate_signed_max_chain_size: 10_000,
-      cpo_name: config.vendor.clone(),
-      cpo_name_is_derived: true,
-      supported_file_transfer_protocols: vec![
-        "HTTP".to_string(),
-        "HTTPS".to_string(),
-      ],
+      cpo_name: configuration[&ConfigurationKey::CpoName].value.clone(),
+      cpo_name_is_derived: !config
+        .ocpp_configs
+        .contains_key(&ConfigurationKey::CpoName),
+      supported_file_transfer_protocols: parse_file_transfer_protocols(
+        &configuration[&ConfigurationKey::SupportedFileTransferProtocols].value,
+      ),
       certificates: Vec::new(),
       events: Vec::new(),
       next_event_id: 1,
@@ -567,6 +595,8 @@ pub(in crate::simulator) enum ConfigurationOrigin {
   Default,
   /// A value from local simulator settings or an interactive configuration write.
   Local,
+  /// An explicit value from a global or charge-point TOML configs table.
+  Profile,
   /// A value supplied by the CSMS, including a boot response interval.
   Csms,
 }
@@ -577,6 +607,7 @@ impl ConfigurationOrigin {
     match self {
       Self::Default => "default",
       Self::Local => "local",
+      Self::Profile => "profile",
       Self::Csms => "csms",
     }
   }

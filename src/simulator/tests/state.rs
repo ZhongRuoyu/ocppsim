@@ -8,6 +8,8 @@ fn connection_config_for_state_tests(
   protocol: OcppVersion,
 ) -> SimulatorConnectionConfig {
   SimulatorConnectionConfig {
+    ocpp_configs: std::collections::BTreeMap::new(),
+    config_warnings: Vec::new(),
     profile: None,
     ws_url: "ws://localhost:9000/ocpp".to_string(),
     cp_id: "CP-TEST".to_string(),

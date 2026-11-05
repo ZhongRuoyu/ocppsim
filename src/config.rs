@@ -1,13 +1,26 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
 use crate::ocpp::{
-  OcppVersion, basic_auth_password_requirement, is_valid_basic_auth_password,
-  validate_boot_notification_fields, validate_heartbeat_interval,
+  ConfigurationKey, OcppVersion, basic_auth_password_requirement,
+  is_valid_basic_auth_password, validate_boot_notification_fields,
+  validate_heartbeat_interval,
 };
+
+mod ocpp_configs;
+
+/// Explicit command-line settings that overlap OCPP configuration values.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigOverrides {
+  pub protocol: Option<OcppVersion>,
+  pub connectors: Option<u16>,
+  pub heartbeat_seconds: Option<u64>,
+  pub security_profile: Option<u8>,
+  pub basic_auth_password: Option<String>,
+}
 
 /// Built-in defaults used when profile/global config entries are omitted.
 #[derive(Debug, Clone)]
@@ -25,6 +38,8 @@ pub struct ConfigDefaults {
 /// Final settings after merging defaults, global config, and a profile.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
+  pub ocpp_configs: BTreeMap<ConfigurationKey, String>,
+  pub config_warnings: Vec<String>,
   pub ws_url: Option<String>,
   pub cp_id: Option<String>,
   pub append_cp_id: bool,
@@ -49,6 +64,9 @@ pub struct ResolvedConfig {
 
 #[derive(Debug, Default, Deserialize)]
 struct ConfigFile {
+  #[serde(default)]
+  configs: BTreeMap<String, toml::Value>,
+  connectors: Option<u16>,
   protocol: Option<String>,
   vendor: Option<String>,
   model: Option<String>,
@@ -82,6 +100,8 @@ struct ConfigFile {
 
 #[derive(Debug, Default, Deserialize)]
 struct ProfileConfig {
+  #[serde(default)]
+  configs: BTreeMap<String, toml::Value>,
   #[serde(rename = "ws-url")]
   ws_url: Option<String>,
   id: Option<String>,
@@ -127,6 +147,7 @@ pub fn resolve_config(
   profile_name: Option<&str>,
   defaults: &ConfigDefaults,
   allow_missing: bool,
+  overrides: &ConfigOverrides,
 ) -> Result<ResolvedConfig> {
   let mut global =
     load_config(config_path, allow_missing && profile_name.is_none())?;
@@ -138,7 +159,9 @@ pub fn resolve_config(
 
   let protocol_label =
     profile.protocol.as_deref().or(global.protocol.as_deref());
-  let protocol = if let Some(label) = protocol_label {
+  let protocol = if let Some(protocol) = overrides.protocol {
+    protocol
+  } else if let Some(label) = protocol_label {
     parse_protocol_label(label).with_context(|| {
       format!(
         "Invalid `protocol` in {} ({}).",
@@ -150,20 +173,12 @@ pub fn resolve_config(
     defaults.protocol
   };
 
-  let security_profile = profile.security_profile.or(global.security_profile);
-  if let Some(profile_number) = security_profile
-    && !(1..=3).contains(&profile_number)
-  {
-    bail!(
-      "{} has invalid `security-profile={}` in {}.",
-      source,
-      profile_number,
-      config_path.display()
-    );
-  }
-
-  let basic_auth_password =
-    profile.basic_auth_password.or(global.basic_auth_password);
+  let configured =
+    ocpp_configs::resolve(&global, &profile, profile_name, overrides).map_err(
+      |error| anyhow!("{source} in {}: {error}", config_path.display()),
+    )?;
+  let security_profile = configured.security_profile;
+  let basic_auth_password = configured.basic_auth_password;
   if let Some(password) = basic_auth_password.as_deref()
     && !is_valid_basic_auth_password(protocol, password)
   {
@@ -190,10 +205,12 @@ pub fn resolve_config(
   )?;
 
   Ok(ResolvedConfig {
+    ocpp_configs: configured.values,
+    config_warnings: configured.warnings,
     ws_url: profile.ws_url,
     cp_id: profile.id,
     append_cp_id: profile.append_cp_id.unwrap_or(true),
-    connectors: profile.connectors.unwrap_or(defaults.connectors),
+    connectors: configured.connectors.unwrap_or(defaults.connectors),
     protocol,
     vendor,
     model,
@@ -208,9 +225,7 @@ pub fn resolve_config(
       .request_timeout_seconds
       .or(global.request_timeout_seconds)
       .unwrap_or(defaults.request_timeout_seconds),
-    heartbeat_seconds: normalize_heartbeat_seconds(
-      profile.heartbeat_seconds.or(global.heartbeat_seconds),
-    )?,
+    heartbeat_seconds: configured.heartbeat_seconds,
     outbound_queue_limit: profile
       .outbound_queue_limit
       .or(global.outbound_queue_limit)
@@ -251,9 +266,6 @@ fn select_profile(
   )?);
   profile.id =
     Some(required_profile_value(profile.id, name, config_path, "id")?);
-  if let Some(connectors) = profile.connectors {
-    validate_profile_connectors(name, config_path, connectors)?;
-  }
   Ok(profile)
 }
 
@@ -263,21 +275,6 @@ fn merged_string(
   default: &str,
 ) -> String {
   profile.or(global).unwrap_or_else(|| default.to_string())
-}
-
-fn validate_profile_connectors(
-  profile_name: &str,
-  config_path: &Path,
-  connectors: u16,
-) -> Result<()> {
-  if connectors != 0 {
-    return Ok(());
-  }
-  bail!(
-    "Profile `{}` has invalid `connectors=0` in {}.",
-    profile_name,
-    config_path.display()
-  );
 }
 
 fn validate_boot_identity(
@@ -438,8 +435,14 @@ vendor = "ocppsim"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_config(&path, Some("test"), &defaults, false)
-      .expect_err("empty config should not resolve a profile");
+    let error = super::resolve_config(
+      &path,
+      Some("test"),
+      &defaults,
+      false,
+      &super::ConfigOverrides::default(),
+    )
+    .expect_err("empty config should not resolve a profile");
     assert_eq!(
       error.to_string(),
       format!("Profile `test` was not found in {}.", path.display())
@@ -471,8 +474,14 @@ basic-auth-password = "not-a-hex-password"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_config(&path, Some("demo"), &defaults, false)
-      .expect_err("invalid password should not resolve");
+    let error = super::resolve_config(
+      &path,
+      Some("demo"),
+      &defaults,
+      false,
+      &super::ConfigOverrides::default(),
+    )
+    .expect_err("invalid password should not resolve");
     assert!(
       error.to_string().contains("basic-auth-password"),
       "unexpected error: {error}"
@@ -506,8 +515,14 @@ basic-auth-password = "not-a-hex-passwd"
       security_event_limit: 1000,
     };
 
-    let resolved = super::resolve_config(&path, Some("demo"), &defaults, false)
-      .expect("profile");
+    let resolved = super::resolve_config(
+      &path,
+      Some("demo"),
+      &defaults,
+      false,
+      &super::ConfigOverrides::default(),
+    )
+    .expect("profile");
     assert_eq!(
       resolved.basic_auth_password.as_deref(),
       Some("not-a-hex-passwd")
@@ -539,8 +554,14 @@ id = "CP-DEMO"
       security_event_limit: 1000,
     };
 
-    let error = super::resolve_config(&path, Some("demo"), &defaults, false)
-      .expect_err("invalid vendor should not resolve");
+    let error = super::resolve_config(
+      &path,
+      Some("demo"),
+      &defaults,
+      false,
+      &super::ConfigOverrides::default(),
+    )
+    .expect_err("invalid vendor should not resolve");
     assert!(
       error.to_string().contains("BootNotification identity"),
       "unexpected error: {error}"

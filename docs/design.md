@@ -95,14 +95,17 @@ OCPP 2.0.1 and OCPP 2.1 expose the same backing values through
 `GetVariables` and `SetVariables` for component `ChargingStation` or
 `SecurityCtrlr`.
 Each entry tracks the origin of its current value: a built-in default, a value
-from local simulator settings or a `config set` command, or a value supplied by
-the CSMS.
+from local simulator settings or a `config set` command, a TOML OCPP config, or
+a value supplied by the CSMS.
 Vendor-derived organization defaults are tracked separately from explicit writes
 so profile changes can refresh defaults while preserving overrides.
 Accepted writes update the origin even if the value is unchanged.
 Rejected writes preserve it, and security-profile rollback restores the previous
 origin along with the value.
 This metadata remains internal and is not included in OCPP responses.
+TOML values are validated before startup or a connection-profile change.
+Explicit profile values replace runtime overrides; omitted values from the
+previous profile fall back to defaults without clearing unrelated runtime edits.
 The mapping table and unsupported variable scope live in
 [`ocpp-support.md`](ocpp-support.md).
 

@@ -58,7 +58,7 @@ pub async fn run() -> Result<()> {
   let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SimulatorCommand>();
   let (ui_tx, mut ui_rx) = mpsc::unbounded_channel();
 
-  let config = SimulatorConfig::from_resolved(&resolved);
+  let config = SimulatorConfig::from_resolved(&resolved)?;
   let simulator_task =
     tokio::spawn(run_simulator(config, cmd_rx, ui_tx, cmd_tx.clone()));
 
@@ -343,7 +343,7 @@ fn resolve_connect_config(
       cli_args.resolve_direct_for_connect(ws_url, cp_id)?
     }
   };
-  Ok(SimulatorConnectionConfig::from_resolved(&resolved))
+  SimulatorConnectionConfig::from_resolved(&resolved)
 }
 
 /// Queues a generic local reading query without changing or sending values.

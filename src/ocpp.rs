@@ -32,6 +32,16 @@ pub fn validate_heartbeat_interval(seconds: u64) -> Result<(), String> {
   }
 }
 
+/// Normalizes a comma-separated list of file-transfer protocol names.
+pub fn parse_file_transfer_protocols(value: &str) -> Vec<String> {
+  value
+    .split(',')
+    .map(str::trim)
+    .filter(|item| !item.is_empty())
+    .map(str::to_ascii_uppercase)
+    .collect()
+}
+
 /// Returns the human-readable Basic Auth password requirement for a protocol.
 pub fn basic_auth_password_requirement(protocol: OcppVersion) -> &'static str {
   match protocol {
@@ -494,6 +504,16 @@ impl ConfigurationKey {
         | Self::OrganizationName
         | Self::SupportedFileTransferProtocols
     )
+  }
+
+  /// Returns the shared storage key for configuration aliases.
+  pub const fn canonical(self) -> Self {
+    match self {
+      Self::BasicAuthPassword => Self::AuthorizationKey,
+      Self::OrganizationName => Self::CpoName,
+      Self::CertificateSignedMaxChainSize => Self::MaxCertificateChainSize,
+      _ => self,
+    }
   }
 
   /// Returns finite value choices, or an empty slice for free-form values.

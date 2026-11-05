@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use chrono::{SecondsFormat, Utc};
 use serde_json::Value;
 
@@ -17,7 +17,43 @@ pub(in crate::simulator) fn default_configuration_entries(
 ) -> BTreeMap<ConfigurationKey, ConfigurationEntry> {
   let mut entries = core_configuration_entries(config);
   entries.extend(security_configuration_entries(config));
+  for (key, entry) in &mut entries {
+    if let Some(value) = config.ocpp_configs.get(&key.canonical()) {
+      if !key.is_sensitive() {
+        entry.value.clone_from(value);
+      }
+      entry.origin = ConfigurationOrigin::Profile;
+    }
+  }
   entries
+}
+
+/// Validates loaded OCPP values before startup or a connection-profile switch.
+pub(in crate::simulator) fn validate_profile_configuration(
+  config: &SimulatorConfig,
+) -> Result<()> {
+  let entries = default_configuration_entries(config);
+  for (key, value) in &config.ocpp_configs {
+    let entry = entries
+      .get(key)
+      .ok_or_else(|| anyhow!("Unsupported OCPP config: {}.", key.as_str()))?;
+    // These settings also configure native startup state, even when OCPP
+    // exposes their resulting values as read-only.
+    if entry.read_only
+      && !matches!(
+        key,
+        ConfigurationKey::NumberOfConnectors
+          | ConfigurationKey::SecurityProfile
+      )
+    {
+      bail!("OCPP config {} is read-only.", key.as_str());
+    }
+    super::workflow::validate_configuration_value(config.protocol, *key, value)
+      .map_err(|error| {
+        anyhow!("Invalid OCPP config {}: {error}", key.as_str())
+      })?;
+  }
+  Ok(())
 }
 
 fn core_configuration_entries(
