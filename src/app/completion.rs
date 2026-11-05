@@ -37,6 +37,7 @@ const CONNECT_URL_PREFIXES: &[&str] = &["ws://", "wss://"];
 #[derive(Debug, Clone)]
 pub(super) struct CompletionState {
   base: String,
+  suffix: String,
   candidates: Vec<String>,
   index: usize,
 }
@@ -46,9 +47,11 @@ impl CompletionState {
     base: String,
     candidates: Vec<String>,
     index: usize,
+    suffix: String,
   ) -> Self {
     Self {
       base,
+      suffix,
       candidates,
       index,
     }
@@ -58,11 +61,59 @@ impl CompletionState {
     self.candidates.is_empty()
   }
 
-  pub(super) fn next_value(&mut self, reverse: bool) -> String {
+  /// Returns the completed line and cursor, retaining the following text.
+  pub(super) fn value(&self) -> (String, usize) {
+    let candidate = &self.candidates[self.index];
+    let candidate = if self.suffix.is_empty() {
+      candidate.as_str()
+    } else {
+      candidate.trim_end()
+    };
+    // A quoted list may already have its closing quote or later members.
+    let candidate = if self.suffix.trim_start().starts_with(['"', ',']) {
+      candidate.strip_suffix('"').unwrap_or(candidate)
+    } else {
+      candidate
+    };
+    let prefix = format!("{}{candidate}", self.base);
+    let cursor = prefix.len();
+    (format!("{prefix}{}", self.suffix), cursor)
+  }
+
+  /// Advances through candidates while retaining the original following text.
+  pub(super) fn next_value(&mut self, reverse: bool) -> (String, usize) {
     self.index =
       next_completion_index(self.index, self.candidates.len(), reverse);
-    format!("{}{}", self.base, self.candidates[self.index])
+    self.value()
   }
+}
+
+/// Returns text after the word or protocol-list member being completed.
+pub(super) fn completion_suffix(input: &str, cursor: usize) -> &str {
+  let prefix = &input[..cursor];
+  let parts = prefix.split_whitespace().collect::<Vec<_>>();
+  let in_protocol_list = parts.len() >= 3
+    && parts[0].eq_ignore_ascii_case("config")
+    && parts[1].eq_ignore_ascii_case("set")
+    && ConfigurationKey::parse(parts[2])
+      == Some(ConfigurationKey::SupportedFileTransferProtocols)
+    && (parts.len() > 3 || prefix.ends_with(char::is_whitespace));
+  let remaining = &input[cursor..];
+  // At the start of a quoted value, replace that whole argument. Inside it,
+  // retain the closing quote and any later list members.
+  if in_protocol_list && !prefix.contains('"') && remaining.starts_with('"') {
+    let mut values =
+      serde_json::Deserializer::from_str(remaining).into_iter::<String>();
+    if values.next().is_some_and(|value| value.is_ok()) {
+      return &remaining[values.byte_offset()..];
+    }
+  }
+  let end = remaining
+    .find(|ch: char| {
+      ch.is_whitespace() || (in_protocol_list && matches!(ch, ',' | '"'))
+    })
+    .unwrap_or(remaining.len());
+  &remaining[end..]
 }
 
 pub(super) fn completion_seed(
@@ -653,14 +704,21 @@ mod tests {
       "config set AuthorizeRemoteTxRequests ".to_string(),
       vec!["false ".to_string(), "true ".to_string()],
       0,
+      String::new(),
     );
     assert_eq!(
       cycle.next_value(false),
-      "config set AuthorizeRemoteTxRequests true "
+      (
+        "config set AuthorizeRemoteTxRequests true ".to_string(),
+        "config set AuthorizeRemoteTxRequests true ".len(),
+      )
     );
     assert_eq!(
       cycle.next_value(true),
-      "config set AuthorizeRemoteTxRequests false "
+      (
+        "config set AuthorizeRemoteTxRequests false ".to_string(),
+        "config set AuthorizeRemoteTxRequests false ".len(),
+      )
     );
   }
 

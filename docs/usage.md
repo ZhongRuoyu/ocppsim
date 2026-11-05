@@ -336,6 +336,11 @@ Each command sends only its named measurand.
 During an active OCPP 2.x transaction, these sends use `TransactionEvent`;
 otherwise, they use `MeterValues`.
 
+Tab and Shift-Tab complete at the cursor and cycle forward or backward.
+Only text before the cursor determines the available candidates.
+Completion replaces the current word (or protocol-list member) and preserves
+later arguments and list members, keeping the cursor at the completed text.
+
 ## Shell Completions
 
 `ocppsim` can generate shell completion setup scripts:

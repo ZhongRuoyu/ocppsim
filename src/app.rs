@@ -34,7 +34,8 @@ mod completion;
 mod history;
 
 use completion::{
-  CompletionState, completion_seed, configuration_completion_seed,
+  CompletionState, completion_seed, completion_suffix,
+  configuration_completion_seed,
 };
 use history::CommandHistory;
 
@@ -861,29 +862,25 @@ impl TerminalApp {
     self.history.leave_navigation();
   }
 
-  /// Performs tab completion cycling for the current input line.
+  /// Completes at the cursor using only preceding text to select candidates.
   ///
   /// When `reverse` is `true`, candidates are traversed backward.
   fn complete_input(&mut self, reverse: bool) {
-    if self.cursor != self.input.len() {
-      self.cursor = self.input.len();
-    }
-
     if let Some(state) = self.completion.as_mut() {
       if state.is_empty() {
         self.completion = None;
         return;
       }
-      self.input = state.next_value(reverse);
-      self.cursor = self.input.len();
+      (self.input, self.cursor) = state.next_value(reverse);
       return;
     }
 
+    let prefix = &self.input[..self.cursor];
     let Some((base, candidates)) =
-      configuration_completion_seed(&self.input, &self.configuration).or_else(
+      configuration_completion_seed(prefix, &self.configuration).or_else(
         || {
           completion_seed(
-            &self.input,
+            prefix,
             self.protocol,
             &self.known_connectors,
             &self.profile_completions,
@@ -899,11 +896,12 @@ impl TerminalApp {
 
     let index = if reverse { candidates.len() - 1 } else { 0 };
 
-    self.input = format!("{}{}", base, candidates[index]);
-    self.cursor = self.input.len();
-
-    if candidates.len() > 1 {
-      self.completion = Some(CompletionState::new(base, candidates, index));
+    let multiple = candidates.len() > 1;
+    let suffix = completion_suffix(&self.input, self.cursor).to_string();
+    let state = CompletionState::new(base, candidates, index, suffix);
+    (self.input, self.cursor) = state.value();
+    if multiple {
+      self.completion = Some(state);
     }
   }
 
@@ -1234,8 +1232,10 @@ mod tests {
 
   use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-  use crate::ocpp::OcppVersion;
-  use crate::simulator::{SimulatorRuntimeState, UiEvent};
+  use crate::ocpp::{ConfigurationKey, OcppVersion};
+  use crate::simulator::{
+    ConfigurationSnapshot, SimulatorRuntimeState, UiEvent,
+  };
 
   use super::{
     InputAction, PromptClearLayout, PromptSnapshot, TerminalApp,
@@ -1611,6 +1611,148 @@ mod tests {
 
     press_with_modifiers(&mut app, KeyCode::Right, KeyModifiers::ALT);
     assert_eq!(app.cursor, app.input.len());
+  }
+
+  #[test]
+  fn completion_replaces_the_current_word_and_cycles_at_the_cursor() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.input = "stale 1 caf\u{e9}".to_string();
+    app.cursor = "sta".len();
+    for (key, command) in [
+      (KeyCode::Tab, "status"),
+      (KeyCode::Tab, "start"),
+      (KeyCode::BackTab, "status"),
+      (KeyCode::BackTab, "standards"),
+    ] {
+      press(&mut app, key);
+      assert_eq!(app.input, format!("{command} 1 caf\u{e9}"));
+      assert_eq!(app.cursor, command.len());
+    }
+    press_with_modifiers(&mut app, KeyCode::Tab, KeyModifiers::SHIFT);
+    assert_eq!(app.input, "start 1 caf\u{e9}");
+    assert_eq!(app.cursor, "start".len());
+  }
+
+  #[test]
+  fn completion_ignores_later_arguments_for_all_candidate_sources() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.known_connectors = vec![1, 2];
+    app.set_profile_completions(vec!["caf\u{e9}".to_string()]);
+    app.configuration = [
+      ConfigurationKey::HeartbeatInterval,
+      ConfigurationKey::AuthorizeRemoteTxRequests,
+    ]
+    .map(|key| ConfigurationSnapshot {
+      key,
+      read_only: false,
+    })
+    .to_vec();
+    for (input, prefix, expected, cursor) in [
+      ("connect 1", "", "status 1", "status"),
+      ("conxx 1", "con", "config 1", "config"),
+      ("start 9 token", "start ", "start 1 token", "start 1"),
+      ("stop 1  Local", "stop 1", "stop 1  Local", "stop 1"),
+      (
+        "connect caf\u{e9}xxx next",
+        "connect caf\u{e9}",
+        "connect caf\u{e9} next",
+        "connect caf\u{e9}",
+      ),
+      (
+        "measurand 1 Socxxx 25",
+        "measurand 1 So",
+        "measurand 1 SoC 25",
+        "measurand 1 SoC",
+      ),
+      (
+        "config set Heartxxx 25",
+        "config set Heart",
+        "config set HeartbeatInterval 25",
+        "config set HeartbeatInterval",
+      ),
+      (
+        "config set AuthorizeRemoteTxRequests true extra",
+        "config set AuthorizeRemoteTxRequests t",
+        "config set AuthorizeRemoteTxRequests true extra",
+        "config set AuthorizeRemoteTxRequests true",
+      ),
+    ] {
+      app.input = input.to_string();
+      app.cursor = prefix.len();
+      app.clear_completion();
+      press(&mut app, KeyCode::Tab);
+      assert_eq!(app.input, expected, "{input}");
+      assert_eq!(app.cursor, cursor.len(), "{input}");
+    }
+  }
+
+  #[test]
+  fn completion_preserves_later_protocol_members_and_existing_quotes() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.configuration = vec![ConfigurationSnapshot {
+      key: ConfigurationKey::SupportedFileTransferProtocols,
+      read_only: false,
+    }];
+    let command = "config set SupportedFileTransferProtocols ";
+    for (value, prefix, expected, completed) in [
+      ("Fxxx,FTP", "F", "FTP,FTP", "FTP"),
+      (r#""Fxxx,FTP""#, r#""F"#, r#""FTP,FTP""#, r#""FTP"#),
+      (r#""Hxxx""#, r#""H"#, r#""HTTP""#, r#""HTTP"#),
+      (
+        r#""HTTP,HTTPS,FTPS,Fxxx""#,
+        r#""HTTP,HTTPS,FTPS,F"#,
+        r#""HTTP,HTTPS,FTPS,FTP""#,
+        r#""HTTP,HTTPS,FTPS,FTP"#,
+      ),
+      (
+        r#""HTTP,HTTPS,FTPS,Fxxx ,FTP""#,
+        r#""HTTP,HTTPS,FTPS,F"#,
+        r#""HTTP,HTTPS,FTPS,FTP ,FTP""#,
+        r#""HTTP,HTTPS,FTPS,FTP"#,
+      ),
+      (r#""HTTP, FTP""#, "", "HTTP", "HTTP"),
+    ] {
+      app.input = format!("{command}{value}");
+      app.cursor = command.len() + prefix.len();
+      app.clear_completion();
+      press(&mut app, KeyCode::Tab);
+      assert_eq!(app.input, format!("{command}{expected}"));
+      assert_eq!(app.cursor, command.len() + completed.len());
+      assert!(crate::commands::parse_command(&app.input).is_ok());
+    }
+  }
+
+  #[test]
+  fn completion_keeps_the_cursor_when_no_candidates_match() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    for (input, prefix) in [
+      ("unknown argument", "unk"),
+      ("connect missing next", "connect miss"),
+      ("data-transfer vendor message", "data-transfer ven"),
+    ] {
+      app.input = input.to_string();
+      app.cursor = prefix.len();
+      press(&mut app, KeyCode::Tab);
+      assert_eq!(app.input, input);
+      assert_eq!(app.cursor, prefix.len());
+    }
+  }
+
+  #[test]
+  fn cursor_movement_and_edits_reset_completion_candidates() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.input = "connect profile".to_string();
+    app.cursor = "con".len();
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.input, "config profile");
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.input, "config profile");
+
+    press(&mut app, KeyCode::Home);
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.input, "status profile");
+    assert_eq!(app.cursor, "status".len());
   }
 
   /// Returns a unique temp path for file-logging tests.
