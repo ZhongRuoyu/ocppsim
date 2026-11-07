@@ -1614,6 +1614,34 @@ mod tests {
   }
 
   #[test]
+  fn tab_completion_preserves_alias_spellings_and_cycles_short_aliases() {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
+      let mut app = TerminalApp::new(OcppVersion::V2_1);
+      app.input = "qu".to_string();
+      app.cursor = app.input.len();
+      press(&mut app, key);
+      assert_eq!(app.input, "quit ");
+      assert_eq!(app.cursor, 5);
+      assert!(app.completion.is_none());
+    }
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.input = "h".to_string();
+    app.cursor = 1;
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(app.input, "h ");
+    for expected in ["heartbeat ", "help ", "h "] {
+      press(&mut app, KeyCode::Tab);
+      assert_eq!(app.input, expected);
+    }
+    app.clear_completion();
+    app.input = "?".to_string();
+    app.cursor = 1;
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.input, "? ");
+    assert!(app.completion.is_none());
+  }
+
+  #[test]
   fn completion_replaces_the_current_word_and_cycles_at_the_cursor() {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
     app.input = "stale 1 caf\u{e9}".to_string();

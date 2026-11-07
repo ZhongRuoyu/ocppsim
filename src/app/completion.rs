@@ -1,3 +1,4 @@
+use crate::commands::COMMAND_ALIASES;
 use crate::ocpp::{
   ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
   OcppVersion, StopReason,
@@ -126,11 +127,11 @@ pub(super) fn completion_seed(
   let parts: Vec<&str> = input.split_whitespace().collect();
 
   if parts.is_empty() {
-    return Some((String::new(), complete_static("", COMMAND_WORDS)));
+    return Some((String::new(), complete_commands("")));
   }
 
   if parts.len() == 1 && !ends_with_space {
-    return Some((String::new(), complete_static(parts[0], COMMAND_WORDS)));
+    return Some((String::new(), complete_commands(parts[0])));
   }
 
   let command = parts[0].to_ascii_lowercase();
@@ -366,6 +367,19 @@ fn seed_for_connect_targets(
   Some((base, candidates))
 }
 
+/// Completes command names, revealing aliases only for a typed prefix.
+fn complete_commands(prefix: &str) -> Vec<String> {
+  let mut candidates = complete_static(prefix, COMMAND_WORDS);
+  if !prefix.is_empty() {
+    let aliases = COMMAND_ALIASES
+      .iter()
+      .map(|&(alias, _)| alias)
+      .collect::<Vec<_>>();
+    candidates.extend(complete_static(prefix, &aliases));
+  }
+  candidates
+}
+
 /// Filters static command words by prefix and appends trailing spaces.
 fn complete_static(prefix: &str, words: &[&str]) -> Vec<String> {
   let owned: Vec<String> = words.iter().map(ToString::to_string).collect();
@@ -509,6 +523,46 @@ fn completion_base(parts: &[&str], ends_with_space: bool) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn command_aliases_are_hidden_without_a_typed_prefix() {
+    for input in ["", " ", "\t "] {
+      let (_, candidates) =
+        completion_seed(input, OcppVersion::V2_1, &[], &[]).unwrap();
+      assert_eq!(candidates, complete_static("", COMMAND_WORDS));
+      for &(alias, _) in COMMAND_ALIASES {
+        assert!(!candidates.contains(&format!("{alias} ")));
+      }
+    }
+  }
+
+  #[test]
+  fn typed_alias_prefixes_complete_case_insensitively() {
+    for (input, expected) in [
+      ("q", vec!["quit "]),
+      ("qu", vec!["quit "]),
+      ("qui", vec!["quit "]),
+      ("QUIT", vec!["quit "]),
+      ("  Qu", vec!["quit "]),
+      ("h", vec!["heartbeat ", "help ", "h "]),
+      ("H", vec!["heartbeat ", "help ", "h "]),
+      ("?", vec!["? "]),
+      ("he", vec!["heartbeat ", "help "]),
+      ("e", vec!["exit "]),
+      ("quits", vec![]),
+      ("??", vec![]),
+    ] {
+      let (_, candidates) =
+        completion_seed(input, OcppVersion::V2_1, &[], &[]).unwrap();
+      assert_eq!(candidates, expected, "{input}");
+    }
+    for input in ["quit ", "h ", "? ", "help q", "exit q"] {
+      assert!(
+        completion_seed(input, OcppVersion::V2_1, &[], &[]).is_none(),
+        "{input}"
+      );
+    }
+  }
 
   #[test]
   fn configuration_completion_uses_current_supported_keys() {

@@ -9,6 +9,10 @@ use crate::ocpp::{
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
 
+/// Alternate command spellings shared by parsing and prefix completion.
+pub(crate) const COMMAND_ALIASES: &[(&str, &str)] =
+  &[("quit", "exit"), ("h", "help"), ("?", "help")];
+
 const USAGE_STATUS: &str = "Usage: status";
 const USAGE_CONFIG: &str =
   "Usage: config list | config get <key> | config set <key> <value>";
@@ -122,11 +126,15 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
   }
 
   let command = parts[0].to_ascii_lowercase();
-  if let Some(result) = parse_simple_command(command.as_str(), &parts) {
+  let command = COMMAND_ALIASES
+    .iter()
+    .find_map(|&(alias, canonical)| (alias == command).then_some(canonical))
+    .unwrap_or(&command);
+  if let Some(result) = parse_simple_command(command, &parts) {
     return result;
   }
 
-  match command.as_str() {
+  match command {
     "config" => parse_config_command(input, &parts),
     "connect" => parse_connect_command(&parts),
     "authorize" => parse_authorize_command(&parts),
@@ -135,7 +143,7 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
     "stop" => parse_stop_command(&parts),
     "connector-status" => parse_connector_status_command(&parts),
     "meter" | "send-meter" | "soc" | "send-soc" => {
-      parse_meter_command(&parts, command.as_str())
+      parse_meter_command(&parts, command)
     }
     "measurand" => parse_measurand_command(&parts, false),
     "send-measurand" => parse_measurand_command(&parts, true),
@@ -206,12 +214,8 @@ fn parse_simple_command(
     "standards" => {
       parse_zero_arg_command(parts, USAGE_STANDARDS, UserCommand::Standards)
     }
-    "help" | "h" | "?" => {
-      parse_zero_arg_command(parts, USAGE_HELP, UserCommand::Help)
-    }
-    "exit" | "quit" => {
-      parse_zero_arg_command(parts, USAGE_EXIT, UserCommand::Exit)
-    }
+    "help" => parse_zero_arg_command(parts, USAGE_HELP, UserCommand::Help),
+    "exit" => parse_zero_arg_command(parts, USAGE_EXIT, UserCommand::Exit),
     _ => return None,
   };
   Some(result)
@@ -739,6 +743,24 @@ mod tests {
   };
   use crate::metering::{MeterDelta, MeterReading, MeterUpdate};
   use crate::ocpp::Measurand;
+
+  #[test]
+  fn aliases_parse_as_their_canonical_commands() {
+    for input in ["quit", "QUIT", "QuIt"] {
+      assert!(matches!(parse_command(input).unwrap(), UserCommand::Exit));
+      assert_eq!(
+        parse_command(&format!("{input} extra")).unwrap_err(),
+        super::USAGE_EXIT
+      );
+    }
+    for input in ["h", "H", "?"] {
+      assert!(matches!(parse_command(input).unwrap(), UserCommand::Help));
+      assert_eq!(
+        parse_command(&format!("{input} extra")).unwrap_err(),
+        super::USAGE_HELP
+      );
+    }
+  }
 
   #[test]
   /// Verifies fixed-arity commands reject surplus tokens.
