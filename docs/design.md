@@ -149,6 +149,12 @@ printed in frame traces.
 Detailed security support, retention, and firmware limitations are documented in
 [`ocpp-support.md`](ocpp-support.md).
 
+## Command Catalog
+
+Canonical names, aliases, and completion order are declared together in
+`src/commands/catalog.rs`.
+Parsing and argument completion dispatch on the resulting command enum.
+
 ## Terminal UI
 
 The terminal app keeps inline rendering, input routing, snapshots, and file

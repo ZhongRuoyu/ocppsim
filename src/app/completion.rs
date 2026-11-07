@@ -1,33 +1,10 @@
-use crate::commands::COMMAND_ALIASES;
+use crate::commands::CommandName;
 use crate::ocpp::{
   ConfigurationKey, ConnectorStatus as OcppConnectorStatus, Measurand,
   OcppVersion, StopReason,
 };
 use crate::simulator::ConfigurationSnapshot;
 
-const COMMAND_WORDS: &[&str] = &[
-  "status",
-  "config",
-  "connect",
-  "disconnect",
-  "boot",
-  "authorize",
-  "data-transfer",
-  "start",
-  "stop",
-  "meter",
-  "send-meter",
-  "soc",
-  "send-soc",
-  "measurand",
-  "send-measurand",
-  "heartbeat",
-  "connector-status",
-  "clear",
-  "standards",
-  "help",
-  "exit",
-];
 const STATUS_WORDS_V1_6: &[OcppConnectorStatus] = OcppConnectorStatus::V1_6;
 const STATUS_WORDS_V2_X: &[OcppConnectorStatus] = OcppConnectorStatus::V2_X;
 const STOP_REASON_HINTS_V1_6: &[StopReason] = StopReason::V1_6;
@@ -94,7 +71,7 @@ pub(super) fn completion_suffix(input: &str, cursor: usize) -> &str {
   let prefix = &input[..cursor];
   let parts = prefix.split_whitespace().collect::<Vec<_>>();
   let in_protocol_list = parts.len() >= 3
-    && parts[0].eq_ignore_ascii_case("config")
+    && CommandName::parse(parts[0]) == Some(CommandName::Config)
     && parts[1].eq_ignore_ascii_case("set")
     && ConfigurationKey::parse(parts[2])
       == Some(ConfigurationKey::SupportedFileTransferProtocols)
@@ -134,44 +111,49 @@ pub(super) fn completion_seed(
     return Some((String::new(), complete_commands(parts[0])));
   }
 
-  let command = parts[0].to_ascii_lowercase();
-
-  match command.as_str() {
-    "connect" => {
+  match CommandName::parse(parts[0])? {
+    CommandName::Connect => {
       seed_for_connect_targets(&parts, ends_with_space, profile_names)
     }
-    "start" | "meter" | "send-meter" | "soc" | "send-soc" => {
+    CommandName::Start
+    | CommandName::Meter
+    | CommandName::SendMeter
+    | CommandName::Soc
+    | CommandName::SendSoc => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
     }
-    "stop" => seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
-      .or_else(|| match protocol {
-        OcppVersion::V1_6 => seed_for_stop_reasons(
-          &parts,
-          ends_with_space,
-          2,
-          STOP_REASON_HINTS_V1_6,
-        ),
-        OcppVersion::V2_0_1 => seed_for_stop_reasons(
-          &parts,
-          ends_with_space,
-          2,
-          STOP_REASON_HINTS_V2_0_1,
-        ),
-        OcppVersion::V2_1 => seed_for_stop_reasons(
-          &parts,
-          ends_with_space,
-          2,
-          STOP_REASON_HINTS_V2_1,
-        ),
-      }),
-    "measurand" | "send-measurand" => {
+    CommandName::Stop => {
+      seed_for_connectors(&parts, ends_with_space, 1, known_connectors).or_else(
+        || match protocol {
+          OcppVersion::V1_6 => seed_for_stop_reasons(
+            &parts,
+            ends_with_space,
+            2,
+            STOP_REASON_HINTS_V1_6,
+          ),
+          OcppVersion::V2_0_1 => seed_for_stop_reasons(
+            &parts,
+            ends_with_space,
+            2,
+            STOP_REASON_HINTS_V2_0_1,
+          ),
+          OcppVersion::V2_1 => seed_for_stop_reasons(
+            &parts,
+            ends_with_space,
+            2,
+            STOP_REASON_HINTS_V2_1,
+          ),
+        },
+      )
+    }
+    CommandName::Measurand | CommandName::SendMeasurand => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors)
         .or_else(|| seed_for_measurands(&parts, ends_with_space, protocol))
     }
-    "heartbeat" => {
+    CommandName::Heartbeat => {
       seed_for_position(&parts, ends_with_space, 1, &["start", "stop"])
     }
-    "connector-status" => {
+    CommandName::ConnectorStatus => {
       seed_for_connectors(&parts, ends_with_space, 1, known_connectors).or_else(
         || match protocol {
           OcppVersion::V1_6 => {
@@ -195,7 +177,7 @@ pub(super) fn configuration_completion_seed(
   let parts = input.split_whitespace().collect::<Vec<_>>();
   if !parts
     .first()
-    .is_some_and(|word| word.eq_ignore_ascii_case("config"))
+    .is_some_and(|word| CommandName::parse(word) == Some(CommandName::Config))
   {
     return None;
   }
@@ -369,15 +351,17 @@ fn seed_for_connect_targets(
 
 /// Completes command names, revealing aliases only for a typed prefix.
 fn complete_commands(prefix: &str) -> Vec<String> {
-  let mut candidates = complete_static(prefix, COMMAND_WORDS);
-  if !prefix.is_empty() {
-    let aliases = COMMAND_ALIASES
-      .iter()
-      .map(|&(alias, _)| alias)
-      .collect::<Vec<_>>();
-    candidates.extend(complete_static(prefix, &aliases));
-  }
-  candidates
+  let prefix = prefix.to_ascii_lowercase();
+  let names = CommandName::ALL.iter().map(|command| command.as_str());
+  let aliases = CommandName::ALL
+    .iter()
+    .flat_map(|command| command.aliases().iter().copied())
+    .filter(|_| !prefix.is_empty());
+  names
+    .chain(aliases)
+    .filter(|name| name.starts_with(&prefix))
+    .map(|name| format!("{name} "))
+    .collect()
 }
 
 /// Filters static command words by prefix and appends trailing spaces.
@@ -529,8 +513,15 @@ mod tests {
     for input in ["", " ", "\t "] {
       let (_, candidates) =
         completion_seed(input, OcppVersion::V2_1, &[], &[]).unwrap();
-      assert_eq!(candidates, complete_static("", COMMAND_WORDS));
-      for &(alias, _) in COMMAND_ALIASES {
+      let canonical = CommandName::ALL
+        .iter()
+        .map(|command| format!("{} ", command.as_str()))
+        .collect::<Vec<_>>();
+      assert_eq!(candidates, canonical);
+      for alias in CommandName::ALL
+        .iter()
+        .flat_map(|command| command.aliases())
+      {
         assert!(!candidates.contains(&format!("{alias} ")));
       }
     }
@@ -566,7 +557,7 @@ mod tests {
 
   #[test]
   fn configuration_completion_uses_current_supported_keys() {
-    assert_eq!(complete_static("conf", COMMAND_WORDS), ["config "]);
+    assert_eq!(complete_commands("conf"), ["config "]);
     let keys = [
       ConfigurationKey::HeartbeatInterval,
       ConfigurationKey::CpoName,
@@ -778,11 +769,8 @@ mod tests {
 
   #[test]
   fn generic_measurand_completion_uses_active_protocol_and_canonical_names() {
-    assert_eq!(complete_static("meas", COMMAND_WORDS), ["measurand "]);
-    assert_eq!(
-      complete_static("send-meas", COMMAND_WORDS),
-      ["send-measurand "]
-    );
+    assert_eq!(complete_commands("meas"), ["measurand "]);
+    assert_eq!(complete_commands("send-meas"), ["send-measurand "]);
     for protocol in [OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1]
     {
       for command in ["measurand", "send-measurand"] {
@@ -840,8 +828,8 @@ mod tests {
         );
       }
     }
-    assert_eq!(complete_static("soc", COMMAND_WORDS), ["soc "]);
-    assert_eq!(complete_static("send-soc", COMMAND_WORDS), ["send-soc "]);
+    assert_eq!(complete_commands("soc"), ["soc "]);
+    assert_eq!(complete_commands("send-soc"), ["send-soc "]);
   }
 
   #[test]

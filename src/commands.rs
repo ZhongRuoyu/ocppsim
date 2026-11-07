@@ -9,9 +9,9 @@ use crate::ocpp::{
 };
 use crate::sensitive::{REDACTED_VALUE, redact_url_secrets};
 
-/// Alternate command spellings shared by parsing and prefix completion.
-pub(crate) const COMMAND_ALIASES: &[(&str, &str)] =
-  &[("quit", "exit"), ("h", "help"), ("?", "help")];
+mod catalog;
+
+pub(crate) use catalog::CommandName;
 
 const USAGE_STATUS: &str = "Usage: status";
 const USAGE_CONFIG: &str =
@@ -125,33 +125,48 @@ pub fn parse_command(input: &str) -> Result<UserCommand, String> {
     return Err("Command is empty.".to_string());
   }
 
-  let command = parts[0].to_ascii_lowercase();
-  let command = COMMAND_ALIASES
-    .iter()
-    .find_map(|&(alias, canonical)| (alias == command).then_some(canonical))
-    .unwrap_or(&command);
-  if let Some(result) = parse_simple_command(command, &parts) {
-    return result;
-  }
-
-  match command {
-    "config" => parse_config_command(input, &parts),
-    "connect" => parse_connect_command(&parts),
-    "authorize" => parse_authorize_command(&parts),
-    "data-transfer" => parse_data_transfer_command(&parts),
-    "start" => parse_start_command(&parts),
-    "stop" => parse_stop_command(&parts),
-    "connector-status" => parse_connector_status_command(&parts),
-    "meter" | "send-meter" | "soc" | "send-soc" => {
-      parse_meter_command(&parts, command)
-    }
-    "measurand" => parse_measurand_command(&parts, false),
-    "send-measurand" => parse_measurand_command(&parts, true),
-    "heartbeat" => parse_heartbeat_command(&parts),
-    _ => Err(format!(
+  let command = CommandName::parse(parts[0]).ok_or_else(|| {
+    format!(
       "Unknown command `{}`. Type `help` for available commands.",
-      parts[0]
-    )),
+      parts[0],
+    )
+  })?;
+  match command {
+    CommandName::Status => {
+      parse_zero_arg_command(&parts, USAGE_STATUS, UserCommand::Status)
+    }
+    CommandName::Config => parse_config_command(input, &parts),
+    CommandName::Connect => parse_connect_command(&parts),
+    CommandName::Disconnect => {
+      parse_zero_arg_command(&parts, USAGE_DISCONNECT, UserCommand::Disconnect)
+    }
+    CommandName::Boot => {
+      parse_zero_arg_command(&parts, USAGE_BOOT, UserCommand::Boot)
+    }
+    CommandName::Authorize => parse_authorize_command(&parts),
+    CommandName::DataTransfer => parse_data_transfer_command(&parts),
+    CommandName::Start => parse_start_command(&parts),
+    CommandName::Stop => parse_stop_command(&parts),
+    CommandName::ConnectorStatus => parse_connector_status_command(&parts),
+    CommandName::Meter
+    | CommandName::SendMeter
+    | CommandName::Soc
+    | CommandName::SendSoc => parse_meter_command(&parts, command),
+    CommandName::Measurand => parse_measurand_command(&parts, false),
+    CommandName::SendMeasurand => parse_measurand_command(&parts, true),
+    CommandName::Heartbeat => parse_heartbeat_command(&parts),
+    CommandName::Clear => {
+      parse_zero_arg_command(&parts, USAGE_CLEAR, UserCommand::Clear)
+    }
+    CommandName::Standards => {
+      parse_zero_arg_command(&parts, USAGE_STANDARDS, UserCommand::Standards)
+    }
+    CommandName::Help => {
+      parse_zero_arg_command(&parts, USAGE_HELP, UserCommand::Help)
+    }
+    CommandName::Exit => {
+      parse_zero_arg_command(&parts, USAGE_EXIT, UserCommand::Exit)
+    }
   }
 }
 
@@ -162,8 +177,8 @@ pub fn redact_sensitive_command(input: &str) -> String {
     return String::new();
   };
 
-  match command.to_ascii_lowercase().as_str() {
-    "config"
+  match CommandName::parse(command) {
+    Some(CommandName::Config)
       if parts.len() >= 4
         && parts[1].eq_ignore_ascii_case("set")
         && ConfigurationKey::parse(parts[2])
@@ -173,15 +188,15 @@ pub fn redact_sensitive_command(input: &str) -> String {
       parts.push(REDACTED_VALUE);
       parts.join(" ")
     }
-    "authorize" if parts.len() >= 2 => {
+    Some(CommandName::Authorize) if parts.len() >= 2 => {
       parts[1] = REDACTED_VALUE;
       parts.join(" ")
     }
-    "start" if parts.len() >= 3 => {
+    Some(CommandName::Start) if parts.len() >= 3 => {
       parts[2] = REDACTED_VALUE;
       parts.join(" ")
     }
-    "connect" if parts.len() >= 2 => {
+    Some(CommandName::Connect) if parts.len() >= 2 => {
       let redacted_url = redact_url_secrets(parts[1]);
       if redacted_url == parts[1] {
         input.to_string()
@@ -196,29 +211,6 @@ pub fn redact_sensitive_command(input: &str) -> String {
     }
     _ => input.to_string(),
   }
-}
-
-fn parse_simple_command(
-  command: &str,
-  parts: &[&str],
-) -> Option<Result<UserCommand, String>> {
-  let result = match command {
-    "status" => {
-      parse_zero_arg_command(parts, USAGE_STATUS, UserCommand::Status)
-    }
-    "disconnect" => {
-      parse_zero_arg_command(parts, USAGE_DISCONNECT, UserCommand::Disconnect)
-    }
-    "boot" => parse_zero_arg_command(parts, USAGE_BOOT, UserCommand::Boot),
-    "clear" => parse_zero_arg_command(parts, USAGE_CLEAR, UserCommand::Clear),
-    "standards" => {
-      parse_zero_arg_command(parts, USAGE_STANDARDS, UserCommand::Standards)
-    }
-    "help" => parse_zero_arg_command(parts, USAGE_HELP, UserCommand::Help),
-    "exit" => parse_zero_arg_command(parts, USAGE_EXIT, UserCommand::Exit),
-    _ => return None,
-  };
-  Some(result)
 }
 
 fn parse_connect_command(parts: &[&str]) -> Result<UserCommand, String> {
@@ -370,17 +362,19 @@ fn parse_connector_status_command(
 
 fn parse_meter_command(
   parts: &[&str],
-  command: &str,
+  command: CommandName,
 ) -> Result<UserCommand, String> {
   let (measurand, send, usage) = match command {
-    "meter" => (Measurand::EnergyActiveImportRegister, false, USAGE_METER),
-    "send-meter" => (
+    CommandName::Meter => {
+      (Measurand::EnergyActiveImportRegister, false, USAGE_METER)
+    }
+    CommandName::SendMeter => (
       Measurand::EnergyActiveImportRegister,
       true,
       USAGE_SEND_METER,
     ),
-    "soc" => (Measurand::Soc, false, USAGE_SOC),
-    "send-soc" => (Measurand::Soc, true, USAGE_SEND_SOC),
+    CommandName::Soc => (Measurand::Soc, false, USAGE_SOC),
+    CommandName::SendSoc => (Measurand::Soc, true, USAGE_SEND_SOC),
     _ => unreachable!("meter command dispatch is exhaustive"),
   };
   ensure_range(parts, (if send { 2 } else { 1 })..=3, usage)?;
