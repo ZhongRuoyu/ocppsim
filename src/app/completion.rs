@@ -12,12 +12,14 @@ const STOP_REASON_HINTS_V2_0_1: &[StopReason] = StopReason::V2_0_1;
 const STOP_REASON_HINTS_V2_1: &[StopReason] = StopReason::V2_1;
 const CONNECT_URL_PREFIXES: &[&str] = &["ws://", "wss://"];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CompletionState {
   base: String,
   suffix: String,
   candidates: Vec<String>,
   index: usize,
+  scroll_top: usize,
+  reverse: bool,
 }
 
 impl CompletionState {
@@ -32,11 +34,50 @@ impl CompletionState {
       suffix,
       candidates,
       index,
+      scroll_top: 0,
+      reverse: index > 0,
     }
   }
 
   pub(super) fn is_empty(&self) -> bool {
     self.candidates.is_empty()
+  }
+
+  /// Returns the selected candidate index.
+  pub(super) fn index(&self) -> usize {
+    self.index
+  }
+
+  /// Returns the candidate labels, including their insertion suffixes.
+  pub(super) fn candidates(&self) -> &[String] {
+    &self.candidates
+  }
+
+  /// Keeps one row beyond selection visible in the direction of travel.
+  pub(super) fn visible_range(
+    &mut self,
+    height: usize,
+  ) -> std::ops::Range<usize> {
+    let height = height.min(self.candidates.len());
+    if height == 0 {
+      return 0..0;
+    }
+    // A one-row menu cannot leave space beyond its selected candidate.
+    let margin = 1.min(height - 1);
+    let target = if self.reverse {
+      self.index.saturating_sub(margin)
+    } else {
+      (self.index + margin + 1).saturating_sub(height)
+    };
+    if self.index < self.scroll_top || self.index >= self.scroll_top + height {
+      self.scroll_top = target;
+    } else if self.reverse {
+      self.scroll_top = self.scroll_top.min(target);
+    } else {
+      self.scroll_top = self.scroll_top.max(target);
+    }
+    self.scroll_top = self.scroll_top.min(self.candidates.len() - height);
+    self.scroll_top..self.scroll_top + height
   }
 
   /// Returns the completed line and cursor, retaining the following text.
@@ -60,6 +101,7 @@ impl CompletionState {
 
   /// Advances through candidates while retaining the original following text.
   pub(super) fn next_value(&mut self, reverse: bool) -> (String, usize) {
+    self.reverse = reverse;
     self.index =
       next_completion_index(self.index, self.candidates.len(), reverse);
     self.value()
@@ -552,6 +594,55 @@ mod tests {
         completion_seed(input, OcppVersion::V2_1, &[], &[]).is_none(),
         "{input}"
       );
+    }
+  }
+
+  #[test]
+  fn menu_keeps_one_row_beyond_selection_in_either_direction() {
+    let candidates = (0..20).map(|i| format!("option-{i}")).collect();
+    let mut state =
+      CompletionState::new(String::new(), candidates, 0, String::new());
+    assert_eq!(state.visible_range(8), 0..8);
+    for _ in 0..6 {
+      state.next_value(false);
+      assert_eq!(state.visible_range(8), 0..8);
+    }
+    state.next_value(false);
+    assert_eq!(state.index(), 7);
+    assert_eq!(state.visible_range(8), 1..9);
+    for _ in 0..4 {
+      state.next_value(false);
+      state.visible_range(8);
+    }
+    assert_eq!(state.visible_range(8), 5..13);
+    for _ in 0..5 {
+      state.next_value(true);
+      assert_eq!(state.visible_range(8), 5..13);
+    }
+    state.next_value(true);
+    assert_eq!(state.index(), 5);
+    assert_eq!(state.visible_range(8), 4..12);
+    // A redraw without a new selection must not continue scrolling.
+    assert_eq!(state.visible_range(8), 4..12);
+  }
+
+  #[test]
+  fn menu_wraps_and_keeps_selection_visible_at_every_height() {
+    for height in 0..12 {
+      let candidates = (0..20).map(|i| format!("option-{i}")).collect();
+      let mut state =
+        CompletionState::new(String::new(), candidates, 0, String::new());
+      for reverse in [false, true] {
+        for _ in 0..45 {
+          let range = state.visible_range(height);
+          if height > 0 {
+            assert!(range.contains(&state.index()));
+          } else {
+            assert!(range.is_empty());
+          }
+          state.next_value(reverse);
+        }
+      }
     }
   }
 

@@ -7,21 +7,15 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Local;
-use crossterm::cursor::{
-  MoveDown, MoveTo, MoveToColumn, MoveUp, SetCursorStyle, Show,
-};
+use crossterm::cursor::{self, SetCursorStyle, Show};
 use crossterm::event::{
   self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
-use crossterm::queue;
-use crossterm::style::{
-  Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor,
-};
+use crossterm::style::ResetColor;
 use crossterm::terminal::{
-  self, Clear, ClearType, disable_raw_mode, enable_raw_mode,
+  self, EndSynchronizedUpdate, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::text::Line;
 
 use crate::ocpp::OcppVersion;
 use crate::sensitive::{redact_text_secrets, redact_url_secrets};
@@ -32,6 +26,8 @@ use crate::simulator::{
 
 mod completion;
 mod history;
+mod log_tail;
+mod render;
 
 use completion::{
   CompletionState, completion_seed, completion_suffix,
@@ -40,194 +36,34 @@ use completion::{
 use history::CommandHistory;
 
 const MAX_LOG_LINES: usize = 10_000;
-const PROMPT_PREFIX_WIDTH: usize = 2;
-const PROMPT_PLACEHOLDER: &str = "Command";
 const EXIT_CONFIRMATION_PROMPT: &str =
   "Active CSMS state may remain unfinished. Confirm exit? [y/N]";
 
-/// Number of terminal lines occupied by the live prompt block.
-const PROMPT_BLOCK_LINES: u16 = 4;
-
 pub struct TerminalSession {
-  stdout: Stdout,
-  prompt_visible: bool,
-  last_prompt: Option<PromptSnapshot>,
+  renderer: render::PromptRenderer<BufWriter<Stdout>>,
 }
 
 impl TerminalSession {
   /// Initializes raw input mode while keeping normal terminal scrollback.
   pub fn new() -> Result<Self> {
     enable_raw_mode()?;
-    Ok(Self {
-      stdout: io::stdout(),
-      prompt_visible: false,
-      last_prompt: None,
-    })
+    // Buffer frame output before it reaches line-buffered stdout.
+    let mut renderer =
+      render::PromptRenderer::new(BufWriter::new(io::stdout()));
+    renderer.set_cursor_row(cursor::position().ok().map(|(_, row)| row));
+    Ok(Self { renderer })
   }
 
-  /// Flushes pending log lines and redraws the live command composer.
+  /// Flushes logs and redraws the prompt and any completion overlay.
   pub fn draw(&mut self, app: &mut TerminalApp) -> Result<()> {
-    let width = terminal_width();
-    let prompt = PromptSnapshot::new(app, width);
-    let should_clear_screen = app.take_screen_clear_requested();
-    let logs = app.drain_pending_logs();
-    let prompt_changed = self.last_prompt.as_ref() != Some(&prompt);
-
-    if logs.is_empty() && !prompt_changed && !should_clear_screen {
-      return Ok(());
+    let size = terminal::size().unwrap_or((80, 24));
+    if self.renderer.needs_cursor_position(size) {
+      self
+        .renderer
+        .set_cursor_row(cursor::position().ok().map(|(_, row)| row));
     }
-
-    self.clear_prompt(width)?;
-    if should_clear_screen {
-      execute!(self.stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-    }
-    for entry in logs {
-      self.write_log_entry(&entry)?;
-    }
-    self.render_prompt(app, width)?;
-    self.last_prompt = Some(prompt);
-    self.stdout.flush()?;
+    self.renderer.draw(app, size)?;
     Ok(())
-  }
-
-  /// Clears the rendered prompt block before logs or a fresh prompt redraw.
-  fn clear_prompt(&mut self, width: usize) -> io::Result<()> {
-    if !self.prompt_visible {
-      return Ok(());
-    }
-    let layout = self
-      .last_prompt
-      .as_ref()
-      .map_or_else(PromptClearLayout::default, |prompt| {
-        prompt.clear_layout(width)
-      });
-
-    queue!(self.stdout, MoveToColumn(0))?;
-    if layout.lines_above_cursor > 0 {
-      queue!(
-        self.stdout,
-        MoveUp(u16::try_from(layout.lines_above_cursor).unwrap_or(u16::MAX))
-      )?;
-    }
-    for index in 0..layout.block_lines {
-      queue!(self.stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-      if index + 1 < layout.block_lines {
-        queue!(self.stdout, MoveDown(1))?;
-      }
-    }
-    if layout.block_lines > 1 {
-      queue!(
-        self.stdout,
-        MoveUp(u16::try_from(layout.block_lines - 1).unwrap_or(u16::MAX))
-      )?;
-    }
-    queue!(self.stdout, MoveToColumn(0))?;
-    self.prompt_visible = false;
-    self.last_prompt = None;
-    Ok(())
-  }
-
-  /// Prints one log entry into normal terminal scrollback.
-  fn write_log_entry(&mut self, entry: &LogEntry) -> io::Result<()> {
-    queue!(
-      self.stdout,
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      SetForegroundColor(Color::DarkGrey),
-      Print(format!("{} [{}] ", entry.timestamp, entry.level.label())),
-      SetForegroundColor(log_level_color(entry.level)),
-      Print(entry.message.as_str()),
-      ResetColor,
-      Print("\r\n")
-    )
-  }
-
-  /// Renders the inline command composer and taskbar block.
-  fn render_prompt(
-    &mut self,
-    app: &TerminalApp,
-    width: usize,
-  ) -> io::Result<()> {
-    let content_width = width.saturating_sub(1);
-    let input_width = content_width.saturating_sub(PROMPT_PREFIX_WIDTH);
-    let prompt_shadow = app.prompt_shadow();
-    let (view, show_placeholder) = if let Some(shadow) = prompt_shadow {
-      (visible_input_view(shadow, shadow.len(), input_width), false)
-    } else {
-      (
-        visible_input_view(app.input(), app.cursor(), input_width),
-        app.input().is_empty(),
-      )
-    };
-
-    queue!(
-      self.stdout,
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      Print("\r\n"),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      SetAttribute(Attribute::Bold),
-      Print(">"),
-      SetAttribute(Attribute::Reset),
-      Print(" ")
-    )?;
-
-    if prompt_shadow.is_some() {
-      queue!(
-        self.stdout,
-        SetForegroundColor(Color::Yellow),
-        Print(view.text),
-        ResetColor
-      )?;
-    } else if show_placeholder {
-      queue!(
-        self.stdout,
-        SetAttribute(Attribute::Dim),
-        Print(fit_to_width(PROMPT_PLACEHOLDER, input_width)),
-        SetAttribute(Attribute::Reset)
-      )?;
-    } else {
-      queue!(self.stdout, Print(view.text))?;
-    }
-
-    let cursor_column = PROMPT_PREFIX_WIDTH
-      .saturating_add(view.cursor_width)
-      .min(content_width);
-    queue!(
-      self.stdout,
-      Print("\r\n"),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine),
-      Print("\r\n"),
-      MoveToColumn(0),
-      Clear(ClearType::CurrentLine)
-    )?;
-    self.render_taskbar(app, width)?;
-    queue!(
-      self.stdout,
-      MoveUp(2),
-      SetCursorStyle::DefaultUserShape,
-      Show,
-      MoveToColumn(u16::try_from(cursor_column).unwrap_or(u16::MAX))
-    )?;
-    self.prompt_visible = true;
-    Ok(())
-  }
-
-  /// Renders the one-line profile and connection status taskbar.
-  fn render_taskbar(
-    &mut self,
-    app: &TerminalApp,
-    width: usize,
-  ) -> io::Result<()> {
-    let line = fit_to_width(&app.taskbar_line(), width.saturating_sub(1));
-    queue!(
-      self.stdout,
-      SetAttribute(Attribute::Dim),
-      Print(line),
-      SetAttribute(Attribute::Reset)
-    )
   }
 
   /// Polls keyboard and mouse input and maps it to an app action.
@@ -266,10 +102,13 @@ impl TerminalSession {
 impl Drop for TerminalSession {
   /// Restores terminal state when the session leaves scope.
   fn drop(&mut self) {
-    let _ = self.clear_prompt(terminal_width());
+    let _ = self
+      .renderer
+      .clear_prompt(terminal::size().unwrap_or((80, 24)));
+    let _ = self.renderer.stdout.flush();
     restore_console();
     let _ = execute!(
-      self.stdout,
+      self.renderer.stdout,
       ResetColor,
       SetCursorStyle::DefaultUserShape,
       Show
@@ -281,187 +120,13 @@ impl Drop for TerminalSession {
 pub fn restore_console() {
   let _ = disable_raw_mode();
   let mut stdout = io::stdout();
-  let _ = execute!(stdout, ResetColor, SetCursorStyle::DefaultUserShape, Show);
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PromptSnapshot {
-  /// Input text currently shown in the command composer.
-  input: String,
-  /// Byte cursor position within the input text.
-  cursor: usize,
-  /// Terminal width used for the last prompt render.
-  width: usize,
-  /// Profile name shown in the taskbar, when profile mode is active.
-  profile_name: Option<String>,
-  /// WebSocket URL shown in the taskbar when no profile name is available.
-  ws_url: String,
-  /// Connection state shown in the taskbar.
-  connected: bool,
-  /// Shadow text shown over the input line for modal prompts.
-  prompt_shadow: Option<String>,
-}
-
-impl PromptSnapshot {
-  fn new(app: &TerminalApp, width: usize) -> Self {
-    Self {
-      input: app.input().to_string(),
-      cursor: app.cursor(),
-      width,
-      profile_name: app.profile_name.clone(),
-      ws_url: app.ws_url.clone(),
-      connected: app.connected,
-      prompt_shadow: app.prompt_shadow().map(str::to_string),
-    }
-  }
-
-  fn clear_layout(&self, width: usize) -> PromptClearLayout {
-    let metrics = self.render_metrics();
-    let width = width.max(1);
-    let input_rows = terminal_rows(metrics.input_line_width, width);
-    let taskbar_rows = terminal_rows(metrics.taskbar_line_width, width);
-    PromptClearLayout {
-      lines_above_cursor: 1 + metrics.cursor_column / width,
-      block_lines: 1 + input_rows + 1 + taskbar_rows,
-    }
-  }
-
-  fn render_metrics(&self) -> PromptRenderMetrics {
-    let content_width = self.width.saturating_sub(1);
-    let input_width = content_width.saturating_sub(PROMPT_PREFIX_WIDTH);
-    let prompt_text = self.prompt_shadow.as_deref().unwrap_or(&self.input);
-    let cursor = self.prompt_shadow.as_ref().map_or(self.cursor, String::len);
-    let view = visible_input_view(prompt_text, cursor, input_width);
-    let input_text_width =
-      if self.prompt_shadow.is_none() && self.input.is_empty() {
-        display_width(&fit_to_width(PROMPT_PLACEHOLDER, input_width))
-      } else {
-        display_width(view.text)
-      };
-    let taskbar_width = display_width(&fit_to_width(
-      &format_taskbar_line(
-        self.profile_name.as_deref(),
-        &self.ws_url,
-        self.connected,
-      ),
-      self.width.saturating_sub(1),
-    ));
-
-    PromptRenderMetrics {
-      input_line_width: PROMPT_PREFIX_WIDTH.saturating_add(input_text_width),
-      taskbar_line_width: taskbar_width,
-      cursor_column: PROMPT_PREFIX_WIDTH
-        .saturating_add(view.cursor_width)
-        .min(content_width),
-    }
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PromptClearLayout {
-  lines_above_cursor: usize,
-  block_lines: usize,
-}
-
-impl Default for PromptClearLayout {
-  fn default() -> Self {
-    Self {
-      lines_above_cursor: 1,
-      block_lines: usize::from(PROMPT_BLOCK_LINES),
-    }
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PromptRenderMetrics {
-  input_line_width: usize,
-  taskbar_line_width: usize,
-  cursor_column: usize,
-}
-
-struct VisibleInputView<'a> {
-  text: &'a str,
-  cursor_width: usize,
-}
-
-fn visible_input_view(
-  input: &str,
-  cursor: usize,
-  width: usize,
-) -> VisibleInputView<'_> {
-  if width == 0 {
-    return VisibleInputView {
-      text: "",
-      cursor_width: 0,
-    };
-  }
-
-  let mut start = 0;
-  while display_width(&input[start..cursor]) > width {
-    start = next_char_boundary(input, start);
-  }
-
-  let mut end = input.len();
-  while display_width(&input[start..end]) > width {
-    end = previous_char_boundary(input, end);
-  }
-
-  VisibleInputView {
-    text: &input[start..end],
-    cursor_width: display_width(&input[start..cursor]).min(width),
-  }
-}
-
-fn display_width(input: &str) -> usize {
-  Line::raw(input.to_string()).width()
-}
-
-/// Truncates display text so taskbar content never wraps.
-fn fit_to_width(input: &str, width: usize) -> String {
-  if width == 0 {
-    return String::new();
-  }
-  if display_width(input) <= width {
-    return input.to_string();
-  }
-
-  let suffix = "...";
-  let body_width = width.saturating_sub(suffix.len());
-  if body_width == 0 {
-    return suffix[..width].to_string();
-  }
-
-  let mut output = String::new();
-  for ch in input.chars() {
-    let next_width = display_width(&format!("{output}{ch}"));
-    if next_width > body_width {
-      break;
-    }
-    output.push(ch);
-  }
-  output.push_str(suffix);
-  output
-}
-
-fn terminal_rows(display_width: usize, terminal_width: usize) -> usize {
-  let terminal_width = terminal_width.max(1);
-  display_width.div_ceil(terminal_width).max(1)
-}
-
-fn terminal_width() -> usize {
-  terminal::size()
-    .map_or(80, |(width, _)| width as usize)
-    .max(PROMPT_PREFIX_WIDTH)
-}
-
-fn log_level_color(level: UiLogLevel) -> Color {
-  match level {
-    UiLogLevel::Info => Color::White,
-    UiLogLevel::Warn => Color::Yellow,
-    UiLogLevel::Error => Color::Red,
-    UiLogLevel::Tx => Color::Cyan,
-    UiLogLevel::Rx => Color::Green,
-  }
+  let _ = execute!(
+    stdout,
+    EndSynchronizedUpdate,
+    ResetColor,
+    SetCursorStyle::DefaultUserShape,
+    Show
+  );
 }
 
 #[derive(Debug, Clone)]
@@ -542,6 +207,7 @@ pub struct TerminalApp {
   completion: Option<CompletionState>,
   log_sink: Option<FileLogSink>,
   screen_clear_requested: bool,
+  view_dirty: bool,
   runtime_state: SimulatorRuntimeState,
   exit_confirmation: Option<ExitConfirmation>,
 }
@@ -564,6 +230,7 @@ impl TerminalApp {
       completion: None,
       log_sink: None,
       screen_clear_requested: false,
+      view_dirty: true,
       runtime_state: SimulatorRuntimeState::default(),
       exit_confirmation: None,
     }
@@ -575,6 +242,7 @@ impl TerminalApp {
     profile_name: Option<String>,
     ws_url: Option<String>,
   ) {
+    self.invalidate_view();
     self.profile_name = profile_name;
     self.ws_url = ws_url
       .map(|url| redact_url_secrets(&url))
@@ -588,6 +256,7 @@ impl TerminalApp {
 
   /// Sets profile names offered for `connect <profile>` completion.
   pub fn set_profile_completions(&mut self, profiles: Vec<String>) {
+    self.invalidate_view();
     self.profile_completions = profiles;
   }
 
@@ -625,6 +294,7 @@ impl TerminalApp {
   /// Clears pending log redraws and asks the terminal to clear the visible
   /// screen while keeping normal terminal scrollback available.
   pub fn clear_logs(&mut self) {
+    self.invalidate_view();
     self.pending_logs.clear();
     self.screen_clear_requested = true;
   }
@@ -632,6 +302,7 @@ impl TerminalApp {
   /// Requests process exit, requiring confirmation when runtime state is
   /// active enough that shutdown may leave the CSMS in an unfinished state.
   pub fn request_exit(&mut self) -> bool {
+    self.invalidate_view();
     if !exit_requires_confirmation(&self.runtime_state) {
       self.exit_confirmation = None;
       return true;
@@ -651,11 +322,14 @@ impl TerminalApp {
 
   /// Cancels any pending exit confirmation.
   pub fn cancel_exit_confirmation(&mut self) {
-    self.exit_confirmation = None;
+    if self.exit_confirmation.take().is_some() {
+      self.invalidate_view();
+    }
   }
 
   /// Handles keyboard input for editing, history, completion, and submit.
   pub fn handle_key_event(&mut self, key: KeyEvent) -> InputAction {
+    self.invalidate_view();
     if let Some(action) = self.handle_exit_confirmation_key(key) {
       return action;
     }
@@ -762,7 +436,9 @@ impl TerminalApp {
         InputAction::None
       }
       KeyCode::Esc => {
-        self.clear_completion();
+        if self.completion.take().is_some() {
+          return InputAction::None;
+        }
         self.leave_history_navigation();
         self.input.clear();
         self.cursor = 0;
@@ -798,7 +474,10 @@ impl TerminalApp {
   /// Handles Ctrl-modified editing and exit shortcuts.
   fn handle_ctrl_key(&mut self, key: KeyEvent) -> InputAction {
     match key.code {
-      KeyCode::Char('c' | 'd') => InputAction::ExitRequested,
+      KeyCode::Char('c' | 'd') => {
+        self.clear_completion();
+        InputAction::ExitRequested
+      }
       KeyCode::Char('w') => {
         self.clear_completion();
         self.leave_history_navigation();
@@ -999,7 +678,18 @@ impl TerminalApp {
 
   /// Clears any active tab-completion state.
   fn clear_completion(&mut self) {
-    self.completion = None;
+    if self.completion.take().is_some() {
+      self.invalidate_view();
+    }
+  }
+
+  /// Invalidates the prepared view, coalescing a batch of UI changes.
+  fn invalidate_view(&mut self) {
+    self.view_dirty = true;
+  }
+
+  fn take_view_dirty(&mut self) -> bool {
+    std::mem::take(&mut self.view_dirty)
   }
 
   fn prompt_shadow(&self) -> Option<&str> {
@@ -1010,6 +700,7 @@ impl TerminalApp {
   }
 
   fn apply_runtime_state(&mut self, state: SimulatorRuntimeState) {
+    self.invalidate_view();
     if self
       .exit_confirmation
       .as_ref()
@@ -1092,6 +783,7 @@ impl TerminalApp {
 
   /// Appends one pending terminal log entry.
   fn push_log_entry(&mut self, entry: LogEntry) {
+    self.invalidate_view();
     self.pending_logs.push_back(entry);
     while self.pending_logs.len() > MAX_LOG_LINES {
       let _ = self.pending_logs.pop_front();
@@ -1237,10 +929,8 @@ mod tests {
     ConfigurationSnapshot, SimulatorRuntimeState, UiEvent,
   };
 
-  use super::{
-    InputAction, PromptClearLayout, PromptSnapshot, TerminalApp,
-    visible_input_view,
-  };
+  use super::render::layout::display_width;
+  use super::{InputAction, TerminalApp};
 
   static TEMP_LOG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1459,51 +1149,6 @@ mod tests {
   }
 
   #[test]
-  /// Verifies taskbar text is truncated before it can wrap.
-  fn fit_to_width_uses_ascii_suffix() {
-    assert_eq!(super::fit_to_width("abcdef", 4), "a...");
-    assert_eq!(super::fit_to_width("abcdef", 2), "..");
-  }
-
-  #[test]
-  /// Verifies prompt rendering keeps the cursor visible in narrow terminals.
-  fn visible_input_view_tracks_cursor_in_narrow_width() {
-    let view = visible_input_view("abcdef", 5, 3);
-
-    assert_eq!(view.text, "cde");
-    assert_eq!(view.cursor_width, 3);
-  }
-
-  #[test]
-  /// Verifies prompt clearing accounts for terminal reflow after resize.
-  fn prompt_clear_layout_tracks_wrapped_cursor_after_resize() {
-    let snapshot = PromptSnapshot {
-      input: "a".repeat(200),
-      cursor: 200,
-      width: 100,
-      profile_name: None,
-      ws_url: String::new(),
-      connected: false,
-      prompt_shadow: None,
-    };
-
-    assert_eq!(
-      snapshot.clear_layout(100),
-      PromptClearLayout {
-        lines_above_cursor: 1,
-        block_lines: 4,
-      }
-    );
-    assert_eq!(
-      snapshot.clear_layout(50),
-      PromptClearLayout {
-        lines_above_cursor: 2,
-        block_lines: 5,
-      }
-    );
-  }
-
-  #[test]
   /// Verifies non-ASCII insertion and deletion keep byte indices valid.
   fn edits_non_ascii_input_on_character_boundaries() {
     let mut app = TerminalApp::new(OcppVersion::V2_1);
@@ -1512,7 +1157,7 @@ mod tests {
     press(&mut app, KeyCode::Char('x'));
     assert_eq!(app.input, "éx");
     assert_eq!(app.cursor, app.input.len());
-    assert_eq!(super::display_width(&app.input[..app.cursor]), 2);
+    assert_eq!(display_width(&app.input[..app.cursor]), 2);
 
     press(&mut app, KeyCode::Left);
     assert_eq!(app.cursor, "é".len());
@@ -1614,6 +1259,31 @@ mod tests {
   }
 
   #[test]
+  fn escape_dismisses_completion_before_clearing_input() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    press(&mut app, KeyCode::Tab);
+    let completed = app.input.clone();
+    let cursor = app.cursor;
+    assert!(app.completion.is_some());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.completion.is_none());
+    assert_eq!(app.input, completed);
+    assert_eq!(app.cursor, cursor);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.input, "");
+  }
+
+  #[test]
+  fn enter_submits_the_selected_completion() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    press(&mut app, KeyCode::Tab);
+    let action =
+      app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(action, InputAction::Submitted(line) if line == "status"));
+    assert!(app.completion.is_none());
+  }
+
+  #[test]
   fn tab_completion_preserves_alias_spellings_and_cycles_short_aliases() {
     for key in [KeyCode::Tab, KeyCode::BackTab] {
       let mut app = TerminalApp::new(OcppVersion::V2_1);
@@ -1638,6 +1308,16 @@ mod tests {
     app.cursor = 1;
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.input, "? ");
+    assert!(app.completion.is_none());
+  }
+
+  #[test]
+  fn unique_completion_does_not_leave_a_menu_open() {
+    let mut app = TerminalApp::new(OcppVersion::V2_1);
+    app.input = "heart".to_string();
+    app.cursor = app.input.len();
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.input, "heartbeat ");
     assert!(app.completion.is_none());
   }
 

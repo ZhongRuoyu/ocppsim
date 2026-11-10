@@ -157,11 +157,13 @@ Parsing and argument completion dispatch on the resulting command enum.
 
 ## Terminal UI
 
-The terminal app keeps inline rendering, input routing, snapshots, and file
-logging in the main app module.
-Command history navigation and tab completion are split into focused
-submodules under `src/app/` so editing behavior can evolve without making the
-rendering path harder to scan.
+The terminal UI renders inline to preserve normal terminal scrollback.
+Rendering, completion, and command history are separated into focused
+submodules under `src/app/`.
+
+The renderer retains prepared views to skip unchanged frames.
+Completion menus use temporary overlays and a bounded log cache to restore
+covered content without reserving terminal space.
 
 ## Connector State Notes
 
