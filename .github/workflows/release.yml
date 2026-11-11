@@ -129,6 +129,7 @@ jobs:
       - name: Bump Homebrew formula
         run: |
           brew tap zhongruoyu/tap
+          brew trust zhongruoyu/tap
           brew bump-formula-pr --no-fork \
             --version "$VERSION" \
             zhongruoyu/tap/ocppsim
