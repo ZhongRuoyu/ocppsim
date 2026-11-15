@@ -244,9 +244,7 @@ impl TerminalApp {
   ) {
     self.invalidate_view();
     self.profile_name = profile_name;
-    self.ws_url = ws_url
-      .map(|url| redact_url_secrets(&url))
-      .unwrap_or_default();
+    self.ws_url = ws_url.map_or_default(|url| redact_url_secrets(&url));
   }
 
   /// Returns the active protocol for command help and completions.

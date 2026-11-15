@@ -617,8 +617,7 @@ impl Simulator {
       let detail = event
         .tech_info
         .as_deref()
-        .map(|info| format!(" ({info})"))
-        .unwrap_or_default();
+        .map_or_default(|info| format!(" ({info})"));
       self.log(
         UiLogLevel::Info,
         format!(

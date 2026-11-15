@@ -202,8 +202,7 @@ impl Simulator {
           .config
           .ws_url
           .as_deref()
-          .map(redact_url_secrets)
-          .unwrap_or_default()
+          .map_or_default(redact_url_secrets)
       },
       |u| redact_url_secrets(u.as_str()),
     );
